@@ -60,9 +60,40 @@ def generate_launch_description():
         ]
     )
 
+    yolo_detector_node = Node(
+        package='yolo_detector_node',
+        executable='yolo_node', # Matches entry_point in setup.py
+        name='yolo_detector_node',
+        output='screen',
+        parameters=[{
+            # Specify model (e.g., standard yolov8 nano)
+            # Or if using custom: 'model_name': 'resource/your_custom_model.pt'
+            'model_name': 'yolov8n.pt',
+            'input_topic': '/robotis_op3/camera/image_raw', # Verify camera topic
+            'output_topic': '/yolo/detections',
+            'device': '', # Auto-detect ('cpu' or 'cuda')
+            'conf_threshold': 0.4,
+            'iou_threshold': 0.5,
+        }]
+    )
+
+    yolo_visualizer_node = Node(
+        package='yolo_visualizer_node',
+        executable='visualizer_node', # Name from its setup.py
+        name='yolo_visualizer_node',
+        output='screen',
+        # Remap input topics if they differ from defaults in the node
+        # remappings=[
+        #     ('input_image_topic', '/robotis_op3/camera/image_raw'),
+        #     ('input_detections_topic', '/yolo/detections'),
+        # ]
+    )
+
     # Add the actions to the launch description
     # ld.add_action(webots) # REMOVE OR COMMENT OUT THIS LINE
     ld.add_action(op3_controller_node)
+    ld.add_action(yolo_detector_node) # Add the YOLO node
+    ld.add_action(yolo_visualizer_node)
     # ld.add_action(get_up_node) # Add the new get_up_node
 
     return ld
