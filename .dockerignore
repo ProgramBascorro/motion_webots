@@ -1,0 +1,35 @@
+# Docker ignore file
+
+# Git stuff
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+build/
+install/
+log/
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*.swp
+
+# Virtual environments (local ones)
+ros2_venv/
+dfine/
+miniconda3/
+
+# Large data / model files you might mount instead
+# yolov8n.pt # Keep IN image if you want it pre-loaded
+
+# Scripts dir if not needed inside image
+# scripts/
+
+# Backup files
+*~
+*.bak

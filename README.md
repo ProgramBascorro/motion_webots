@@ -1,109 +1,124 @@
-This is a dope setup, Yuda. From the directory structure and naming alone, I can tell this ROS 2 OP3 project is *stacked* with everything you need to simulate, control, and eventually bring to life a full-on humanoid RoboCup soccer player. Let’s break down **what’s what** and **what's important** for each core domain: **motion**, **vision**, and **robot control integration**.
+# ROBOTIS OP3 - Webots ROS 2 Simulation Workspace
 
----
+This workspace contains ROS 2 packages for simulating the ROBOTIS OP3 robot in the Webots simulator and controlling it using the Robotis framework and custom nodes.
 
-### 🔥 TL;DR: Must-Know Packages by Domain
+## Project Structure
 
-| Domain        | Important Packages                                                   | Notes |
-|---------------|----------------------------------------------------------------------|-------|
-| **Motion**    | `op3_walking_module`, `op3_online_walking_module`, `op3_balance_control`, `op3_action_module`, `op3_kinematics_dynamics`, `robotis_math` | Walking, trajectory gen, dynamics |
-| **Vision**    | `op3_ball_detector_msgs`, `op3_camera_setting_tool_msgs`             | Camera tools and ball detection messaging |
-| **Control**   | `op3_manager`, `robotis_controller`, `robotis_controller_msgs`, `robotis_device`, `open_cr_module` | Main controller manager and hardware interface |
-| **Simulation**| `op3_webots_ros2`, `webots_ros2`, `webots_ros2_driver`               | Integration with Webots (your sim engine) |
-| **Tuning**    | `op3_tuning_module`, `op3_offset_tuner_msgs`                         | Used to fine-tune joint offset and calibration |
-| **Localization** | `op3_localization`                                                | Position tracking on the field |
+*   `src/`: Contains the source code for all ROS 2 packages.
+    *   `ROBOTIS-OP3-Simulations/op3_webots_ros2/`: Interface between ROS 2 and the Webots OP3 model.
+    *   `ROBOTIS-OP3/`: Official high-level modules (manager, walking, etc.).
+    *   `ROBOTIS-Framework/`: Core Robotis libraries.
+    *   `ROBOTIS-Framework-msgs/`: Messages for the framework.
+    *   `ROBOTIS-OP3-msgs/`: Messages specific to OP3 modules.
+    *   `ROBOTIS-Math/`: Math library.
+    *   `webots_ros2/`: Core Webots ROS 2 interface packages.
+    *   `op3_get_up_behavior/`: Custom node for get-up behavior.
+    *   `yolo_detector_node/`: Custom node for YOLO detection.
+    *   `yolo_visualizer_node/`: Custom node to visualize YOLO detections.
+    *   `op3_joint_demux/`: Bridge node for joint commands.
+    *   `bascorro_demo/`: Demo package.
+    *   *(Add other custom packages here)*
+*   `scripts/`: Utility scripts for building the workspace.
+*   `docker/`: Contains files related to the Docker setup.
+    *   `entrypoint.sh`: Script executed when the Docker container starts.
+*   `Dockerfile`: Defines how to build the Docker image for this project.
+*   `.dockerignore`: Specifies files/directories to exclude from the Docker build context.
 
----
+## Prerequisites
 
-### 🔧 Motion Breakdown
+1.  **Docker:** Install Docker Desktop for Windows (or Docker Engine on Linux). Ensure the Docker daemon is running. [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
+2.  **WSL2:** Ensure WSL2 is installed and integrated with Docker Desktop.
+3.  **Webots:** Install Webots R2023b or compatible on your Windows host machine. [https://cyberbotics.com/](https://cyberbotics.com/)
+4.  **(Optional) X Server for Windows:** If you need to run GUI applications (like `rqt_image_view`) from *inside* the Docker container (advanced), install an X Server like VcXsrv or X410 on Windows and configure it. This README currently assumes GUIs like Webots run natively on Windows.
 
-1. **`op3_walking_module`**  
-   Handles basic gait and walking patterns. Think of this as the core bipedal movement brain.
+## Docker Setup
 
-2. **`op3_online_walking_module`**  
-   A more real-time reactive version of walking – more adaptable to changes, obstacles, etc. Might be more advanced than the static `walking_module`.
+This project uses Docker to provide a consistent build and runtime environment based on ROS 2 Jazzy.
 
-3. **`op3_action_module`**  
-   Used for pre-recorded sequences like stand-up, fall-down recovery, kick, etc.
+### Building the Docker Image
 
-4. **`op3_balance_control`**  
-   Helps maintain stability – very useful for standing kicks or reacting to pushes.
+1.  Open a terminal (like PowerShell or CMD) **on your Windows host** in the root directory of this workspace (`ros2_ws`).
+2.  Run the Docker build command:
 
-5. **`op3_kinematics_dynamics` + `robotis_math`**  
-   Under-the-hood libraries that make everything above *actually work*. They handle forward/inverse kinematics, coordinate transforms, etc.
+    ```bash
+    docker build -t op3-jazzy-ws .
+    ```
 
----
+    *   `-t op3-jazzy-ws`: Tags the image with the name `op3-jazzy-ws`. You can change this tag.
+    *   `.`: Specifies the current directory as the build context (where the `Dockerfile` is located).
+    *   This process will take a while the first time as it downloads the base image and installs all dependencies. Subsequent builds will be faster due to caching.
 
-### 👀 Vision Stuff
+## Running the Simulation with Docker
 
-> You’re gonna need vision for ball detection, line detection, maybe even goal detection.
+This setup runs the ROS 2 control stack inside the Docker container and connects to the Webots simulator running natively on your Windows host.
 
-1. **`op3_ball_detector_msgs`**  
-   Likely the interface for publishing the detected ball position, size, etc.
+### Steps:
 
-2. **`op3_camera_setting_tool_msgs`**  
-   Manages things like exposure, white balance, resolution, etc.
+1.  **Start Webots:** Launch Webots on Windows. Open the specific world file for this project:
+    *   File -> Open World... -> Navigate to `path\to\your\ros2_ws\src\ROBOTIS-OP3-Simulations\op3_webots_ros2\worlds\robotis_op3_extern.wbt`
+    *   Ensure the simulation isn't paused and the console shows it's waiting for external controller connections (check the OP3 robot node's `controller` field is `<extern>`).
 
-📌 *Missing actual perception or CV package?* Could be part of something external or yet to be ported — make sure to hook in OpenCV or YOLOv8 or whatever later.
+2.  **Find Host IP Address:** The Docker container needs the IP address of your Windows host *as seen from within WSL2*.
+    *   Open a **WSL2 terminal** (e.g., Ubuntu).
+    *   Run the command:
+        ```bash
+        ip route | grep default | awk '{print $3}'
+        ```
+    *   Note down the IP address displayed (e.g., `172.25.112.1`).
 
----
+3.  **Run the Docker Container:**
+    *   Open a terminal (PowerShell or CMD) **on your Windows host**.
+    *   Execute the `docker run` command, replacing `<HOST_IP_FROM_WSL>` with the IP address you found in the previous step:
 
-### 🧠 Core Control & Robot Brain
+        ```bash
+        docker run -it --rm \
+          --network host \
+          -e WEBOTS_CONTROLLER_URL="tcp://<HOST_IP_FROM_WSL>:1234/ROBOTIS%20OP3/" \
+          op3-jazzy-ws \
+          ros2 launch op3_webots_ros2 robot_launch2.py
+        ```
 
-1. **`op3_manager`**  
-   Loads, manages, and coordinates the modules above (think: your robot’s “OS kernel”).
+    *   **Explanation of Options:**
+        *   `-it`: Interactive TTY (allows seeing logs, using Ctrl+C).
+        *   `--rm`: Removes the container when it stops.
+        *   `--network host`: Shares the host's network stack for easy connection to Webots.
+        *   `-e WEBOTS_CONTROLLER_URL=...`: Sets the crucial environment variable for the `op3_extern_controller` to find Webots. **Remember to insert the correct IP and ensure the robot name encoding (`ROBOTIS%20OP3`) matches the one in Webots.**
+        *   `op3-jazzy-ws`: The name of the Docker image you built.
+        *   `ros2 launch op3_webots_ros2 robot_launch2.py`: The command executed inside the container via the entrypoint script. This launches your main ROS 2 stack.
 
-2. **`robotis_controller`, `robotis_device`, `robotis_framework_common`**  
-   Abstracts the lower-level stuff like motor control, communication with hardware (or sim), and handles the real-time loop.
+4.  **Interact (if applicable):**
+    *   If your launch file starts `teleop_twist_keyboard`, a separate `xterm` window might appear *on your Windows desktop* (if an X Server is running and configured) or you might see its output/input request in the main Docker terminal (depending on exact setup). Focus the teleop window/terminal to send commands.
+    *   If you launched visualization nodes, you might need to run `rqt` or `rviz2` either natively on Windows (connecting to the ROS topics exposed via host networking) or inside the container (requires X server setup).
 
-3. **`open_cr_module`**  
-   This is the bridge between the robot and OpenCR hardware (used in the physical OP3). In sim, this might be mocked/emulated.
+5.  **Stop the Container:** Press `Ctrl+C` in the terminal where you ran `docker run`.
 
----
+## Development Workflow with Docker
 
-### 🌐 Webots Integration
+For active development:
 
-1. **`op3_webots_ros2`**  
-   Your OP3-specific glue for Webots simulation.
+1.  **Modify Code:** Edit code in the `src/` directory on your Windows host using your preferred editor (e.g., VS Code).
+2.  **Rebuild Inside Container (Faster):**
+    *   Start an interactive bash shell in a *new* container, mounting your source code:
+        ```bash
+        docker run -it --rm \
+          --network host \
+          -v "%cd%\src:/ros2_ws/src" \
+          op3-jazzy-ws \
+          bash
+        ```
+        *(Note: `%cd%\src` works in CMD/PowerShell on Windows to mount the current directory's `src` folder. Adjust path if needed.)*
+    *   Inside the container's bash shell:
+        ```bash
+        # The entrypoint already sourced everything
+        cd /ros2_ws
+        colcon build --symlink-install --packages-select <package_you_modified>
+        # Test run your nodes or launch files here
+        exit
+        ```
+3.  **Rebuild Image (If Dockerfile or Dependencies Change):** If you modify the `Dockerfile` or need to install new system/python dependencies, rebuild the entire image using `docker build -t op3-jazzy-ws .`.
 
-2. **`webots_ros2`** and friends (like `webots_ros2_driver`)  
-   Base drivers for robot simulation in Webots. Not OP3-specific, but essential.
+## Notes
 
----
-
-### 🎯 Tuning + Misc
-
-- **`op3_tuning_module`**, **`op3_offset_tuner_msgs`**  
-  Essential for fine-grained control of joint angles. Use this to calibrate walking, prevent leg drag, or correct weird balance.
-
----
-
-### 🚨 What’s Missing or Worth Adding
-
-- **Vision pipeline**: It seems you’ve only got the message interfaces. You’ll likely need to add the actual image processing pipeline.
-- **Behavior layer**: No obvious high-level strategy module like `robosoccer_behavior_node`. You’ll have to add your own logic for “find ball > walk > kick”.
-
----
-
-### ✅ What to Run for Sim
-
-If you’re simulating in Webots:
-```bash
-ros2 launch op3_webots_ros2 op3.launch.py
-```
-
-And then start individual modules as needed:
-```bash
-ros2 run op3_manager manager_node
-ros2 run op3_walking_module walking_module_node
-ros2 run op3_action_module action_module_node
-```
-
----
-
-Let me know if you want to:
-- hook vision to YOLO or OpenCV,
-- write your own behavior layer (like `ball_tracker + kicker`),
-- auto-switch between walking/action modes based on ball position, etc.
-
-You’re building a damn robo-striker. Let’s make this little tin can Messi AF.
+*   Ensure Docker Desktop is configured to use the WSL2 backend.
+*   Network configuration (`--network host`) might differ or require adjustments in pure Linux environments or complex network setups.
+*   Running GUI applications from Docker usually requires additional setup (X11 forwarding, configuring `DISPLAY` environment variable).
