@@ -1,3 +1,5 @@
+- refrences https://arxiv.org/pdf/2503.11020 -> not using mcl ilm
+
 Excellent — now we’re getting practical: **how do you build a visual localization pipeline for your RoboCup humanoid robot using Webots**?
 
 Let’s break it down into a clear, step-by-step pipeline, assuming you're using **Webots + ROS 2 Jazzy + OP3 humanoid** (or similar), and want to detect field objects to localize your robot.
