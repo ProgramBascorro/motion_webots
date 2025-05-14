@@ -7,7 +7,7 @@
   <include file="$(find-pkg-share op3_ball_detector)/launch/ball_detector_from_usb_cam.launch.py"/> 
    
   <!-- face tracking -->
-  <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml" />
+  <!-- <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml" /> -->
 
   <!-- camera setting tool -->
   <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml" />

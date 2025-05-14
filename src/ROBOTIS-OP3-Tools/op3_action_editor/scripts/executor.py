@@ -39,26 +39,26 @@ def main(args=None):
         '-p', f'device_name:={device_name_default}'
     ]
 
-    try:
-        proc_player = subprocess.Popen(['ros2', 'run', 'ros_mpg321_player', 'ros_mpg321_player'],
-                      stdout=subprocess.DEVNULL,  # Redirect standard output
-                      stderr=subprocess.DEVNULL   # Redirect standard error
-        )
-    except Exception as e:
-      print(f"Failed to run ros_mpg321_player: {e}")
-      return 1
+    # try:
+    #     proc_player = subprocess.Popen(['ros2', 'run', 'ros_mpg321_player', 'ros_mpg321_player'],
+    #                   stdout=subprocess.DEVNULL,  # Redirect standard output
+    #                   stderr=subprocess.DEVNULL   # Redirect standard error
+    #     )
+    # except Exception as e:
+    #   print(f"Failed to run ros_mpg321_player: {e}")
+    #   return 1
 
     try:
         # Run the node in the same terminal
         proc_editor = subprocess.Popen(['ros2', 'run', package, executable] + params)
     except subprocess.CalledProcessError as e:
         print(f"Error while running op3_action_editor: {e}")
-        proc_player.kill()
+        # proc_player.kill()
         return 1
 
     while True:
-        if proc_player.poll() is not None:
-            break
+    #     if proc_player.poll() is not None:
+    #         break
 
         if proc_editor.poll() is not None:
             break
@@ -66,7 +66,7 @@ def main(args=None):
         time.sleep(1) 
         
 
-    proc_player.kill()
+    # proc_player.kill()
     proc_editor.kill()
 
     rclpy.shutdown()
