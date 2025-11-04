@@ -1,0 +1,131 @@
+# syntax=docker/dockerfile:1
+# Development Dockerfile - No build during image creation
+# Build manually inside container for faster iteration
+
+ARG WEBOTS_IMAGE=cyberbotics/webots:R2023b-ubuntu22.04
+FROM ${WEBOTS_IMAGE} AS webots
+
+FROM osrf/ros:humble-desktop
+
+ARG ROS_DISTRO=humble
+ENV ROS_DISTRO=${ROS_DISTRO}
+ENV DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-c"]
+
+# Install ALL dependencies upfront
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    build-essential \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    git \
+    curl \
+    gnupg \
+    lsb-release \
+    wget \
+    vim \
+    nano \
+    # X11 and GUI support for Webots
+    x11-apps \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    libglu1-mesa \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libglib2.0-0 \
+    # Audio support
+    pulseaudio \
+    # Additional Webots dependencies
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libxtst6 \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libasound2 \
+    # Math and vision libraries
+    libeigen3-dev \
+    libopencv-dev \
+    liborocos-kdl-dev \
+    python3-opencv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ROS2 packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-image-transport \
+    ros-${ROS_DISTRO}-vision-opencv \
+    ros-${ROS_DISTRO}-navigation2 \
+    ros-${ROS_DISTRO}-nav2-bringup \
+    ros-${ROS_DISTRO}-usb-cam \
+    ros-${ROS_DISTRO}-camera-info-manager \
+    ros-${ROS_DISTRO}-gazebo-ros-pkgs \
+    ros-${ROS_DISTRO}-gazebo-ros2-control \
+    ros-${ROS_DISTRO}-xacro \
+    ros-${ROS_DISTRO}-joint-state-publisher \
+    ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher-gui \
+    ros-${ROS_DISTRO}-rviz2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Webots runtime from upstream image
+COPY --from=webots /usr/local/webots /usr/local/webots
+
+# Setup workspace
+WORKDIR /ws
+COPY . /ws
+
+# Initialize rosdep
+RUN rosdep update || (rosdep init && rosdep update)
+
+# Create COLCON_IGNORE files for ROS1 packages
+RUN touch src/ROBOTIS-Utility/ros_madplay_player/COLCON_IGNORE && \
+    touch src/ROBOTIS-Utility/ros_mpg321_player/COLCON_IGNORE
+
+# Environment setup
+ENV WEBOTS_HOME=/usr/local/webots
+ENV PATH=${WEBOTS_HOME}:${PATH}
+ENV LD_LIBRARY_PATH=${WEBOTS_HOME}/lib/controller:${WEBOTS_HOME}/lib
+ENV QT_X11_NO_MITSHM=1
+ENV LIBGL_ALWAYS_SOFTWARE=0
+
+# Create a setup script that sources ROS and the workspace
+RUN echo '#!/bin/bash\n\
+source /opt/ros/${ROS_DISTRO}/setup.bash\n\
+if [ -f /ws/install/setup.bash ]; then\n\
+    source /ws/install/setup.bash\n\
+fi\n\
+exec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+# Create a helpful welcome message
+RUN echo '#!/bin/bash\n\
+echo "========================================"\n\
+echo "OP3 Webots Development Container"\n\
+echo "========================================"\n\
+echo ""\n\
+echo "Workspace: /ws"\n\
+echo ""\n\
+echo "Build commands:"\n\
+echo "  ./scripts/build-workspace.sh          # Build all packages"\n\
+echo "  ./scripts/build-workspace.sh --clean  # Clean and build"\n\
+echo ""\n\
+echo "Or manually:"\n\
+echo "  colcon build --symlink-install --packages-skip ros_madplay_player ros_mpg321_player"\n\
+echo "  source install/setup.bash"\n\
+echo ""\n\
+echo "Run simulation:"\n\
+echo "  ros2 launch op3_webots_ros2 robot_launch.py"\n\
+echo ""\n\
+echo "========================================"\n\
+' > /welcome.sh && chmod +x /welcome.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash", "-c", "/welcome.sh && exec bash"]

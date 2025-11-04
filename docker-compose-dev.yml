@@ -1,0 +1,75 @@
+version: '3.8'
+
+# Development-focused docker-compose setup
+# This configuration mounts source code for live editing and rebuilding
+
+services:
+  op3_dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Skip colcon build during image creation for faster builds
+        - SKIP_COLCON=true
+    image: op3_webots:dev
+    container_name: op3_dev
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      # Enable colored output in terminal
+      - TERM=xterm-256color
+
+    volumes:
+      # X11 socket for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Mount entire workspace for development
+      - ./src:/ws/src:rw
+      # Optionally preserve build artifacts (comment out to rebuild each time)
+      - op3_dev_build:/ws/build
+      - op3_dev_install:/ws/install
+      - op3_dev_log:/ws/log
+      # Mount home directory for config persistence
+      - op3_dev_home:/root
+
+    devices:
+      - /dev/dri:/dev/dri
+
+    network_mode: host
+    ipc: host
+
+    stdin_open: true
+    tty: true
+
+    working_dir: /ws
+
+    # Development helper command - drops you into bash with instructions
+    command: >
+      bash -c "
+      echo '=================================================';
+      echo 'OP3 Development Container';
+      echo '=================================================';
+      echo '';
+      echo 'Quick Start:';
+      echo '  1. colcon build --symlink-install';
+      echo '  2. source install/setup.bash';
+      echo '  3. ros2 launch op3_webots_ros2 robot_launch.py';
+      echo '';
+      echo 'Useful Commands:';
+      echo '  - colcon build --packages-select <package>';
+      echo '  - ros2 launch op3_manager op3_simulation.launch.py';
+      echo '  - ros2 topic list';
+      echo '  - ros2 node list';
+      echo '';
+      echo '=================================================';
+      exec bash
+      "
+
+volumes:
+  op3_dev_build:
+  op3_dev_install:
+  op3_dev_log:
+  op3_dev_home:

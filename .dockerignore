@@ -1,0 +1,50 @@
+# Ignore build artifacts copied from the host
+build/
+install/
+log/
+.colcon/
+
+# Version control metadata
+.git/
+.gitmodules
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+
+# Misc editor config
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ROS bags and databases
+*.bag
+*.db3
+
+# Docker files (avoid recursive copying)
+Dockerfile*
+docker-compose*.yml
+
+# Scripts (optional - uncomment if you don't want scripts in image)
+# *.sh
+
+# Temporary and backup files
+*.tmp
+*.bak
+*.orig
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Data files from root directory
+angular_velocity.*
+linear_acceleration.*
+magnetic_field.*

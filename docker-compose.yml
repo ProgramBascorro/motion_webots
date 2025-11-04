@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  op3_webots:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - SKIP_APT=false
+        - SKIP_ROSDEP=false
+        - SKIP_COLCON=false
+    image: op3_webots:humble
+    container_name: op3_webots_sim
+
+    # GUI and X11 forwarding
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+
+    volumes:
+      # X11 socket for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Mount source code for development (optional - comment out for production)
+      - ./src:/ws/src:rw
+      # Preserve build artifacts
+      - op3_build:/ws/build
+      - op3_install:/ws/install
+      - op3_log:/ws/log
+
+    devices:
+      # GPU access (if available)
+      - /dev/dri:/dev/dri
+
+    network_mode: host
+
+    # Allow container to use host's IPC namespace for better performance
+    ipc: host
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    command: bash
+
+  # Alternative service for running the simulation directly
+  op3_webots_launch:
+    extends: op3_webots
+    container_name: op3_webots_launch
+    command: ros2 launch op3_webots_ros2 robot_launch.py
+
+  # Service for running op3_manager in simulation mode
+  op3_manager_sim:
+    extends: op3_webots
+    container_name: op3_manager_sim
+    command: ros2 launch op3_manager op3_simulation.launch.py
+
+volumes:
+  op3_build:
+  op3_install:
+  op3_log:
