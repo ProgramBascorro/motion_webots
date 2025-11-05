@@ -137,6 +137,7 @@ Robot {
       numberOfRays 2
       aperture 1
     }
+
   ]
   boundingObject Transform {
     translation 0 0 0.0415
