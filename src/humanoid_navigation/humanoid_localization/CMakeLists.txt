@@ -254,7 +254,10 @@ target_link_libraries(humanoidlocalization PUBLIC # Gunakan PUBLIC agar node yan
 )
 
 # --- Executable ---
-add_executable(localization_node src/localization_node.cpp)
+add_executable(localization_node
+  src/localization_node.cpp
+  src/HumanoidLocalization.cpp
+)
 
 # Include directories untuk executable (hanya yang dibutuhkan langsung oleh node)
 target_include_directories(localization_node PRIVATE

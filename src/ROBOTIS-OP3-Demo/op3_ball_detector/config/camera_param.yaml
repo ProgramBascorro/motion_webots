@@ -1,23 +1,29 @@
 /**:
-    ros__parameters:
-      video_device: "/dev/video0"
-      framerate: 30.0
-      io_method: "mmap"
-      frame_id: "cam_link"
-      pixel_format: "mjpeg2rgb"  # see usb_cam/supported_formats for list of supported formats
-      av_device_format: "YUV422P"
-      image_width: 1280
-      image_height: 720
-      camera_name: "camera"
-      #camera_info_url: "package://op3_ball_detector/config/camera_info.yaml"
-      brightness: 128
-      contrast: 128
-      saturation: 128
-      sharpness: 128
-      gain: 0
-      white_balance_automatic: false
-      white_balance_temperature: 4000
-      auto_exposure: false
-      exposure_time_absolute: 250
-      focus_automatic_continuous: false
-      focus_absolute: 0
+  ros__parameters:
+    video_device: "/dev/video0"
+    framerate: 30.0
+    # Turunkan resolusi untuk FPS lebih tinggi
+    image_width: 640      # Dari 640 → 320
+    image_height: 480     # Dari 480 → 240
+    pixel_format: "yuyv"
+    camera_frame_id: "camera"
+    io_method: "mmap"
+    
+    # Disable calibration
+    camera_name: ""
+    camera_info_url: ""
+    
+    # Fix warna kuning - adjust white balance
+    brightness: 150
+    contrast: 160
+    saturation: 140
+    sharpness: 200
+    gain: 50
+    
+    # White balance - FIX INI untuk warna yang benar
+    white_balance_automatic: 1        # Auto white balance ON
+    white_balance_temperature: 5000   # Daylight (4000-6500), coba 5000-5500
+    
+    # Atau disable auto dan set manual:
+    # white_balance_automatic: 0      # Manual mode
+    # white_balance_temperature: 5200 # Adjust hingga warna normal
