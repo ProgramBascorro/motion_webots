@@ -8,18 +8,18 @@
     hough_accum_th: 28.0
     min_radius: 18
     max_radius: 300
-    filter_h_min: 350
-    filter_h_max: 40
-    filter_s_min: 150
+    filter_h_min: 20
+    filter_h_max: 35
+    filter_s_min: 80
     filter_s_max: 255
-    filter_v_min: 65
+    filter_v_min: 70
     filter_v_max: 255
     use_second_filter: false
-    filter2_h_min: 30
-    filter2_h_max: 355
-    filter2_s_min: 0
-    filter2_s_max: 40
-    filter2_v_min: 200
+    filter2_h_min: 350
+    filter2_h_max: 45
+    filter2_s_min: 150
+    filter2_s_max: 255
+    filter2_v_min: 35
     filter2_v_max: 255
     ellipse_size: 2
-    filter_debug: false
+    filter_debug: true

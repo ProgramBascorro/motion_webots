@@ -98,7 +98,7 @@ PROTO RobotisOp3 [
         contactMaterial IS contactMaterial
         physics Physics {
           density -1
-          mass 2.649287
+          mass 1.34928
           centerOfMass -0.01501 0.00013 0.06582
           inertiaMatrix [
             0.00340499 0.00296939 0.00317331 5.72e-06 -4.256e-05 -5.9e-07
@@ -160,7 +160,7 @@ PROTO RobotisOp3 [
               contactMaterial IS contactMaterial
               physics Physics {
                 density -1
-                mass 0.023189
+                mass 0.01181
                 centerOfMass -0.00157 0.0 -0.00774
                 inertiaMatrix [
                   1.51e-06 4.3e-06 4.12e-06 0.0 1e-08 0.0
@@ -252,7 +252,7 @@ PROTO RobotisOp3 [
                     contactMaterial IS contactMaterial
                     physics Physics {
                       density -1
-                      mass 0.351188
+                      mass 0.17886
                       centerOfMass 0.00388 0.00028 -0.01214
                       inertiaMatrix [
                         4.661e-05 0.00012523 0.00010857 -1.01e-06 -1.31e-06 -6e-08
@@ -310,7 +310,7 @@ PROTO RobotisOp3 [
                           contactMaterial IS contactMaterial
                           physics Physics {
                             density -1
-                            mass 0.226645
+                            mass 0.11543
                             centerOfMass 0.00059 -0.01901 -0.08408
                             inertiaMatrix [
                               0.00010499 9.613e-05 2.493e-05 -1e-08 -7.1e-07 3.53e-06
@@ -392,7 +392,7 @@ PROTO RobotisOp3 [
                                 contactMaterial IS contactMaterial
                                 physics Physics {
                                   density -1
-                                  mass 0.078834
+                                  mass 0.04015
                                   centerOfMass 0.0 -0.02151 -0.055
                                   inertiaMatrix [
                                     3.715e-05 2.751e-05 1.511e-05 0.0 0.0 0.0
@@ -486,7 +486,7 @@ PROTO RobotisOp3 [
                                       contactMaterial IS contactMaterial
                                       physics Physics {
                                         density -1
-                                        mass 0.351188
+                                        mass 0.17886
                                         centerOfMass -0.02022 -0.01872 0.01214
                                         inertiaMatrix [
                                           4.661e-05 0.00012523 0.00010857 -1.01e-06 1.31e-06 6e-08
@@ -549,7 +549,7 @@ PROTO RobotisOp3 [
                                             contactMaterial IS footContactMaterial
                                             physics Physics {
                                               density -1
-                                              mass 0.136148
+                                              mass 0.06934
                                               centerOfMass 0.02373 0.01037 -0.0276
                                               inertiaMatrix [
                                                 4.034e-05 7.874e-05 0.00011579 -1.9e-07 1.2e-07 1.01e-06
@@ -659,7 +659,7 @@ PROTO RobotisOp3 [
               contactMaterial IS contactMaterial
               physics Physics {
                 density -1
-                mass 0.023189
+                mass 0.01181
                 centerOfMass -0.00157 0.0 -0.00774
                 inertiaMatrix [
                   1.51e-06 4.3e-06 4.12e-06 0.0 1e-08 0.0
@@ -751,7 +751,7 @@ PROTO RobotisOp3 [
                     contactMaterial IS contactMaterial
                     physics Physics {
                       density -1
-                      mass 0.351188
+                      mass 0.17886
                       centerOfMass 0.00388 -0.00028 -0.01214
                       inertiaMatrix [
                         4.661e-05 0.00012523 0.00010857 1.01e-06 -1.31e-06 6e-08
@@ -809,7 +809,7 @@ PROTO RobotisOp3 [
                           contactMaterial IS contactMaterial
                           physics Physics {
                             density -1
-                            mass 0.226645
+                            mass 0.11543
                             centerOfMass 0.00059 0.01901 -0.08408
                             inertiaMatrix [
                               0.00010499 9.613e-05 2.493e-05 1e-08 -7.1e-07 -3.53e-06
@@ -893,7 +893,7 @@ PROTO RobotisOp3 [
                                 contactMaterial IS contactMaterial
                                 physics Physics {
                                   density -1
-                                  mass 0.078834
+                                  mass 0.04015
                                   centerOfMass 0.0 0.02151 -0.055
                                   inertiaMatrix [
                                     3.715e-05 2.751e-05 1.511e-05 0.0 0.0 0.0
@@ -989,7 +989,7 @@ PROTO RobotisOp3 [
                                       contactMaterial IS contactMaterial
                                       physics Physics {
                                         density -1
-                                        mass 0.351188
+                                        mass 0.17886
                                         centerOfMass -0.02022 0.01872 0.01214
                                         inertiaMatrix [
                                           4.661e-05 0.00012523 0.00010857 1.01e-06 1.31e-06 -6e-08
@@ -1053,7 +1053,7 @@ PROTO RobotisOp3 [
                                             contactMaterial IS footContactMaterial
                                             physics Physics {
                                               density -1
-                                              mass 0.136148
+                                              mass 0.06934
                                               centerOfMass 0.02373 -0.01037 -0.0276
                                               inertiaMatrix [
                                                 4.034e-05 7.874e-05 0.00011579 1.9e-07 1.2e-07 -1.01e-06
@@ -1163,7 +1163,7 @@ PROTO RobotisOp3 [
               contactMaterial IS contactMaterial
               physics Physics {
                 density -1
-                mass 0.023091
+                mass 0.01176
                 centerOfMass 0.0 0.00823 -0.00233
                 inertiaMatrix [
                   1.65e-06 3.87e-06 3.97e-06 0.0 0.0 3.1e-07
@@ -1246,7 +1246,7 @@ PROTO RobotisOp3 [
                     contactMaterial IS contactMaterial
                     physics Physics {
                       density -1
-                      mass 0.348675
+                      mass 0.17758
                       centerOfMass -0.01844 0.04514 0.00028
                       inertiaMatrix [
                         0.00022804 3.042e-05 0.00023474 -1e-08 3e-08 5.9e-07
@@ -1309,7 +1309,7 @@ PROTO RobotisOp3 [
                           contactMaterial IS handContactMaterial
                           physics Physics {
                             density -1
-                            mass 0.081033
+                            mass 0.04127
                             centerOfMass -0.019 0.07033 0.0038
                             inertiaMatrix [
                               6.196e-05 1.231e-05 6.854e-05 0.0 0.0 -3.72e-06
@@ -1390,7 +1390,7 @@ PROTO RobotisOp3 [
               contactMaterial IS contactMaterial
               physics Physics {
                 density -1
-                mass 0.023091
+                mass 0.01176
                 centerOfMass 0.0 -0.00823 -0.00233
                 inertiaMatrix [
                   1.65e-06 3.87e-06 3.97e-06 0.0 0.0 -3.1e-07
@@ -1472,7 +1472,7 @@ PROTO RobotisOp3 [
                     contactMaterial IS contactMaterial
                     physics Physics {
                       density -1
-                      mass 0.348675
+                      mass 0.17758
                       centerOfMass -0.01844 -0.04514 0.00028
                       inertiaMatrix [
                         0.00022804 3.042e-05 0.00023474 1e-08 3e-08 -5.9e-07
@@ -1536,7 +1536,7 @@ PROTO RobotisOp3 [
                           contactMaterial IS handContactMaterial
                           physics Physics {
                             density -1
-                            mass 0.081033
+                            mass 0.04127
                             centerOfMass -0.019 -0.07033 0.0038
                             inertiaMatrix [
                               6.196e-05 1.231e-05 6.854e-05 0.0 0.0 3.72e-06
@@ -1618,7 +1618,7 @@ PROTO RobotisOp3 [
               contactMaterial IS contactMaterial
               physics Physics {
                 density -1
-                mass 0.023091
+                mass 0.01176
                 centerOfMass 0.00233 0.0 0.00823
                 inertiaMatrix [
                   3.97e-06 1.65e-06 3.87e-06 0.0 -3.1e-07 0.0
@@ -1699,7 +1699,7 @@ PROTO RobotisOp3 [
                     contactMaterial IS contactMaterial
                     physics Physics {
                       density -1
-                      mass 0.267642
+                      mass 0.13631
                       centerOfMass 0.0023 -0.01863 0.0277
                       inertiaMatrix [
                         0.00010612 8.721e-05 4.529e-05 1.1e-07 -9.1e-06 8.4e-07

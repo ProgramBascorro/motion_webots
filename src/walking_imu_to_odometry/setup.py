@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'walking_imu_to_odometry = walking_imu_to_odometry.walking_imu_to_odometry:main',
             'walking_step_planner    = walking_imu_to_odometry.walking_step_planner:main',
+            'image_to_compressed = walking_imu_to_odometry.image_to_compressed:main', 
         ],
     },
 )
