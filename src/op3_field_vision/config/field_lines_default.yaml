@@ -1,0 +1,14 @@
+field_line_detector:
+  ros__parameters:
+    image_topic: "/robotis_op3/camera/image_raw"
+    camera_info_topic: "/robotis_op3/camera/camera_info"
+    hsv_s_max: 60
+    hsv_v_min: 180
+    canny_low: 50
+    canny_high: 150
+    hough_threshold: 50
+    min_line_length: 40
+    max_line_gap: 10
+    morph_kernel: 3
+    morph_iters: 1
+    roi_y_min_ratio: 0.0
