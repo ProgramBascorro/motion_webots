@@ -1,0 +1,53 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "/home/farhan/Projects/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/RobotisOp3.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/samples/contests/robocup/protos/RobocupSoccerField.proto"
+
+WorldInfo {
+  info [
+    "ROBOTIS OP3 robot."
+    "The ROBOTIS OP3 robot simulation model can be programmed using the ROBOTIS OP3 motions files."
+  ]
+  title "ROBOTIS OP3"
+  basicTimeStep 8
+}
+Viewpoint {
+  orientation -0.21330010458045784 0.2113459390792094 0.953853216915838 1.6272156543704595
+  position 0.562239037741489 -2.447558055557704 1.3939835768954514
+  follow "ROBOTIS OP3"
+}
+TexturedBackground {
+  skybox FALSE
+  skyColor [
+    0.5 0.5 0.5
+  ]
+}
+TexturedBackgroundLight {
+}
+Floor {
+  rotation 0 0 1 1.57079632679
+  size 100 100
+  appearance Appearance {
+    texture ImageTexture {
+      url [
+        "/home/farhan/Projects/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/worlds/../images/grid.png"
+      ]
+    }
+  }
+}
+RobocupSoccerField {
+}
+RobotisOp3 {
+  translation 0 0 0.282665
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}

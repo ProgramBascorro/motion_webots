@@ -14,11 +14,17 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 include_directories(
   include
   ${OpenCV_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 add_executable(field_line_detector
@@ -31,6 +37,10 @@ ament_target_dependencies(field_line_detector
   sensor_msgs
   cv_bridge
   image_transport
+  visualization_msgs
+  tf2_ros
+  tf2_geometry_msgs
+  geometry_msgs
 )
 
 target_link_libraries(field_line_detector ${OpenCV_LIBRARIES})
