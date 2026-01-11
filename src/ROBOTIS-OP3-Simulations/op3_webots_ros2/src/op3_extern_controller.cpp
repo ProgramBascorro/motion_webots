@@ -13,6 +13,8 @@
 #include <webots/Gyro.hpp>
 #include <webots/Accelerometer.hpp>
 #include <webots/InertialUnit.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <cmath>
 
 namespace robotis_op
 {
@@ -68,7 +70,15 @@ OP3ExternController::OP3ExternController() : Node("op3_webots_extern_controller"
     current_com_m_[i]       = 0;
     previous_com_m_[i]      = 0;
     current_com_vel_mps_[i] = 0;
-  }  
+  }
+
+  // odometry
+  odom_initialized_ = false;
+  initial_pose_x_ = 0.0;
+  initial_pose_y_ = 0.0;
+  initial_yaw_ = 0.0;
+  odom_msg_.pose.covariance.fill(0.0);
+  odom_msg_.twist.covariance.fill(0.0);
 
 }
 
@@ -174,6 +184,7 @@ void OP3ExternController::process()
   publishPresentJointStates();
   publishIMUOutput();
   publishCOMData();
+  publishOdometry();
   //publishCameraData();
 
   stepWebots();
@@ -291,6 +302,80 @@ void OP3ExternController::publishCameraData()
   }
 }
 
+void OP3ExternController::publishOdometry()
+{
+  // Get ground-truth pose from Supervisor API
+  const double* pos = this->getSelf()->getPosition();      // [x, y, z]
+  const double* rot = this->getSelf()->getOrientation();   // 3x3 row-major
+
+  // Extract yaw from rotation matrix (Z-up world)
+  // Matrix layout row-major: [R00, R01, R02, R10, R11, R12, R20, R21, R22]
+  // For Z-up, yaw = atan2(R10, R00) = atan2(rot[3], rot[0])
+  double yaw = atan2(rot[3], rot[0]);
+
+  // Initialize on first call (zero odometry at start)
+  if (!odom_initialized_) {
+    initial_pose_x_ = pos[0];
+    initial_pose_y_ = pos[1];
+    initial_yaw_ = yaw;
+    odom_initialized_ = true;
+    RCLCPP_INFO(this->get_logger(), "Odom initialized at x=%.3f y=%.3f yaw=%.3f",
+                initial_pose_x_, initial_pose_y_, initial_yaw_);
+  }
+
+  // Compute relative pose in world frame
+  double dx = pos[0] - initial_pose_x_;
+  double dy = pos[1] - initial_pose_y_;
+  double dyaw = yaw - initial_yaw_;
+
+  // Wrap dyaw to [-pi, pi]
+  while (dyaw > M_PI) dyaw -= 2.0 * M_PI;
+  while (dyaw < -M_PI) dyaw += 2.0 * M_PI;
+
+  // Rotate displacement into initial frame (odom frame)
+  double c = cos(-initial_yaw_);
+  double s = sin(-initial_yaw_);
+  double odom_x = c * dx - s * dy;
+  double odom_y = s * dx + c * dy;
+
+  // Create quaternion from yaw
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, dyaw);
+
+  auto now = this->get_clock()->now();
+
+  // Publish nav_msgs/Odometry
+  odom_msg_.header.stamp = now;
+  odom_msg_.header.frame_id = "odom";
+  odom_msg_.child_frame_id = "base";
+  odom_msg_.pose.pose.position.x = odom_x;
+  odom_msg_.pose.pose.position.y = odom_y;
+  odom_msg_.pose.pose.position.z = 0.0;
+  odom_msg_.pose.pose.orientation.x = q.x();
+  odom_msg_.pose.pose.orientation.y = q.y();
+  odom_msg_.pose.pose.orientation.z = q.z();
+  odom_msg_.pose.pose.orientation.w = q.w();
+  // Small covariance for ground truth
+  odom_msg_.pose.covariance[0] = 0.001;   // x
+  odom_msg_.pose.covariance[7] = 0.001;   // y
+  odom_msg_.pose.covariance[35] = 0.001;  // yaw
+  odom_publisher_->publish(odom_msg_);
+
+  // Broadcast TF: odom -> base
+  geometry_msgs::msg::TransformStamped t;
+  t.header.stamp = now;
+  t.header.frame_id = "odom";
+  t.child_frame_id = "base";
+  t.transform.translation.x = odom_x;
+  t.transform.translation.y = odom_y;
+  t.transform.translation.z = 0.0;
+  t.transform.rotation.x = q.x();
+  t.transform.rotation.y = q.y();
+  t.transform.rotation.z = q.z();
+  t.transform.rotation.w = q.w();
+  tf_broadcaster_->sendTransform(t);
+}
+
 void OP3ExternController::queueThread()
 {
   auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -304,6 +389,9 @@ void OP3ExternController::queueThread()
 
   camera_info_publisher_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("/robotis_op3/camera/camera_info", 1);
   camera_image_publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/robotis_op3/camera/image_raw", rclcpp::SensorDataQoS().reliable());
+
+  odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr goal_pos_subs[N_MOTORS];
 

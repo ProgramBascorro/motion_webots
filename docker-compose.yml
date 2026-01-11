@@ -1,0 +1,16 @@
+services:
+  op3_ros2:
+    build: .
+    container_name: op3_ros2_humble
+    environment:
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/tmp/.Xauthority
+      - ROS_DOMAIN_ID=0
+    volumes:
+      - ./src:/ros2_ws/src:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-$HOME/.Xauthority}:/tmp/.Xauthority:rw
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true

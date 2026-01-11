@@ -11,6 +11,9 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2/LinearMath/Quaternion.h>
 #include <webots/Supervisor.hpp>
 
 #include <yaml-cpp/yaml.h>
@@ -47,6 +50,7 @@ public:
   void publishIMUOutput();
   void publishCOMData();
   void publishCameraData();
+  void publishOdometry();
 
   void posCommandCallback(const std_msgs::msg::Float64::SharedPtr msg, const int &joint_idx);
   
@@ -80,12 +84,21 @@ public:
   sensor_msgs::msg::CameraInfo camera_info_msg_;
   sensor_msgs::msg::Image image_data_;
 
+  // odometry
+  nav_msgs::msg::Odometry odom_msg_;
+  double initial_pose_x_;
+  double initial_pose_y_;
+  double initial_yaw_;
+  bool odom_initialized_;
+
   // publishers
   rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr com_data_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr present_joint_state_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_data_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr camera_image_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   
   // devices
   webots::Camera* camera_;
