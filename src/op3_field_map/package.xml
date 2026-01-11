@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>op3_field_map</name>
+  <version>0.1.0</version>
+  <description>RoboCup soccer field map publisher for OP3</description>
+  <license>Apache-2.0</license>
+  <maintainer email="farhan@todo.todo">farhan</maintainer>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

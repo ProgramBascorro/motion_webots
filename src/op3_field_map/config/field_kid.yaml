@@ -1,0 +1,39 @@
+field_map_publisher:
+  ros__parameters:
+    frame_id: "odom"
+    publish_rate_hz: 1.0
+    line_width: 0.05
+    z_offset: 0.001
+    
+    line_color:
+      r: 1.0
+      g: 1.0
+      b: 1.0
+      a: 1.0
+    
+    # Line segments as flat list: [x1,y1,x2,y2, x1,y1,x2,y2, ...]
+    # RoboCup kid-size field: A=9m (length), B=6m (width)
+    # Field center at origin, goals at x=±4.5
+    segments_flat:
+      # Outer rectangle
+      - -4.5  # left side: x1
+      - -3.0  # y1
+      - -4.5  # x2
+      -  3.0  # y2
+      - 4.5   # right side: x1
+      - -3.0  # y1
+      - 4.5   # x2
+      - 3.0   # y2
+      - -4.5  # bottom: x1
+      - -3.0  # y1
+      - 4.5   # x2
+      - -3.0  # y2
+      - -4.5  # top: x1
+      - 3.0   # y1
+      - 4.5   # x2
+      - 3.0   # y2
+      # Center line
+      - 0.0   # x1
+      - -3.0  # y1
+      - 0.0   # x2
+      - 3.0   # y2
