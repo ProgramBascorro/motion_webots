@@ -1,0 +1,119 @@
+help() {
+  banner
+  cat <<EOF
+${BOLD}Usage${RST}
+  ${BOLD}./$(basename "$0")${RST}                 Interactive menu
+  ${BOLD}./$(basename "$0") --base${RST}          Start: webots + manager
+  ${BOLD}./$(basename "$0") --teleop${RST}        Start: webots + manager + teleop
+  ${BOLD}./$(basename "$0") --foxglove${RST}      Start: webots + manager + foxglove
+  ${BOLD}./$(basename "$0") --all${RST}           Start: webots + manager + teleop + foxglove
+  ${BOLD}./$(basename "$0") --tools${RST}         Start: add quick ROS tools pane
+  ${BOLD}./$(basename "$0") -u${RST}              Start: usual selection from ~/.config/op3-stack/usual.txt
+  ${BOLD}./$(basename "$0") --save-usual${RST}    Save current selection as usual
+  ${BOLD}./$(basename "$0") --stop${RST}          Publish stop + zero then kill session
+  ${BOLD}./$(basename "$0") --restart <comp>${RST}Restart one component pane
+  ${BOLD}./$(basename "$0") --attach${RST}        Attach to running session
+  ${BOLD}./$(basename "$0") --status${RST}        Session status
+  ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
+  ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
+
+${BOLD}Options${RST}
+  --ws PATH            Workspace root (default: ${WS})
+  --setup PATH         Setup script (auto-detect if omitted)
+  --session NAME       tmux session name (default: ${SESSION})
+  --delay SEC          Delay between starting Webots then Manager (default: ${START_DELAY_SEC})
+  --profile NAME       Profile: webots | real_robot (default: ${PROFILE})
+  --tools              Enable quick ROS tools pane
+  --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view
+  --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
+  --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
+  --dry-run            Print what would run (no changes)
+
+${BOLD}Defaults (env override)${RST}
+  WEBOTS:  ${WEBOTS_CMD}
+  MANAGER: ${MANAGER_CMD}
+
+${BOLD}Env overrides (recommended)${RST}
+  OP3_WS, OP3_SETUP, OP3_SESSION, OP3_START_DELAY_SEC
+  OP3_WEBOTS_CMD, OP3_MANAGER_CMD, OP3_TELEOP_CMD, OP3_FOXGLOVE_CMD
+  OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
+  WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
+
+${BOLD}Profiles${RST}
+  webots     Webots simulation defaults (current commands, delay, domain)
+  real_robot Lower startup delay and different default ROS_DOMAIN_ID
+
+${BOLD}Notes${RST}
+- Pane order: ${BOLD}Pane 0 = Webots${RST}, ${BOLD}Pane 1 = Manager${RST}.
+- Panes are created only for selected components; pane count matches selection count.
+- Interactive selection uses ${BOLD}gum${RST} if available; install with: sudo apt install gum
+- Kill everything: ${BOLD}./$(basename "$0") --exit${RST}
+EOF
+}
+
+op3_tmux_dispatch() {
+  # -------------------- Args --------------------
+  WITH_TELEOP=0
+  WITH_FOXGLOVE=0
+  WITH_TOOLS=0
+  WITH_WEBOTS=0
+  WITH_MANAGER=0
+  WITH_RQT=0
+  DO_ATTACH=0
+  DO_STATUS=0
+  DO_EXIT=0
+  DO_STOP=0
+  DO_USUAL=0
+  DO_SAVE_USUAL=0
+  RESTART_COMPONENT=""
+  DRY_RUN=0
+  START_EXPLICIT=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ws) WS="$2"; shift 2 ;;
+      --setup) SETUP="$2"; shift 2 ;;
+      --session) SESSION="$2"; shift 2 ;;
+      --delay) START_DELAY_SEC="$2"; shift 2 ;;
+      --profile) PROFILE="$2"; shift 2 ;;
+      --base) START_EXPLICIT=1; shift ;;
+      --teleop) WITH_TELEOP=1; START_EXPLICIT=1; shift ;;
+      --foxglove) WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
+      --all) WITH_TELEOP=1; WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
+      --tools) WITH_TOOLS=1; START_EXPLICIT=1; shift ;;
+    --usual|-u) DO_USUAL=1; shift ;;
+    --save-usual) DO_SAVE_USUAL=1; shift ;;
+      --attach) DO_ATTACH=1; shift ;;
+      --status) DO_STATUS=1; shift ;;
+    --exit|-x) DO_EXIT=1; shift ;;
+      --stop) DO_STOP=1; shift ;;
+      --restart) RESTART_COMPONENT="$2"; shift 2 ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      -h|--help) apply_profile "$PROFILE"; help; exit 0 ;;
+      *) die "Unknown argument: $1 (use --help)" ;;
+    esac
+  done
+
+  apply_profile "$PROFILE"
+
+  if [[ "$DO_EXIT" -eq 1 ]]; then action_exit; exit 0; fi
+  if [[ "$DO_STATUS" -eq 1 ]]; then action_status; exit 0; fi
+  if [[ "$DO_ATTACH" -eq 1 ]]; then action_attach; exit 0; fi
+  if [[ "$DO_STOP" -eq 1 ]]; then action_stop; exit 0; fi
+  if [[ -n "$RESTART_COMPONENT" ]]; then restart_component "$RESTART_COMPONENT"; exit 0; fi
+
+  resolve_selection "$START_EXPLICIT" "$DO_USUAL" "$DO_SAVE_USUAL"
+
+  if [[ -n "$MENU_ACTION" ]]; then
+    case "$MENU_ACTION" in
+      attach) action_attach ;;
+      status) action_status ;;
+      exit) action_exit ;;
+      quit) exit 0 ;;
+      *) die "Unknown menu action: $MENU_ACTION" ;;
+    esac
+    exit 0
+  fi
+
+  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$DRY_RUN"
+}
