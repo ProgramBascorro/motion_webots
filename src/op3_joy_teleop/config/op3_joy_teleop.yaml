@@ -1,0 +1,98 @@
+op3_joy_teleop:
+  ros__parameters:
+    axis_x: 1
+    axis_y: 0
+    axis_yaw: -1
+    deadman_button: 6
+    stop_button: 1
+
+    max_x: 0.02
+    max_y: 0.015
+    max_yaw: 0.25
+    joy_sign_x: 1.0
+    joy_sign_y: 1.0
+    joy_sign_yaw: 1.0
+    deadzone: 0.05
+    publish_rate: 30.0
+    dry_run: false
+    joy_timeout: 0.5
+
+    smoothing_mode: accel_limit
+    accel_limit_x: 0.06
+    accel_limit_y: 0.05
+    accel_limit_yaw: 0.8
+    lowpass_alpha: 0.25
+
+    gear_scales: [0.5, 1.0, 1.5]
+    gear_names: [slow, normal, fast]
+    heading_hold_button: 3
+    gear_longpress_sec: 0.5
+    turbo_button: 7
+    turbo_scale: 1.5
+
+    enable_turning: true
+    turn_left_button: 8
+    turn_right_button: 9
+    turn_left_axis: -1
+    turn_right_axis: -1
+    trigger_axis_threshold: 0.2
+    turn_max_yaw: 0.25
+
+    enable_kicks: true
+    left_kick_page: 120
+    right_kick_page: 121
+    kick_mode_button: 4
+    kick_mode_longpress_sec: 0.5
+    kick_mode_window_sec: 2.0
+    require_deadman_released_for_kick: true
+    auto_stop_before_kick: true
+    kick_apply_mode_delay_sec: 0.2
+    kick_timeout_sec: 5.0
+    kick_cooldown_sec: 1.0
+    action_module_name: action_module
+    walking_module_name: walking_module
+
+    head_pan_joint: head_pan
+    head_tilt_joint: head_tilt
+    axis_head_pan: 2
+    axis_head_tilt: 3
+    head_sign_pan: 1.0
+    head_sign_tilt: 1.0
+    head_pan_speed: 1.2
+    head_tilt_speed: 1.0
+    head_pan_min: -1.8
+    head_pan_max: 1.8
+    head_tilt_min: -0.8
+    head_tilt_max: 0.8
+    head_center_button: 0
+    head_center_longpress_sec: 0.5
+    auto_enable_head_module: true
+    head_module_name: head_control_module
+    allow_direct_control_fallback: false
+
+    dpad_axis_x: -1
+    dpad_axis_y: -1
+    dpad_step_x: 0.2
+    dpad_step_y: 0.2
+    dpad_button_up: -1
+    dpad_button_down: -1
+    dpad_button_left: -1
+    dpad_button_right: -1
+
+    # Example mappings (adjust as needed):
+    # Xbox (left stick, LB deadman, B stop)
+    # axis_x: 1
+    # axis_y: 0
+    # axis_yaw: -1
+    # deadman_button: 4
+    # stop_button: 1
+
+    # PS (left stick, L1 deadman, Circle stop)
+    # axis_x: 1
+    # axis_y: 0
+    # axis_yaw: -1
+    # deadman_button: 4
+    # stop_button: 1
+
+    # Controller buttons (from jstest-gtk): A=0, B=1, X=3, Y=4, L1=6, R1=7
+    # Verify axes/buttons with: ros2 topic echo /joy
