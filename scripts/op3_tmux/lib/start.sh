@@ -5,17 +5,24 @@ start_stack() {
   local with_foxglove="$4"
   local with_tools="$5"
   local with_rqt="$6"
-  local dry_run="$7"
+  local with_field_vision="$7"
+  local with_field_map="$8"
+  local with_mcl="$9"
+  local dry_run="${10}"
 
   health_check
 
   local webots_wrapped manager_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
+  local field_vision_wrapped field_map_wrapped mcl_wrapped
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
   teleop_wrapped="$(wrap_cmd "$TELEOP_CMD")"
   fox_wrapped="$(wrap_cmd "$FOXGLOVE_CMD")"
   tools_wrapped="$(wrap_cmd "$TOOLS_CMD")"
   rqt_wrapped="$(wrap_cmd "$RQT_CMD")"
+  field_vision_wrapped="$(wrap_cmd "$FIELD_VISION_CMD")"
+  field_map_wrapped="$(wrap_cmd "$FIELD_MAP_CMD")"
+  mcl_wrapped="$(wrap_cmd "$MCL_CMD")"
 
   if [[ "$dry_run" -eq 1 ]]; then
     banner
@@ -29,6 +36,9 @@ start_stack() {
     if [[ "$with_foxglove" -eq 1 ]]; then echo "${DIM}Pane (fox):     $FOXGLOVE_CMD${RST}"; fi
     if [[ "$with_tools" -eq 1 ]]; then echo "${DIM}Pane (tools):   $TOOLS_CMD${RST}"; fi
     if [[ "$with_rqt" -eq 1 ]]; then echo "${DIM}Pane (rqt):     $RQT_CMD${RST}"; fi
+    if [[ "$with_field_vision" -eq 1 ]]; then echo "${DIM}Pane (field_vision): $FIELD_VISION_CMD${RST}"; fi
+    if [[ "$with_field_map" -eq 1 ]]; then echo "${DIM}Pane (field_map):    $FIELD_MAP_CMD${RST}"; fi
+    if [[ "$with_mcl" -eq 1 ]]; then echo "${DIM}Pane (mcl):          $MCL_CMD${RST}"; fi
     echo
     echo "${DIM}Delay between webots->manager: ${START_DELAY_SEC}s${RST}"
     return 0
@@ -50,6 +60,9 @@ start_stack() {
   [[ "$with_foxglove" -eq 1 ]] && components+=(foxglove)
   [[ "$with_tools" -eq 1 ]] && components+=(tools)
   [[ "$with_rqt" -eq 1 ]] && components+=(rqt_image_view)
+  [[ "$with_field_vision" -eq 1 ]] && components+=(field_vision)
+  [[ "$with_field_map" -eq 1 ]] && components+=(field_map)
+  [[ "$with_mcl" -eq 1 ]] && components+=(mcl)
 
   local count=${#components[@]}
   if [[ "$count" -lt 1 ]]; then
@@ -103,6 +116,18 @@ start_stack() {
         tmux send-keys -t "$SESSION":main.$pane "$rqt_wrapped" C-m
         tmux_env_set "@op3_pane_rqt" "$pane"
         ;;
+      field_vision)
+        tmux send-keys -t "$SESSION":main.$pane "$field_vision_wrapped" C-m
+        tmux_env_set "@op3_pane_field_vision" "$pane"
+        ;;
+      field_map)
+        tmux send-keys -t "$SESSION":main.$pane "$field_map_wrapped" C-m
+        tmux_env_set "@op3_pane_field_map" "$pane"
+        ;;
+      mcl)
+        tmux send-keys -t "$SESSION":main.$pane "$mcl_wrapped" C-m
+        tmux_env_set "@op3_pane_mcl" "$pane"
+        ;;
     esac
     idx=$((idx + 1))
   done
@@ -111,6 +136,9 @@ start_stack() {
   tmux_env_set "@op3_with_foxglove" "$with_foxglove"
   tmux_env_set "@op3_with_tools" "$with_tools"
   tmux_env_set "@op3_with_rqt" "$with_rqt"
+  tmux_env_set "@op3_with_field_vision" "$with_field_vision"
+  tmux_env_set "@op3_with_field_map" "$with_field_map"
+  tmux_env_set "@op3_with_mcl" "$with_mcl"
   tmux_env_set "@op3_profile" "$PROFILE"
   tmux_env_set "@op3_layout" "$count"
 
