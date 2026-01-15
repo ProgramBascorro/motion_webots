@@ -1,0 +1,92 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: rviz_common/Time
+    Name: Time
+Visualization Manager:
+  Class: ""
+  Fixed Frame: map
+  Displays:
+    - Name: Grid
+      Class: rviz_default_plugins/Grid
+      Enabled: true
+      Plane: XY
+      Cell Size: 0.5
+      Color: 160; 160; 160
+      Alpha: 0.7
+    - Name: TF
+      Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 3
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+    - Name: RobotModel
+      Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+    - Name: Localization Pose
+      Class: rviz_default_plugins/PoseWithCovariance
+      Enabled: true
+      Topic: /localization/pose
+      Color: 255; 25; 0
+      Shape: Arrow
+    - Name: Field Points
+      Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Topic: /field_point_cloud
+      Color Transformer: FlatColor
+      Color: 252; 233; 79
+      Size (m): 0.01
+      Style: Flat Squares
+    - Name: Field Points (Map)
+      Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Topic: /field_point_cloud_transformed
+      Color Transformer: FlatColor
+      Color: 239; 41; 41
+      Size (m): 0.01
+      Style: Flat Squares
+    - Name: Field Map
+      Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Topic: /field_map/markers
+    - Name: Camera
+      Class: rviz_default_plugins/Image
+      Enabled: true
+      Topic: /robotis_op3/camera/image_raw
+    - Name: Lines Debug
+      Class: rviz_default_plugins/Image
+      Enabled: true
+      Topic: /vision/lines/debug
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 6
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Pitch: 0.5
+      Yaw: 0.8

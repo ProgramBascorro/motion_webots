@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>soccer_localization</name>
+  <version>0.1.0</version>
+  <description>Field line UKF localization adapted from soccerbot.</description>
+  <maintainer email="farhan@todo.todo">farhan</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>soccer_common</exec_depend>
+  <exec_depend>soccer_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-filterpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
