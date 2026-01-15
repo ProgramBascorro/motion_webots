@@ -1,5 +1,5 @@
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization)
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization)
+COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization ball_localizer)
+COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization ball_localizer)
 MENU_ACTION=""
 
 usual_file_path() {
@@ -87,6 +87,7 @@ apply_selection_flags() {
   WITH_RQT=0
   WITH_YOLO_VISION=0
   WITH_LOCALIZATION=0
+  WITH_BALL_LOCALIZER=0
 
   local item
   for item in "$@"; do
@@ -99,6 +100,7 @@ apply_selection_flags() {
       rqt_image_view) WITH_RQT=1 ;;
       yolo_vision) WITH_YOLO_VISION=1 ;;
       localization) WITH_LOCALIZATION=1 ;;
+      ball_localizer) WITH_BALL_LOCALIZER=1 ;;
     esac
   done
 }
@@ -117,6 +119,7 @@ resolve_selection() {
     [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
     [[ "$WITH_YOLO_VISION" -eq 1 ]] && selected+=(yolo_vision)
     [[ "$WITH_LOCALIZATION" -eq 1 ]] && selected+=(localization)
+    [[ "$WITH_BALL_LOCALIZER" -eq 1 ]] && selected+=(ball_localizer)
   elif [[ "$use_usual" -eq 1 ]]; then
     mapfile -t selected < <(load_usual_selection)
   else

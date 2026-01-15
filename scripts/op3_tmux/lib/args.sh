@@ -8,6 +8,8 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --foxglove${RST}      Start: webots + manager + foxglove
   ${BOLD}./$(basename "$0") --all${RST}           Start: webots + manager + teleop + foxglove
   ${BOLD}./$(basename "$0") --vision${RST}        Start: webots + manager + yolo_vision
+  ${BOLD}./$(basename "$0") --ball${RST}          Start: webots + manager + yolo_vision + ball_localizer
+  ${BOLD}./$(basename "$0") --ball-localizer${RST}Start: webots + manager + ball_localizer
   ${BOLD}./$(basename "$0") --localization${RST}  Start: webots + manager + localization (+ rviz)
   ${BOLD}./$(basename "$0") --tools${RST}         Start: add quick ROS tools pane
   ${BOLD}./$(basename "$0") -u${RST}              Start: usual selection from ~/.config/op3-stack/usual.txt
@@ -27,8 +29,10 @@ ${BOLD}Options${RST}
   --profile NAME       Profile: webots | real_robot (default: ${PROFILE})
   --tools              Enable quick ROS tools pane
   --vision             Enable vision stack (yolo_vision)
+  --ball               Enable vision + ball_localizer
+  --ball-localizer     Enable ball_localizer
   --localization       Enable localization stack (soccer_localization + rviz)
-  --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization
+  --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
   --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
   --dry-run            Print what would run (no changes)
@@ -40,7 +44,7 @@ ${BOLD}Defaults (env override)${RST}
 ${BOLD}Env overrides (recommended)${RST}
   OP3_WS, OP3_SETUP, OP3_SESSION, OP3_START_DELAY_SEC
   OP3_WEBOTS_CMD, OP3_MANAGER_CMD, OP3_TELEOP_CMD, OP3_FOXGLOVE_CMD
-  OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD
+  OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD, OP3_BALL_LOCALIZER_CMD
   OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
 
@@ -66,6 +70,7 @@ op3_tmux_dispatch() {
   WITH_RQT=0
   WITH_YOLO_VISION=0
   WITH_LOCALIZATION=0
+  WITH_BALL_LOCALIZER=0
   DO_ATTACH=0
   DO_STATUS=0
   DO_EXIT=0
@@ -88,6 +93,8 @@ op3_tmux_dispatch() {
       --foxglove) WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
       --all) WITH_TELEOP=1; WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
       --vision) WITH_YOLO_VISION=1; START_EXPLICIT=1; shift ;;
+      --ball) WITH_YOLO_VISION=1; WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
+      --ball-localizer) WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --localization) WITH_LOCALIZATION=1; START_EXPLICIT=1; shift ;;
       --tools) WITH_TOOLS=1; START_EXPLICIT=1; shift ;;
     --usual|-u) DO_USUAL=1; shift ;;
@@ -124,5 +131,5 @@ op3_tmux_dispatch() {
     exit 0
   fi
 
-  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$DRY_RUN"
+  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$DRY_RUN"
 }
