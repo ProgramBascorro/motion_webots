@@ -68,6 +68,8 @@ restart_component() {
     foxglove) pane="$(tmux_env_get @op3_pane_foxglove)" ;;
     tools) pane="$(tmux_env_get @op3_pane_tools)" ;;
     rqt_image_view|rqt) pane="$(tmux_env_get @op3_pane_rqt)" ;;
+    yolo_vision) pane="$(tmux_env_get @op3_pane_yolo_vision)" ;;
+    localization) pane="$(tmux_env_get @op3_pane_localization)" ;;
     *) die "Unknown component for --restart: $comp" ;;
   esac
 
@@ -89,6 +91,8 @@ restart_component() {
     foxglove) wrapped="$(wrap_cmd "$FOXGLOVE_CMD")" ;;
     tools) wrapped="$(wrap_cmd "$TOOLS_CMD")" ;;
     rqt_image_view|rqt) wrapped="$(wrap_cmd "$RQT_CMD")" ;;
+    yolo_vision) wrapped="$(wrap_cmd "$YOLO_VISION_CMD")" ;;
+    localization) wrapped="$(wrap_cmd "$LOCALIZATION_CMD")" ;;
   esac
 
   tmux_send "$target" "$wrapped"

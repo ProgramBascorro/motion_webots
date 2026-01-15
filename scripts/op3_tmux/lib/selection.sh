@@ -1,5 +1,5 @@
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view field_vision field_map mcl)
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view field_vision field_map mcl)
+COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization)
+COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization)
 MENU_ACTION=""
 
 usual_file_path() {
@@ -85,9 +85,8 @@ apply_selection_flags() {
   WITH_FOXGLOVE=0
   WITH_TOOLS=0
   WITH_RQT=0
-  WITH_FIELD_VISION=0
-  WITH_FIELD_MAP=0
-  WITH_MCL=0
+  WITH_YOLO_VISION=0
+  WITH_LOCALIZATION=0
 
   local item
   for item in "$@"; do
@@ -98,9 +97,8 @@ apply_selection_flags() {
       foxglove) WITH_FOXGLOVE=1 ;;
       tools) WITH_TOOLS=1 ;;
       rqt_image_view) WITH_RQT=1 ;;
-      field_vision) WITH_FIELD_VISION=1 ;;
-      field_map) WITH_FIELD_MAP=1 ;;
-      mcl) WITH_MCL=1 ;;
+      yolo_vision) WITH_YOLO_VISION=1 ;;
+      localization) WITH_LOCALIZATION=1 ;;
     esac
   done
 }
@@ -117,9 +115,8 @@ resolve_selection() {
     [[ "$WITH_TELEOP" -eq 1 ]] && selected+=(teleop)
     [[ "$WITH_FOXGLOVE" -eq 1 ]] && selected+=(foxglove)
     [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
-    [[ "$WITH_FIELD_VISION" -eq 1 ]] && selected+=(field_vision)
-    [[ "$WITH_FIELD_MAP" -eq 1 ]] && selected+=(field_map)
-    [[ "$WITH_MCL" -eq 1 ]] && selected+=(mcl)
+    [[ "$WITH_YOLO_VISION" -eq 1 ]] && selected+=(yolo_vision)
+    [[ "$WITH_LOCALIZATION" -eq 1 ]] && selected+=(localization)
   elif [[ "$use_usual" -eq 1 ]]; then
     mapfile -t selected < <(load_usual_selection)
   else
