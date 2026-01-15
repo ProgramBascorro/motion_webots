@@ -3,7 +3,7 @@ yolo_detector:
     image_topic: /robotis_op3/camera/image_raw
     camera_info_topic: /robotis_op3/camera/camera_info
     green_mask_topic: /vision/green/mask
-    output_frame: odom
+    output_frame: base
     camera_frame: cam_link
     model_path: models/yolo.onnx
     input_size: 640
