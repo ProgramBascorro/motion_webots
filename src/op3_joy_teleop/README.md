@@ -49,7 +49,8 @@ walking. Set `auto_enable_head_module: false` in the config to disable this beha
 ## Controls (default mapping)
 
 - Walk: left stick axes 0/1 + deadman L1 (button 6)
-- Stop: B (button 1)
+- Stop: disabled by default (set `stop_button` to enable)
+- Init pose: long-press button 2 (configurable); requires deadman released by default
 - Head: right stick axes 2/3
 - Heading hold: tap X (button 3) to toggle (yaw forced to 0)
 - Gear cycle: long-press X (>=0.5s) cycles slow/normal/fast
@@ -60,6 +61,12 @@ walking. Set `auto_enable_head_module: false` in the config to disable this beha
 
 Turning is disabled by default (`axis_yaw: -1`). Set `axis_yaw` if you want yaw control.
 Turning from triggers is controlled by `enable_turning` and `turn_*` parameters.
+
+Init pose publishes `ini_pose` on `/robotis/base/ini_pose`. Adjust
+`init_pose_button`/`init_pose_longpress_sec` as needed; set `init_pose_button: -1`
+to disable.
+
+With `stop_button` disabled, release the deadman or wait for `joy_timeout` to stop.
 
 Direct control is not used for turning; yaw always goes through `angle_move_amplitude`.
 If you need head direct control in a special sim, set `allow_direct_control_fallback: true`

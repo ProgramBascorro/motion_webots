@@ -21,6 +21,18 @@ class Op3JoyTeleop(Node):
         self._axis_yaw = int(self.declare_parameter("axis_yaw", -1).value)
         self._deadman_button = int(self.declare_parameter("deadman_button", 6).value)
         self._stop_button = int(self.declare_parameter("stop_button", 1).value)
+        self._init_pose_button = int(
+            self.declare_parameter("init_pose_button", 2).value
+        )
+        self._init_pose_longpress_sec = float(
+            self.declare_parameter("init_pose_longpress_sec", 1.0).value
+        )
+        self._require_deadman_released_for_init_pose = bool(
+            self.declare_parameter("require_deadman_released_for_init_pose", True).value
+        )
+        self._auto_stop_before_init_pose = bool(
+            self.declare_parameter("auto_stop_before_init_pose", True).value
+        )
 
         self._max_x = float(self.declare_parameter("max_x", 0.02).value)
         self._max_y = float(self.declare_parameter("max_y", 0.015).value)
@@ -186,6 +198,9 @@ class Op3JoyTeleop(Node):
         self._action_page_pub = self.create_publisher(
             Int32, "/robotis/action/page_num", 10
         )
+        self._init_pose_pub = self.create_publisher(
+            String, "/robotis/base/ini_pose", 10
+        )
 
         self._param_client = self.create_client(
             GetWalkingParam, "/robotis/walking/get_params"
@@ -218,6 +233,10 @@ class Op3JoyTeleop(Node):
         self._head_center_press_time = 0.0
         self._head_center_triggered = False
         self._head_center_request = False
+        self._init_pose_pressed = False
+        self._init_pose_press_time = 0.0
+        self._init_pose_triggered = False
+        self._init_pose_request = False
         self._head_pan = 0.0
         self._head_tilt = 0.0
         self._head_initialized = False
@@ -270,6 +289,7 @@ class Op3JoyTeleop(Node):
         stop = self._get_button(msg, self._stop_button)
         x_pressed = self._get_button(msg, self._heading_hold_button)
         head_center_pressed = self._get_button(msg, self._head_center_button)
+        init_pose_pressed = self._get_button(msg, self._init_pose_button)
         kick_mode_pressed = self._get_button(msg, self._kick_mode_button)
         self._turbo_active = self._get_button(msg, self._turbo_button)
 
@@ -284,6 +304,7 @@ class Op3JoyTeleop(Node):
 
         self._update_heading_hold_and_gear(x_pressed, now)
         self._update_head_center_longpress(head_center_pressed, now)
+        self._update_init_pose_longpress(init_pose_pressed, now)
         self._update_kick_mode(kick_mode_pressed, now)
         self._handle_kick_trigger(now)
 
@@ -323,6 +344,7 @@ class Op3JoyTeleop(Node):
     def _publish_loop(self) -> None:
         self._handle_joy_timeout()
         self._update_kick_state()
+        self._handle_init_pose_request()
         if not self._is_kick_blocking():
             self._publish_walking()
             self._publish_head()
@@ -492,6 +514,27 @@ class Op3JoyTeleop(Node):
         params.angle_move_amplitude = 0.0
         self._param_pub.publish(params)
 
+    def _handle_init_pose_request(self) -> None:
+        if not self._init_pose_request:
+            return
+        if self._is_kick_blocking():
+            return
+        if self._require_deadman_released_for_init_pose and self._deadman_active:
+            self._log_throttled(
+                "init_pose_deadman",
+                "Release deadman before init pose",
+                1.0,
+            )
+            self._init_pose_request = False
+            return
+        if self._auto_stop_before_init_pose:
+            self._publish_stop_zero()
+        if self._dry_run:
+            self._log_throttled("init_pose", "dry_run init pose requested", 1.0)
+        else:
+            self._init_pose_pub.publish(String(data="ini_pose"))
+        self._init_pose_request = False
+
     def _publish_head_offset(self, delta_pan: float, delta_tilt: float) -> None:
         msg = JointState()
         msg.name = [self._head_pan_joint, self._head_tilt_joint]
@@ -652,6 +695,22 @@ class Op3JoyTeleop(Node):
 
         if not pressed and self._head_center_pressed:
             self._head_center_pressed = False
+
+    def _update_init_pose_longpress(self, pressed: bool, now: float) -> None:
+        if self._init_pose_button < 0:
+            return
+        if pressed and not self._init_pose_pressed:
+            self._init_pose_pressed = True
+            self._init_pose_press_time = now
+            self._init_pose_triggered = False
+
+        if pressed and self._init_pose_pressed and not self._init_pose_triggered:
+            if now - self._init_pose_press_time >= self._init_pose_longpress_sec:
+                self._init_pose_request = True
+                self._init_pose_triggered = True
+
+        if not pressed and self._init_pose_pressed:
+            self._init_pose_pressed = False
 
     def _apply_smoothing(
         self, target_x: float, target_y: float, target_yaw: float, dt: float

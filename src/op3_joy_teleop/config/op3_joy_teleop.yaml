@@ -4,7 +4,11 @@ op3_joy_teleop:
     axis_y: 0
     axis_yaw: -1
     deadman_button: 6
-    stop_button: 1
+    stop_button: -1  # set to a valid button index to enable
+    init_pose_button: 0
+    init_pose_longpress_sec: 1.0
+    require_deadman_released_for_init_pose: true
+    auto_stop_before_init_pose: true
 
     max_x: 0.02
     max_y: 0.015
@@ -95,4 +99,5 @@ op3_joy_teleop:
     # stop_button: 1
 
     # Controller buttons (from jstest-gtk): A=0, B=1, X=3, Y=4, L1=6, R1=7
+    # Set init_pose_button to -1 to disable init-pose triggering.
     # Verify axes/buttons with: ros2 topic echo /joy
