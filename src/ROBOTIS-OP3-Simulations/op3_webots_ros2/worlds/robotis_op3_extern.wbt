@@ -2,7 +2,7 @@
 
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/samples/contests/robocup/protos/RobocupSoccerField.proto"
 EXTERNPROTO "../protos/RobotisOp3.proto"
 
 WorldInfo {
@@ -26,19 +26,12 @@ TexturedBackground {
 }
 TexturedBackgroundLight {
 }
-Floor {
-  rotation 0 0 1 1.57079632679
-  size 100 100
-  appearance Appearance {
-    texture ImageTexture {
-      url [
-        "../images/grid.png"
-      ]
-    }
-  }
+RobocupSoccerField {
+  size "kid"
 }
 RobotisOp3 {
   translation 0 0 0.282665
+  rotation 0 0 1 0
   controller "<extern>"
   supervisor TRUE
   cameraWidth 1280
