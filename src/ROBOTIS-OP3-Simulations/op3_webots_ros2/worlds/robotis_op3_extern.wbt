@@ -31,7 +31,6 @@ RobocupSoccerField {
 }
 RobotisOp3 {
   translation 0 0 0.282665
-  rotation 0 0 1 0
   controller "<extern>"
   supervisor TRUE
   cameraWidth 1280

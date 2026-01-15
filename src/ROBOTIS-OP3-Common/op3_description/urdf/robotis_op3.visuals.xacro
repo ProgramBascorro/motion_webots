@@ -1,6 +1,8 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://ros.org/wiki/xacro">
 
+  <xacro:property name="mesh_prefix" value="file://$(find op3_description)/meshes" />
+
   <!--
   <xacro:property name="pi" value="3.141592654" />
   -->
@@ -9,7 +11,7 @@
   <xacro:macro name="insert_mesh_body_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/body.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/body.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -20,7 +22,7 @@
   <xacro:macro name="insert_mesh_r_hip_yaw_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl1.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl1.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -31,7 +33,7 @@
   <xacro:macro name="insert_mesh_r_hip_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl2.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl2.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -42,7 +44,7 @@
   <xacro:macro name="insert_mesh_r_hip_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl3.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl3.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -53,7 +55,7 @@
   <xacro:macro name="insert_mesh_r_knee_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl4.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl4.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -64,7 +66,7 @@
   <xacro:macro name="insert_mesh_r_ank_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl5.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl5.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -75,7 +77,7 @@
   <xacro:macro name="insert_mesh_r_ank_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/rl6.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/rl6.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -86,7 +88,7 @@
   <xacro:macro name="insert_mesh_l_hip_yaw_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll1.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll1.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -97,7 +99,7 @@
   <xacro:macro name="insert_mesh_l_hip_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll2.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll2.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -108,7 +110,7 @@
   <xacro:macro name="insert_mesh_l_hip_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll3.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll3.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -119,7 +121,7 @@
   <xacro:macro name="insert_mesh_l_knee_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll4.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll4.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -130,7 +132,7 @@
   <xacro:macro name="insert_mesh_l_ank_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll5.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll5.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -141,7 +143,7 @@
   <xacro:macro name="insert_mesh_l_ank_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ll6.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ll6.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -152,7 +154,7 @@
   <xacro:macro name="insert_mesh_r_sho_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ra1.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ra1.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -163,7 +165,7 @@
   <xacro:macro name="insert_mesh_r_sho_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ra2.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ra2.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -174,7 +176,7 @@
   <xacro:macro name="insert_mesh_r_el_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/ra3.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/ra3.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -185,7 +187,7 @@
   <xacro:macro name="insert_mesh_l_sho_pitch_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/la1.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/la1.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -196,7 +198,7 @@
   <xacro:macro name="insert_mesh_l_sho_roll_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/la2.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/la2.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -207,7 +209,7 @@
   <xacro:macro name="insert_mesh_l_el_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/la3.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/la3.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -218,7 +220,7 @@
   <xacro:macro name="insert_mesh_head_pan_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/h1.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/h1.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
@@ -229,7 +231,7 @@
   <xacro:macro name="insert_mesh_head_tilt_link">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <geometry>
-      <mesh filename="package://op3_description/meshes/h2.stl"  scale="0.001 0.001 0.001"/>
+      <mesh filename="${mesh_prefix}/h2.stl"  scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="Grey">
       <color rgba="0.60 0.60 0.60 1.0"/>
