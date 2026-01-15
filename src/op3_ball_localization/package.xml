@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>op3_ball_localization</name>
+  <version>0.1.0</version>
+  <description>Ball localization and approach behavior for OP3 using YOLO detections.</description>
+  <maintainer email="farhan@todo.todo">farhan</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>sensor_msgs_py</depend>
+  <depend>op3_walking_module_msgs</depend>
+  <depend>robotis_controller_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

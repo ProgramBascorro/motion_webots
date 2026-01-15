@@ -1,0 +1,49 @@
+op3_ball_localizer:
+  ros__parameters:
+    ball_topic: /vision/yolo/balls
+    output_frame: base
+    publish_rate: 10.0
+
+    scan_pan_min: -1.2
+    scan_pan_max: 1.2
+    scan_tilt_down: -0.6
+    scan_tilt_up: -0.25
+    scan_step: 0.3
+    scan_dwell_sec: 0.4
+    scan_timeout: 6.0
+
+    lost_timeout: 0.8
+    arrive_distance: 0.25
+    # arrive_distance: 0.1
+    arrive_hysteresis: 0.05
+    approach_x_gain: 0.04
+    approach_max_x: 0.02
+    approach_yaw_gain: 1.2
+    approach_max_yaw: 0.25
+    approach_yaw_only_threshold: 0.6
+    min_forward_x: 0.05
+
+    search_yaw: 0.2
+    search_reverse_period: 0.0
+
+    require_ball_in_front: true
+    min_valid_x: 0.01
+
+    head_pan_joint: head_pan
+    head_tilt_joint: head_tilt
+    head_pan_min: -1.8
+    head_pan_max: 1.8
+    head_tilt_min: -0.8
+    head_tilt_max: 0.8
+    head_track_enable: true
+    head_track_pan_gain: 1.0
+    head_track_tilt: -0.5
+    head_track_deadzone: 0.05
+    head_track_max_step: 0.4
+    auto_enable_head_module: true
+    head_module_name: head_control_module
+
+    auto_enable_walking_module: true
+    walking_module_name: walking_module
+
+    dry_run: false
