@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>op3_action_web</name>
+  <version>0.1.0</version>
+  <description>Web UI bridge for editing OP3 action pages.</description>
+
+  <maintainer email="farhan@todo.todo">farhan</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>op3_action_editor</exec_depend>
+  <exec_depend>op3_action_module</exec_depend>
+  <exec_depend>op3_description</exec_depend>
+  <exec_depend>op3_manager</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

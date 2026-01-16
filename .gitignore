@@ -39,6 +39,10 @@ log/
 __pycache__/
 *.pyc
 
+# Frontend build artifacts
+src/op3_action_web/web/node_modules/
+src/op3_action_web/web/dist/
+
 # SCons build files
 .sconf_temp/
 
