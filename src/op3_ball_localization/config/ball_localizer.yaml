@@ -3,6 +3,8 @@ op3_ball_localizer:
     ball_topic: /vision/yolo/balls
     output_frame: base
     publish_rate: 10.0
+    status_log_enabled: true
+    status_log_period_sec: 1.0
 
     scan_pan_min: -1.2
     scan_pan_max: 1.2
@@ -12,14 +14,19 @@ op3_ball_localizer:
     scan_dwell_sec: 0.4
     scan_timeout: 6.0
 
+    # arrive_distance: 0.25
+
     lost_timeout: 0.8
-    arrive_distance: 0.25
-    # arrive_distance: 0.1
+    arrive_distance: 0.18
     arrive_hysteresis: 0.05
+    pre_kick_distance: 0.14
+    kick_distance: 0.09
     approach_x_gain: 0.04
     approach_max_x: 0.02
     approach_yaw_gain: 1.2
     approach_max_yaw: 0.25
+    pre_kick_max_x: 0.02
+    pre_kick_max_yaw: 0.25
     approach_yaw_only_threshold: 0.6
     min_forward_x: 0.05
 
@@ -33,13 +40,34 @@ op3_ball_localizer:
     head_tilt_joint: head_tilt
     head_pan_min: -1.8
     head_pan_max: 1.8
-    head_tilt_min: -0.8
+    head_tilt_min: -1.25
     head_tilt_max: 0.8
     head_track_enable: true
     head_track_pan_gain: 1.0
+    head_track_tilt_mode: geometry
     head_track_tilt: -0.5
+    pre_kick_tilt: -0.6
+    head_track_tilt_far: -0.5
+    head_track_tilt_near: -0.65
+    head_track_tilt_far_distance: 0.45
+    head_track_tilt_near_distance: 0.15
+    head_track_tilt_max_step: 0.2
+    camera_height: 0.50
+    camera_forward_offset: 0.0
+    head_track_tilt_offset: -0.10
+    head_track_min_distance: 0.03
     head_track_deadzone: 0.05
     head_track_max_step: 0.4
+    kick_enable: true
+    kick_left_page: 120
+    kick_right_page: 121
+    kick_bearing_deadzone: 0.08
+    kick_center_prefer: right
+    kick_hold_still_sec: 0.4
+    kick_apply_mode_delay_sec: 0.2
+    kick_timeout_sec: 5.0
+    kick_cooldown_sec: 1.0
+    action_module_name: action_module
     auto_enable_head_module: true
     head_module_name: head_control_module
 
