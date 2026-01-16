@@ -107,6 +107,7 @@ private:
   /////////////////////////////////////////////////////////////////////////
   std::map<std::string, int> joint_name_to_id_;
   std::map<int, std::string> joint_id_to_name_;
+  std::string action_file_path_;
   FILE* action_file_;
   action_file_define::Page play_page_;
   action_file_define::Page next_play_page_;

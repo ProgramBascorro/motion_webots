@@ -17,6 +17,7 @@
 /* Authors: Kayman, Jay Song */
 
 #include <cstdio>
+#include <cstdlib>
 #include <sstream>
 #include "rclcpp/rclcpp.hpp"
 #include "op3_action_module/action_module.h"
@@ -99,12 +100,26 @@ void ActionModule::initialize(const int control_cycle_msec, robotis_framework::R
     action_joints_enable_[joint_name] = false;
   }
 
-  std::string path = ament_index_cpp::get_package_share_directory("op3_action_module") + "/data/motion_4095.bin";
+  std::string default_path =
+      ament_index_cpp::get_package_share_directory("op3_action_module") + "/data/motion_4095.bin";
+  std::string action_file_path = default_path;
+  const char* env_action_file = std::getenv("OP3_ACTION_FILE");
+  if (env_action_file != nullptr && env_action_file[0] != '\0')
+  {
+    action_file_path = env_action_file;
+  }
 
-  this->declare_parameter<std::string>("action_file_path", path);
-  std::string action_file_path = this->get_parameter("action_file_path").as_string();
+  this->declare_parameter<std::string>("action_file_path", action_file_path);
+  action_file_path = this->get_parameter("action_file_path").as_string();
 
-  loadFile(action_file_path);
+  action_file_path_ = action_file_path;
+  if (loadFile(action_file_path_) == false && action_file_path_ != default_path)
+  {
+    RCLCPP_WARN(this->get_logger(), "Failed to load action file '%s', falling back to '%s'",
+                action_file_path_.c_str(), default_path.c_str());
+    action_file_path_ = default_path;
+    loadFile(action_file_path_);
+  }
 
   playing_ = false;
 }
@@ -417,6 +432,21 @@ bool ActionModule::start(int page_number)
   if (page_number < 1 || page_number >= action_file_define::MAXNUM_PAGE)
   {
     std::string status_msg = "Can not play page.(" + convertIntToString(page_number) + " is invalid index)";
+    RCLCPP_ERROR(this->get_logger(), "%s", status_msg.c_str());
+    publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_ERROR, status_msg);
+    return false;
+  }
+
+  if (!action_file_path_.empty())
+  {
+    if (loadFile(action_file_path_) == false)
+    {
+      RCLCPP_WARN(this->get_logger(), "Failed to reload action file '%s'", action_file_path_.c_str());
+    }
+  }
+  if (action_file_ == 0)
+  {
+    std::string status_msg = "Action file is not loaded";
     RCLCPP_ERROR(this->get_logger(), "%s", status_msg.c_str());
     publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_ERROR, status_msg);
     return false;

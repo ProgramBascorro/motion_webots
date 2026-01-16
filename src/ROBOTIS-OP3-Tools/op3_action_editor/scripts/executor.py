@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
+import os
+import shutil
 import subprocess
+import sys
 import rclpy
 import time
 from rclpy.node import Node
@@ -9,6 +12,16 @@ from ament_index_python.packages import get_package_share_directory
 class ActionEditorExecutor(Node):
     def __init__(self):
         super().__init__('op3_action_editor_executor')
+
+
+def ensure_action_file(action_file_path: str, default_path: str) -> None:
+    if os.path.isfile(action_file_path):
+        return
+    if not os.path.isfile(default_path):
+        print(f"Default action file not found: {default_path}", file=sys.stderr)
+        return
+    os.makedirs(os.path.dirname(action_file_path), exist_ok=True)
+    shutil.copyfile(default_path, action_file_path)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -25,7 +38,14 @@ def main(args=None):
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
     action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095.bin'
+    action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
     device_name_default = '/dev/ttyUSB0'
+
+    if action_file_path != action_file_path_default:
+        ensure_action_file(action_file_path, action_file_path_default)
+    if not os.path.isfile(action_file_path):
+        print(f"Action file not found: {action_file_path}", file=sys.stderr)
+        return 1
 
     # Define any parameters or arguments
     params = [
@@ -35,7 +55,7 @@ def main(args=None):
         '-p', f'offset_file_path:={offset_file_path_default}',
         '-p', f'robot_file_path:={robot_file_path_default}',
         '-p', f'init_file_path:={init_file_path_default}',
-        '-p', f'action_file_path:={action_file_path_default}',
+        '-p', f'action_file_path:={action_file_path}',
         '-p', f'device_name:={device_name_default}'
     ]
 
@@ -73,4 +93,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

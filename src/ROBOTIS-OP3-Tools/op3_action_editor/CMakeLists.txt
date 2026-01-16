@@ -85,6 +85,7 @@ install(DIRECTORY
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
+  scripts/action_yaml.py
   scripts/executor.py
   scripts/webots_executor.py
   scripts/bridge_webots.py
@@ -92,4 +93,3 @@ install(PROGRAMS
 )
 
 ament_package()
-
