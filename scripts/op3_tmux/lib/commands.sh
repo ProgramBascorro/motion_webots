@@ -9,8 +9,8 @@ wrap_cmd() {
   local env_script="${OP3_ENV_SCRIPT:-$WS/scripts/op3_env.sh}"
   # shellcheck disable=SC2016
   if [[ -f "$env_script" ]]; then
-    echo "source '$env_script'; source '$SETUP'; export ROS_DOMAIN_ID=\${ROS_DOMAIN_ID:-$ROS_DOMAIN_ID_DEFAULT}; $cmd"
+    echo "source '$env_script'; source '$SETUP'; export ROS_DOMAIN_ID=\${ROS_DOMAIN_ID:-$ROS_DOMAIN_ID_DEFAULT}; export OP3_ACTION_FILE='${ACTION_FILE_PATH}'; $cmd"
   else
-    echo "source '$SETUP'; export ROS_DOMAIN_ID=\${ROS_DOMAIN_ID:-$ROS_DOMAIN_ID_DEFAULT}; $cmd"
+    echo "source '$SETUP'; export ROS_DOMAIN_ID=\${ROS_DOMAIN_ID:-$ROS_DOMAIN_ID_DEFAULT}; export OP3_ACTION_FILE='${ACTION_FILE_PATH}'; $cmd"
   fi
 }

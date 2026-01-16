@@ -21,12 +21,14 @@ fallback_menu_selection() {
   echo "  6) Base + RQT Image View"
   echo "  7) Base + Teleop + Foxglove + Tools + RQT"
   echo "  8) Base + Vision + Ball Localizer"
-  echo "  9) Attach to existing session"
-  echo " 10) Exit (kill session)"
-  echo " 11) Status"
+  echo "  9) Base + Action Editor"
+  echo " 10) Base + Action Web"
+  echo " 11) Attach to existing session"
+  echo " 12) Exit (kill session)"
+  echo " 13) Status"
   echo "  0) Quit"
   echo
-  read -r -p "Select [0-11]: " choice
+  read -r -p "Select [0-13]: " choice
 
   case "${choice:-0}" in
     1) printf "%s\n" webots manager ;;
@@ -37,9 +39,11 @@ fallback_menu_selection() {
     6) printf "%s\n" webots manager rqt_image_view ;;
     7) printf "%s\n" webots manager teleop foxglove tools rqt_image_view ;;
     8) printf "%s\n" webots manager yolo_vision ball_localizer ;;
-    9) MENU_ACTION="attach" ;;
-    10) MENU_ACTION="exit" ;;
-    11) MENU_ACTION="status" ;;
+    9) printf "%s\n" webots manager action_editor ;;
+    10) printf "%s\n" webots manager action_web ;;
+    11) MENU_ACTION="attach" ;;
+    12) MENU_ACTION="exit" ;;
+    13) MENU_ACTION="status" ;;
     0) MENU_ACTION="quit" ;;
     *) echo "${YLW}Invalid choice.${RST}"; exit 1 ;;
   esac

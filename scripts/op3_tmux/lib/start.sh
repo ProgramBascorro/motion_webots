@@ -8,12 +8,17 @@ start_stack() {
   local with_yolo_vision="$7"
   local with_localization="$8"
   local with_ball_localizer="$9"
-  local dry_run="${10}"
+  local with_action_editor="${10}"
+  local with_action_web="${11}"
+  local dry_run="${12}"
 
   health_check
+  if [[ "$with_manager" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 ]]; then
+    ensure_action_file
+  fi
 
   local webots_wrapped manager_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
-  local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped
+  local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
   teleop_wrapped="$(wrap_cmd "$TELEOP_CMD")"
@@ -23,6 +28,8 @@ start_stack() {
   yolo_vision_wrapped="$(wrap_cmd "$YOLO_VISION_CMD")"
   localization_wrapped="$(wrap_cmd "$LOCALIZATION_CMD")"
   ball_localizer_wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")"
+  action_editor_wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")"
+  action_web_wrapped="$(wrap_cmd "$ACTION_WEB_CMD")"
 
   if [[ "$dry_run" -eq 1 ]]; then
     banner
@@ -39,6 +46,8 @@ start_stack() {
     if [[ "$with_yolo_vision" -eq 1 ]]; then echo "${DIM}Pane (yolo_vision):  $YOLO_VISION_CMD${RST}"; fi
     if [[ "$with_localization" -eq 1 ]]; then echo "${DIM}Pane (localization): $LOCALIZATION_CMD${RST}"; fi
     if [[ "$with_ball_localizer" -eq 1 ]]; then echo "${DIM}Pane (ball_localizer): $BALL_LOCALIZER_CMD${RST}"; fi
+    if [[ "$with_action_editor" -eq 1 ]]; then echo "${DIM}Pane (action_editor): $ACTION_EDITOR_CMD${RST}"; fi
+    if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (action_web): $ACTION_WEB_CMD${RST}"; fi
     echo
     echo "${DIM}Delay between webots->manager: ${START_DELAY_SEC}s${RST}"
     return 0
@@ -63,6 +72,8 @@ start_stack() {
   [[ "$with_yolo_vision" -eq 1 ]] && components+=(yolo_vision)
   [[ "$with_localization" -eq 1 ]] && components+=(localization)
   [[ "$with_ball_localizer" -eq 1 ]] && components+=(ball_localizer)
+  [[ "$with_action_editor" -eq 1 ]] && components+=(action_editor)
+  [[ "$with_action_web" -eq 1 ]] && components+=(action_web)
 
   local count=${#components[@]}
   if [[ "$count" -lt 1 ]]; then
@@ -128,6 +139,14 @@ start_stack() {
         tmux send-keys -t "$SESSION":main.$pane "$ball_localizer_wrapped" C-m
         tmux_env_set "@op3_pane_ball_localizer" "$pane"
         ;;
+      action_editor)
+        tmux send-keys -t "$SESSION":main.$pane "$action_editor_wrapped" C-m
+        tmux_env_set "@op3_pane_action_editor" "$pane"
+        ;;
+      action_web)
+        tmux send-keys -t "$SESSION":main.$pane "$action_web_wrapped" C-m
+        tmux_env_set "@op3_pane_action_web" "$pane"
+        ;;
     esac
     idx=$((idx + 1))
   done
@@ -139,6 +158,8 @@ start_stack() {
   tmux_env_set "@op3_with_yolo_vision" "$with_yolo_vision"
   tmux_env_set "@op3_with_localization" "$with_localization"
   tmux_env_set "@op3_with_ball_localizer" "$with_ball_localizer"
+  tmux_env_set "@op3_with_action_editor" "$with_action_editor"
+  tmux_env_set "@op3_with_action_web" "$with_action_web"
   tmux_env_set "@op3_profile" "$PROFILE"
   tmux_env_set "@op3_layout" "$count"
 

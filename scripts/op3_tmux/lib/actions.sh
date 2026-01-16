@@ -71,6 +71,8 @@ restart_component() {
     yolo_vision) pane="$(tmux_env_get @op3_pane_yolo_vision)" ;;
     localization) pane="$(tmux_env_get @op3_pane_localization)" ;;
     ball_localizer) pane="$(tmux_env_get @op3_pane_ball_localizer)" ;;
+    action_editor) pane="$(tmux_env_get @op3_pane_action_editor)" ;;
+    action_web) pane="$(tmux_env_get @op3_pane_action_web)" ;;
     *) die "Unknown component for --restart: $comp" ;;
   esac
 
@@ -95,6 +97,8 @@ restart_component() {
     yolo_vision) wrapped="$(wrap_cmd "$YOLO_VISION_CMD")" ;;
     localization) wrapped="$(wrap_cmd "$LOCALIZATION_CMD")" ;;
     ball_localizer) wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")" ;;
+    action_editor) wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")" ;;
+    action_web) wrapped="$(wrap_cmd "$ACTION_WEB_CMD")" ;;
   esac
 
   tmux_send "$target" "$wrapped"
