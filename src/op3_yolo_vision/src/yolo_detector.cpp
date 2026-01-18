@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -42,6 +43,40 @@ std::string resolveModelPath(const std::string& model_path)
   }
   const auto share = ament_index_cpp::get_package_share_directory("op3_yolo_vision");
   return (std::filesystem::path(share) / model_path).string();
+}
+
+std::string toLower(std::string value)
+{
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return value;
+}
+
+int resolveDnnBackend(const std::string& name)
+{
+  const std::string key = toLower(name);
+  if (key == "cuda") {
+    return cv::dnn::DNN_BACKEND_CUDA;
+  }
+  if (key == "opencv" || key == "default" || key.empty()) {
+    return cv::dnn::DNN_BACKEND_OPENCV;
+  }
+  return cv::dnn::DNN_BACKEND_OPENCV;
+}
+
+int resolveDnnTarget(const std::string& name)
+{
+  const std::string key = toLower(name);
+  if (key == "cuda") {
+    return cv::dnn::DNN_TARGET_CUDA;
+  }
+  if (key == "cuda_fp16" || key == "fp16") {
+    return cv::dnn::DNN_TARGET_CUDA_FP16;
+  }
+  if (key == "cpu" || key == "default" || key.empty()) {
+    return cv::dnn::DNN_TARGET_CPU;
+  }
+  return cv::dnn::DNN_TARGET_CPU;
 }
 
 sensor_msgs::msg::Image toImageMsg(const cv::Mat& image,
@@ -170,6 +205,8 @@ YoloDetector::YoloDetector()
   nms_score_threshold_(0.1f),
   publish_debug_(true),
   use_green_horizon_(true),
+  use_gpu_(false),
+  use_fp16_(false),
   ground_z_(0.0),
   max_range_m_(10.0),
   horizon_max_age_sec_(0.25),
@@ -186,9 +223,14 @@ YoloDetector::YoloDetector()
   this->declare_parameter("image_topic", "/robotis_op3/camera/image_raw");
   this->declare_parameter("camera_info_topic", "/robotis_op3/camera/camera_info");
   this->declare_parameter("green_mask_topic", "/vision/green/mask");
+  this->declare_parameter("ball_center_topic", "/vision/yolo/ball_center");
   this->declare_parameter("output_frame", "odom");
   this->declare_parameter("camera_frame", "cam_link");
   this->declare_parameter("model_path", "models/yolo.onnx");
+  this->declare_parameter("use_gpu", use_gpu_);
+  this->declare_parameter("use_fp16", use_fp16_);
+  this->declare_parameter("dnn_backend", "opencv");
+  this->declare_parameter("dnn_target", "cpu");
   this->declare_parameter("input_size", input_size_);
   this->declare_parameter("ball_confidence_threshold", 0.2);
   this->declare_parameter("goalpost_confidence_threshold", 0.5);
@@ -209,9 +251,24 @@ YoloDetector::YoloDetector()
   image_topic_ = this->get_parameter("image_topic").as_string();
   camera_info_topic_ = this->get_parameter("camera_info_topic").as_string();
   green_mask_topic_ = this->get_parameter("green_mask_topic").as_string();
+  ball_center_topic_ = this->get_parameter("ball_center_topic").as_string();
   output_frame_ = this->get_parameter("output_frame").as_string();
   camera_frame_ = this->get_parameter("camera_frame").as_string();
   model_path_ = resolveModelPath(this->get_parameter("model_path").as_string());
+  use_gpu_ = this->get_parameter("use_gpu").as_bool();
+  use_fp16_ = this->get_parameter("use_fp16").as_bool();
+  dnn_backend_ = this->get_parameter("dnn_backend").as_string();
+  dnn_target_ = this->get_parameter("dnn_target").as_string();
+  if (use_gpu_) {
+    const std::string backend_key = toLower(dnn_backend_);
+    const std::string target_key = toLower(dnn_target_);
+    if (backend_key.empty() || backend_key == "opencv" || backend_key == "default") {
+      dnn_backend_ = "cuda";
+    }
+    if (target_key.empty() || target_key == "cpu" || target_key == "default") {
+      dnn_target_ = use_fp16_ ? "cuda_fp16" : "cuda";
+    }
+  }
   input_size_ = this->get_parameter("input_size").as_int();
   nms_threshold_ = static_cast<float>(this->get_parameter("nms_threshold").as_double());
   nms_score_threshold_ = static_cast<float>(this->get_parameter("nms_score_threshold").as_double());
@@ -262,6 +319,10 @@ YoloDetector::YoloDetector()
   robots_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/vision/yolo/robots", 10);
   intersections_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
     "/vision/yolo/intersections", 10);
+  if (!ball_center_topic_.empty()) {
+    ball_center_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
+      ball_center_topic_, 10);
+  }
 
   RCLCPP_INFO(this->get_logger(), "YOLO detector initialized");
   RCLCPP_INFO(this->get_logger(), "  Image topic: %s", image_topic_.c_str());
@@ -282,8 +343,35 @@ bool YoloDetector::loadModel()
 
   try {
     net_ = cv::dnn::readNetFromONNX(model_path_);
-    net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-    net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+    const std::string backend_key = toLower(dnn_backend_);
+    const std::string target_key = toLower(dnn_target_);
+    const bool backend_known = (backend_key == "opencv" || backend_key == "cuda" || backend_key.empty() ||
+      backend_key == "default");
+    const bool target_known = (target_key == "cpu" || target_key == "cuda" || target_key == "cuda_fp16" ||
+      target_key == "fp16" || target_key.empty() || target_key == "default");
+    if (!backend_known) {
+      RCLCPP_WARN(this->get_logger(), "Unknown dnn_backend '%s', falling back to OpenCV",
+                  dnn_backend_.c_str());
+    }
+    if (!target_known) {
+      RCLCPP_WARN(this->get_logger(), "Unknown dnn_target '%s', falling back to CPU",
+                  dnn_target_.c_str());
+    }
+    const int backend = resolveDnnBackend(dnn_backend_);
+    const int target = resolveDnnTarget(dnn_target_);
+    try {
+      net_.setPreferableBackend(backend);
+      net_.setPreferableTarget(target);
+      RCLCPP_INFO(this->get_logger(), "  DNN backend: %s", dnn_backend_.c_str());
+      RCLCPP_INFO(this->get_logger(), "  DNN target: %s", dnn_target_.c_str());
+    } catch (const cv::Exception& e) {
+      RCLCPP_WARN(this->get_logger(), "Failed to set DNN backend/target: %s", e.what());
+      net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+      net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+      dnn_backend_ = "opencv";
+      dnn_target_ = "cpu";
+      RCLCPP_WARN(this->get_logger(), "Falling back to CPU (OpenCV)");
+    }
   } catch (const cv::Exception& e) {
     RCLCPP_ERROR(this->get_logger(), "Failed to load YOLO model: %s", e.what());
     RCLCPP_ERROR(this->get_logger(),
@@ -416,6 +504,10 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   std::vector<tf2::Vector3> goal_points;
   std::vector<tf2::Vector3> robot_points;
   std::vector<tf2::Vector3> intersection_points;
+  bool have_ball_center = false;
+  cv::Point2f best_ball_pixel(0.0f, 0.0f);
+  double best_ball_dist = std::numeric_limits<double>::infinity();
+  float best_ball_score = -1.0f;
 
   cv::Mat debug_image = bgr.clone();
 
@@ -458,6 +550,15 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     if (info.name == "ball") {
       ball_points.push_back(point_out);
+      if (ball_center_pub_) {
+        if (!have_ball_center || planar_dist < best_ball_dist ||
+            (std::abs(planar_dist - best_ball_dist) < 1e-3 && det.score > best_ball_score)) {
+          have_ball_center = true;
+          best_ball_dist = planar_dist;
+          best_ball_score = det.score;
+          best_ball_pixel = pixel_center;
+        }
+      }
     } else if (info.name == "goal post") {
       goal_points.push_back(point_out);
     } else if (info.name == "robot") {
@@ -479,6 +580,16 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   goals_pub_->publish(buildCloud(goal_points, msg->header.stamp));
   robots_pub_->publish(buildCloud(robot_points, msg->header.stamp));
   intersections_pub_->publish(buildCloud(intersection_points, msg->header.stamp));
+  if (ball_center_pub_ && have_ball_center && width > 0 && height > 0) {
+    geometry_msgs::msg::PointStamped center_msg;
+    center_msg.header = msg->header;
+    const double norm_x = static_cast<double>(best_ball_pixel.x) / static_cast<double>(width);
+    const double norm_y = static_cast<double>(best_ball_pixel.y) / static_cast<double>(height);
+    center_msg.point.x = std::max(0.0, std::min(1.0, norm_x));
+    center_msg.point.y = std::max(0.0, std::min(1.0, norm_y));
+    center_msg.point.z = static_cast<double>(best_ball_score);
+    ball_center_pub_->publish(center_msg);
+  }
 
   if (publish_debug_) {
     debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));

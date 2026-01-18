@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -80,15 +81,20 @@ private:
   std::string image_topic_;
   std::string camera_info_topic_;
   std::string green_mask_topic_;
+  std::string ball_center_topic_;
   std::string output_frame_;
   std::string camera_frame_;
   std::string model_path_;
+  std::string dnn_backend_;
+  std::string dnn_target_;
 
   int input_size_;
   float nms_threshold_;
   float nms_score_threshold_;
   bool publish_debug_;
   bool use_green_horizon_;
+  bool use_gpu_;
+  bool use_fp16_;
   double ground_z_;
   double max_range_m_;
   double horizon_max_age_sec_;
@@ -116,6 +122,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr goals_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr robots_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr intersections_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr ball_center_pub_;
 
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
