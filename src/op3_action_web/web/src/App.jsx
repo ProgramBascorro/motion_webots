@@ -207,7 +207,10 @@ export default function App() {
   const [selectedStepIndex, setSelectedStepIndex] = useState(null);
   const [showAllJoints, setShowAllJoints] = useState(false);
   const [upright, setUpright] = useState(true);
+  const [layFlat, setLayFlat] = useState(false);
   const [mirrorView, setMirrorView] = useState(false);
+  const [viewerEnabled, setViewerEnabled] = useState(true);
+  const [viewerNote, setViewerNote] = useState("");
   const [sendStepToWebots, setSendStepToWebots] = useState(() => {
     const raw = localStorage.getItem("op3SendStepToWebots");
     if (raw === null || raw === undefined) {
@@ -215,6 +218,11 @@ export default function App() {
     }
     return raw === "1" || raw === "true";
   });
+  const [recordEnabled, setRecordEnabled] = useState(false);
+  const [recordMode, setRecordMode] = useState("time");
+  const [recordElapsed, setRecordElapsed] = useState(0);
+  const [recordLastDelta, setRecordLastDelta] = useState(null);
+  const [recordLastTicks, setRecordLastTicks] = useState(null);
   const [autoEnableAction, setAutoEnableAction] = useState(true);
   const [showYaml, setShowYaml] = useState(true);
   const [scratchPageIndex, setScratchPageIndex] = useState(250);
@@ -257,6 +265,11 @@ export default function App() {
   const livePoseRef = useRef({});
   const pendingRunRef = useRef(null);
   const historyRef = useRef({});
+  const recordRef = useRef({
+    lastTime: null,
+    lastStepIndex: null,
+    lastPageIndex: null,
+  });
 
   const viewerRef = useRef(null);
   const robotRef = useRef(null);
@@ -330,10 +343,11 @@ export default function App() {
 
   const editorDisabled = !yamlData || Boolean(parseError);
 
-  const applyRobotOrientation = (robot, uprightValue) => {
+  const applyRobotOrientation = (robot, uprightValue, layFlatValue) => {
     const baseRotationX = -Math.PI / 2;
     const extra = uprightValue ? 0 : Math.PI;
-    robot.rotation.set(baseRotationX + extra, 0, 0);
+    const flat = layFlatValue ? Math.PI / 2 : 0;
+    robot.rotation.set(baseRotationX + extra + flat, 0, 0);
   };
 
   const applyRobotMirror = (robot, mirrorValue) => {
@@ -398,6 +412,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("op3SendStepToWebots", sendStepToWebots ? "1" : "0");
   }, [sendStepToWebots]);
+
+  useEffect(() => {
+    if (viewerEnabled) {
+      setViewerNote("");
+    }
+  }, [viewerEnabled]);
 
   useEffect(() => {
     if (!yamlText.trim()) {
@@ -468,6 +488,33 @@ export default function App() {
       setRangeEnd(String(indexValue));
     }
   }, [activeStep, selectedStepIndex]);
+
+  useEffect(() => {
+    recordRef.current = {
+      lastTime: null,
+      lastStepIndex: null,
+      lastPageIndex: selectedPageIndex,
+    };
+    setRecordElapsed(0);
+    setRecordLastDelta(null);
+    setRecordLastTicks(null);
+  }, [recordEnabled, selectedPageIndex]);
+
+  useEffect(() => {
+    if (!recordEnabled) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      const lastTime = recordRef.current.lastTime;
+      if (lastTime === null || lastTime === undefined) {
+        setRecordElapsed(0);
+        return;
+      }
+      const delta = (window.performance.now() - lastTime) / 1000;
+      setRecordElapsed(delta);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [recordEnabled]);
 
   useEffect(() => {
     if (!rosUrl) {
@@ -567,6 +614,9 @@ export default function App() {
   }, [rosUrl]);
 
   useEffect(() => {
+    if (!viewerEnabled) {
+      return undefined;
+    }
     const container = viewerRef.current;
     if (!container) {
       return undefined;
@@ -581,9 +631,13 @@ export default function App() {
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 20);
     camera.position.copy(defaultCameraPosRef.current);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance",
+    });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -604,8 +658,16 @@ export default function App() {
     scene.add(grid);
 
     const loader = new URDFLoader();
+    const handleContextLost = (event) => {
+      event.preventDefault();
+      setViewerNote("WebGL context lost. Toggle preview to restart.");
+      setViewerEnabled(false);
+    };
+
+    renderer.domElement.addEventListener("webglcontextlost", handleContextLost);
+
     loader.load(`${assetsUrl}/robotis_op3.urdf`, (robot) => {
-      applyRobotOrientation(robot, upright);
+      applyRobotOrientation(robot, upright, layFlat);
       applyRobotMirror(robot, mirrorView);
       robotRef.current = robot;
       scene.add(robot);
@@ -633,6 +695,7 @@ export default function App() {
       window.removeEventListener("resize", handleResize);
       window.cancelAnimationFrame(frameId);
       controls.dispose();
+      renderer.domElement.removeEventListener("webglcontextlost", handleContextLost);
       renderer.dispose();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -641,13 +704,13 @@ export default function App() {
       controlsRef.current = null;
       robotRef.current = null;
     };
-  }, [assetsUrl]);
+  }, [assetsUrl, viewerEnabled]);
 
   useEffect(() => {
     if (robotRef.current) {
-      applyRobotOrientation(robotRef.current, upright);
+      applyRobotOrientation(robotRef.current, upright, layFlat);
     }
-  }, [upright]);
+  }, [upright, layFlat]);
 
   useEffect(() => {
     if (robotRef.current) {
@@ -730,6 +793,16 @@ export default function App() {
     });
   };
 
+  const findStepByIndex = (page, index) => {
+    if (!page || !Array.isArray(page.steps)) {
+      return null;
+    }
+    const byIndex = page.steps.find(
+      (step) => Number(step.index) === Number(index)
+    );
+    return byIndex || page.steps[index] || null;
+  };
+
   const updateActiveStep = (updater) => {
     if (!activePage || selectedStepIndex === null || selectedStepIndex === undefined) {
       return;
@@ -739,10 +812,24 @@ export default function App() {
       if (!page || !Array.isArray(page.steps)) {
         return;
       }
-      const byIndex = page.steps.find(
-        (step) => Number(step.index) === Number(selectedStepIndex)
-      );
-      const step = byIndex || page.steps[selectedStepIndex];
+      const step = findStepByIndex(page, selectedStepIndex);
+      if (!step) {
+        return;
+      }
+      updater(step, page);
+    });
+  };
+
+  const updateStepByIndex = (pageIndex, stepIndex, updater) => {
+    if (pageIndex === null || pageIndex === undefined) {
+      return;
+    }
+    updateYamlData((draft) => {
+      const page = draft.pages?.find((item) => item.index === pageIndex);
+      if (!page || !Array.isArray(page.steps)) {
+        return;
+      }
+      const step = findStepByIndex(page, stepIndex);
       if (!step) {
         return;
       }
@@ -789,19 +876,78 @@ export default function App() {
     return parts.filter(Boolean).join(" | ") || "Result received";
   };
 
-  const stepHistoryKey = () => {
-    if (!activePage || selectedStepIndex === null || selectedStepIndex === undefined) {
-      return null;
+  const parseSchedule = (header) => {
+    const value = header?.schedule;
+    if (value === "time" || value === 10 || value === "0x0a") {
+      return "time";
     }
-    return `${activePage.index}:${selectedStepIndex}`;
+    return "speed";
   };
 
-  const pushStepHistory = (key, positions) => {
+  const resolveSpeed = (header) => {
+    const raw = Number(header?.speed);
+    if (Number.isFinite(raw) && raw > 0) {
+      return raw;
+    }
+    return 32;
+  };
+
+  const clampByte = (value) => {
+    return Math.max(0, Math.min(255, value));
+  };
+
+  const secondsToTimeTicks = (seconds, speed) => {
+    if (!Number.isFinite(seconds)) {
+      return 0;
+    }
+    const ticks = (seconds / 0.008) * (32 / speed);
+    return clampByte(Math.round(ticks));
+  };
+
+  const secondsToPauseTicks = (seconds, speed) => {
+    if (!Number.isFinite(seconds)) {
+      return 0;
+    }
+    const ticks = (seconds / 0.008) * (speed / 32);
+    return clampByte(Math.round(ticks));
+  };
+
+  const stepHistoryKey = (pageIndex = null, stepIndex = null) => {
+    const pageValue =
+      pageIndex !== null && pageIndex !== undefined
+        ? pageIndex
+        : activePage?.index;
+    const stepValue =
+      stepIndex !== null && stepIndex !== undefined ? stepIndex : selectedStepIndex;
+    if (pageValue === null || pageValue === undefined) {
+      return null;
+    }
+    if (stepValue === null || stepValue === undefined) {
+      return null;
+    }
+    return `${pageValue}:${stepValue}`;
+  };
+
+  const snapshotStep = (step) => {
+    return {
+      positions: cloneData(step?.positions || {}),
+      time: step?.time ?? 0,
+      pause: step?.pause ?? 0,
+    };
+  };
+
+  const applyStepSnapshot = (step, snapshot) => {
+    step.positions = cloneData(snapshot?.positions || {});
+    step.time = snapshot?.time ?? 0;
+    step.pause = snapshot?.pause ?? 0;
+  };
+
+  const pushStepHistory = (key, stepSnapshot) => {
     if (!key) {
       return;
     }
     const history = historyRef.current[key] || { undo: [], redo: [] };
-    const snapshot = cloneData(positions || {});
+    const snapshot = cloneData(stepSnapshot || {});
     const last = history.undo[history.undo.length - 1];
     if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
       historyRef.current[key] = history;
@@ -825,12 +971,12 @@ export default function App() {
     if (!history || history.undo.length === 0) {
       return;
     }
-    const current = cloneData(activeStep.positions || {});
+    const current = snapshotStep(activeStep);
     const snapshot = history.undo.pop();
     history.redo.push(current);
     historyRef.current[key] = history;
     updateActiveStep((step) => {
-      step.positions = cloneData(snapshot);
+      applyStepSnapshot(step, snapshot);
     });
     setHistoryTick((tick) => tick + 1);
     setJointDrafts({});
@@ -845,12 +991,12 @@ export default function App() {
     if (!history || history.redo.length === 0) {
       return;
     }
-    const current = cloneData(activeStep.positions || {});
+    const current = snapshotStep(activeStep);
     const snapshot = history.redo.pop();
     history.undo.push(current);
     historyRef.current[key] = history;
     updateActiveStep((step) => {
-      step.positions = cloneData(snapshot);
+      applyStepSnapshot(step, snapshot);
     });
     setHistoryTick((tick) => tick + 1);
     setJointDrafts({});
@@ -984,16 +1130,6 @@ export default function App() {
       ],
     };
     return { scratchIndex, yaml: YAML.dump(payload, { sortKeys: false, lineWidth: -1 }) };
-  };
-
-  const findStepByIndex = (page, index) => {
-    if (!page || !Array.isArray(page.steps)) {
-      return null;
-    }
-    const byIndex = page.steps.find(
-      (step) => Number(step.index) === Number(index)
-    );
-    return byIndex || page.steps[index] || null;
   };
 
   const buildRangeScratchYaml = () => {
@@ -1142,7 +1278,7 @@ export default function App() {
     if (!preset || !activeStep) {
       return;
     }
-    pushStepHistory(stepHistoryKey(), activeStep.positions || {});
+    pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
     updateActiveStep((step) => {
       step.positions = cloneData(preset.positions || {});
     });
@@ -1185,6 +1321,9 @@ export default function App() {
     if (!Number.isFinite(parsed)) {
       return;
     }
+    if (activeStep) {
+      pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
+    }
     updateActiveStep((step) => {
       step[field] = Math.round(parsed);
     });
@@ -1222,7 +1361,9 @@ export default function App() {
     if (!Number.isFinite(parsed)) {
       return;
     }
-    pushStepHistory(stepHistoryKey(), activeStep?.positions || {});
+    if (activeStep) {
+      pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
+    }
     const rawValue = toRawDegrees(parsed);
     updateActiveStep((step) => {
       step.positions = step.positions || {};
@@ -1233,7 +1374,9 @@ export default function App() {
 
   const handleJointToggleOff = (name, currentRaw) => {
     const nextValue = isTorqueOff(currentRaw) ? RAW_CENTER : "torque_off";
-    pushStepHistory(stepHistoryKey(), activeStep?.positions || {});
+    if (activeStep) {
+      pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
+    }
     updateActiveStep((step) => {
       step.positions = step.positions || {};
       setRawPosition(step.positions, name, jointIdMap, nextValue);
@@ -1257,7 +1400,71 @@ export default function App() {
     setStatusError(false);
   };
 
+  const recordStepSelection = (page, stepIndex) => {
+    if (!recordEnabled || !page) {
+      return;
+    }
+    const now = window.performance.now();
+    const record = recordRef.current;
+    const samePage = record.lastPageIndex === page.index;
+    if (!samePage || record.lastTime === null || record.lastStepIndex === null) {
+      record.lastTime = now;
+      record.lastStepIndex = stepIndex;
+      record.lastPageIndex = page.index;
+      setRecordElapsed(0);
+      setRecordLastDelta(null);
+      setRecordLastTicks(null);
+      setStatus(`Record start at step ${stepIndex}`);
+      setStatusError(false);
+      return;
+    }
+
+    const deltaSec = (now - record.lastTime) / 1000;
+    const speed = resolveSpeed(page.header);
+    const schedule = parseSchedule(page.header);
+
+    if (recordMode === "time" && schedule !== "time") {
+      setStatus("Record time needs schedule=time");
+      setStatusError(true);
+      record.lastTime = now;
+      record.lastStepIndex = stepIndex;
+      record.lastPageIndex = page.index;
+      return;
+    }
+
+    let targetIndex = stepIndex;
+    let ticks = 0;
+    let label = "time";
+    if (recordMode === "time") {
+      ticks = secondsToTimeTicks(deltaSec, speed);
+      ticks = Math.max(1, ticks);
+    } else {
+      ticks = secondsToPauseTicks(deltaSec, speed);
+      targetIndex = record.lastStepIndex;
+      label = "pause";
+    }
+
+    const targetStep = findStepByIndex(page, targetIndex);
+    const key = stepHistoryKey(page.index, targetIndex);
+    if (targetStep) {
+      pushStepHistory(key, snapshotStep(targetStep));
+      updateStepByIndex(page.index, targetIndex, (step) => {
+        step[label] = ticks;
+      });
+    }
+
+    setRecordLastDelta(deltaSec);
+    setRecordLastTicks(ticks);
+    setStatus(`Recorded ${deltaSec.toFixed(2)}s -> ${label} ${ticks}`);
+    setStatusError(false);
+
+    record.lastTime = now;
+    record.lastStepIndex = stepIndex;
+    record.lastPageIndex = page.index;
+  };
+
   const handleStepClick = (page, step, stepIndex) => {
+    recordStepSelection(page, stepIndex);
     const pose = buildPose(step.positions || {}, livePoseRef.current);
     setSelectedPageIndex(page.index);
     setSelectedStepIndex(stepIndex);
@@ -1594,6 +1801,37 @@ export default function App() {
                       <label className="toggle">
                         <input
                           type="checkbox"
+                          checked={recordEnabled}
+                          onChange={(event) =>
+                            setRecordEnabled(event.target.checked)
+                          }
+                          disabled={editorDisabled}
+                        />
+                        <span>Record</span>
+                      </label>
+                      <select
+                        className="record-select"
+                        value={recordMode}
+                        onChange={(event) => setRecordMode(event.target.value)}
+                        disabled={editorDisabled || !recordEnabled}
+                      >
+                        <option value="time">to time</option>
+                        <option value="pause">to pause</option>
+                      </select>
+                      <span
+                        className={`record-indicator${
+                          recordEnabled ? " active" : ""
+                        }`}
+                      >
+                        {recordEnabled
+                          ? recordLastDelta !== null
+                            ? `Δ ${recordLastDelta.toFixed(2)}s · ${recordMode} ${recordLastTicks ?? "-"}`
+                            : `Δ ${recordElapsed.toFixed(2)}s`
+                          : "Record off"}
+                      </span>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
                           checked={sendStepToWebots}
                           onChange={(event) =>
                             setSendStepToWebots(event.target.checked)
@@ -1903,6 +2141,13 @@ export default function App() {
                 <button className="ghost" type="button" onClick={resetView}>
                   Reset View
                 </button>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => setViewerEnabled((value) => !value)}
+                >
+                  {viewerEnabled ? "Hide Preview" : "Show Preview"}
+                </button>
                 <label className="toggle">
                   <input
                     type="checkbox"
@@ -1910,6 +2155,14 @@ export default function App() {
                     onChange={(event) => setUpright(event.target.checked)}
                   />
                   <span>Upright</span>
+                </label>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={layFlat}
+                    onChange={(event) => setLayFlat(event.target.checked)}
+                  />
+                  <span>Lay flat</span>
                 </label>
                 <label className="toggle">
                   <input
@@ -1922,11 +2175,27 @@ export default function App() {
                 <span className="pill">{previewPose ? "Preview" : "Live"}</span>
               </div>
             </div>
-            <div className="viewer-canvas" ref={viewerRef} />
+            {viewerEnabled ? (
+              <div className="viewer-canvas" ref={viewerRef} />
+            ) : (
+              <div className="viewer-placeholder">
+                <p>Preview hidden to save GPU.</p>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => setViewerEnabled(true)}
+                >
+                  Show Preview
+                </button>
+              </div>
+            )}
             <div className="panel-footer">
               <span className="hint">
-                Select a step to preview in 3D. Use Send Step or Auto send to move Webots.
+                {viewerEnabled
+                  ? "Select a step to preview in 3D. Use Send Step or Auto send to move Webots."
+                  : "Preview is disabled. Re-enable when you need it."}
               </span>
+              {viewerNote ? <span className="viewer-note">{viewerNote}</span> : null}
             </div>
           </section>
 

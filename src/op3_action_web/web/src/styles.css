@@ -171,6 +171,26 @@ body {
   min-width: 140px;
 }
 
+.record-select {
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--stroke);
+  background: #fff;
+  font-size: 12px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.record-indicator {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.record-indicator.active {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
 button {
   border: none;
   border-radius: 10px;
@@ -595,6 +615,29 @@ button.ghost {
   border: 1px solid var(--stroke);
   background: #fdf6ea;
   overflow: hidden;
+}
+
+.viewer-placeholder {
+  min-height: 360px;
+  border-radius: 14px;
+  border: 1px dashed var(--stroke);
+  background: #fff7ea;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.viewer-placeholder p {
+  margin: 0;
+}
+
+.viewer-note {
+  color: #9b1c1c;
+  font-weight: 600;
 }
 
 .hint {
