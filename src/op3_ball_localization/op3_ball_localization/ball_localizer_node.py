@@ -1,11 +1,17 @@
 import copy
+import csv
 import math
+import os
+import sys
+import threading
 import time
 from typing import Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import JointState, PointCloud2
+from geometry_msgs.msg import PointStamped
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
+from sensor_msgs.msg import Imu, JointState, PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Int32, String
 
@@ -28,8 +34,17 @@ class BallLocalizer(Node):
         self._ball_topic = str(
             self.declare_parameter("ball_topic", "/vision/yolo/balls").value
         )
+        self._ball_center_topic = str(
+            self.declare_parameter("ball_center_topic", "/vision/yolo/ball_center").value
+        )
         self._output_frame = str(
             self.declare_parameter("output_frame", "base").value
+        )
+        self._joint_states_topic = str(
+            self.declare_parameter("joint_states_topic", "/robotis_op3/joint_states").value
+        )
+        self._imu_topic = str(
+            self.declare_parameter("imu_topic", "/robotis_op3/imu").value
         )
         self._publish_rate = float(
             self.declare_parameter("publish_rate", 10.0).value
@@ -61,6 +76,27 @@ class BallLocalizer(Node):
         )
         self._lost_timeout = float(
             self.declare_parameter("lost_timeout", 0.8).value
+        )
+        self._fall_enable = bool(
+            self.declare_parameter("fall_enable", True).value
+        )
+        self._fall_pitch_front_deg = float(
+            self.declare_parameter("fall_pitch_front_deg", 60.0).value
+        )
+        self._fall_pitch_back_deg = float(
+            self.declare_parameter("fall_pitch_back_deg", 60.0).value
+        )
+        self._fall_hold_sec = float(
+            self.declare_parameter("fall_hold_sec", 0.3).value
+        )
+        self._fall_recover_pitch_deg = float(
+            self.declare_parameter("fall_recover_pitch_deg", 25.0).value
+        )
+        self._fall_cooldown_sec = float(
+            self.declare_parameter("fall_cooldown_sec", 2.0).value
+        )
+        self._fall_imu_timeout_sec = float(
+            self.declare_parameter("fall_imu_timeout_sec", 0.5).value
         )
         self._arrive_distance = float(
             self.declare_parameter("arrive_distance", 0.25).value
@@ -141,6 +177,32 @@ class BallLocalizer(Node):
         self._pre_kick_tilt = float(
             self.declare_parameter("pre_kick_tilt", self._scan_tilt_down).value
         )
+        self._head_track_pixel_target_y = float(
+            self.declare_parameter("head_track_pixel_target_y", 0.5).value
+        )
+        self._head_track_pixel_gain = float(
+            self.declare_parameter("head_track_pixel_gain", 1.2).value
+        )
+        self._head_track_pixel_deadzone = float(
+            self.declare_parameter("head_track_pixel_deadzone", 0.03).value
+        )
+        self._head_track_pixel_timeout = float(
+            self.declare_parameter("head_track_pixel_timeout", self._lost_timeout).value
+        )
+        self.declare_parameter(
+            "head_track_tilt_table_distances",
+            descriptor=ParameterDescriptor(type=ParameterType.PARAMETER_DOUBLE_ARRAY),
+        )
+        self.declare_parameter(
+            "head_track_tilt_table_tilts",
+            descriptor=ParameterDescriptor(type=ParameterType.PARAMETER_DOUBLE_ARRAY),
+        )
+        distances_value = self.get_parameter("head_track_tilt_table_distances").value
+        tilts_value = self.get_parameter("head_track_tilt_table_tilts").value
+        self._head_track_tilt_table_distances = (
+            list(distances_value) if distances_value else []
+        )
+        self._head_track_tilt_table_tilts = list(tilts_value) if tilts_value else []
         self._head_track_tilt_far = float(
             self.declare_parameter("head_track_tilt_far", self._head_track_tilt).value
         )
@@ -170,6 +232,15 @@ class BallLocalizer(Node):
         )
         self._head_track_deadzone = float(
             self.declare_parameter("head_track_deadzone", 0.05).value
+        )
+        self._head_track_pan_hold_deadzone = bool(
+            self.declare_parameter("head_track_pan_hold_deadzone", True).value
+        )
+        self._head_track_pan_smoothing = float(
+            self.declare_parameter("head_track_pan_smoothing", 0.0).value
+        )
+        self._head_track_tilt_smoothing = float(
+            self.declare_parameter("head_track_tilt_smoothing", 0.0).value
         )
         self._head_track_max_step = float(
             self.declare_parameter("head_track_max_step", 0.4).value
@@ -201,6 +272,24 @@ class BallLocalizer(Node):
         self._kick_cooldown_sec = float(
             self.declare_parameter("kick_cooldown_sec", 1.0).value
         )
+        self._getup_enable = bool(
+            self.declare_parameter("getup_enable", True).value
+        )
+        self._getup_front_page = int(
+            self.declare_parameter("getup_front_page", 122).value
+        )
+        self._getup_back_page = int(
+            self.declare_parameter("getup_back_page", 123).value
+        )
+        self._getup_apply_mode_delay_sec = float(
+            self.declare_parameter("getup_apply_mode_delay_sec", 0.2).value
+        )
+        self._getup_timeout_sec = float(
+            self.declare_parameter("getup_timeout_sec", 6.0).value
+        )
+        self._getup_cooldown_sec = float(
+            self.declare_parameter("getup_cooldown_sec", 2.0).value
+        )
         self._action_module_name = str(
             self.declare_parameter("action_module_name", "action_module").value
         )
@@ -215,6 +304,29 @@ class BallLocalizer(Node):
         )
         self._walking_module_name = str(
             self.declare_parameter("walking_module_name", "walking_module").value
+        )
+        self._walking_enable_retry_sec = float(
+            self.declare_parameter("walking_enable_retry_sec", 2.0).value
+        )
+        self._walking_start_retry_sec = float(
+            self.declare_parameter("walking_start_retry_sec", 2.0).value
+        )
+        self._log_only_mode = bool(
+            self.declare_parameter("log_only_mode", False).value
+        )
+        self._log_sample_enable = bool(
+            self.declare_parameter("log_sample_enable", False).value
+        )
+        self._log_sample_csv_path = str(
+            self.declare_parameter(
+                "log_sample_csv_path", "log/ball_localizer_tilt_samples.csv"
+            ).value
+        )
+        self._log_sample_period_sec = float(
+            self.declare_parameter("log_sample_period_sec", 0.2).value
+        )
+        self._log_sample_key_capture = bool(
+            self.declare_parameter("log_sample_key_capture", False).value
         )
         self._dry_run = bool(self.declare_parameter("dry_run", False).value)
 
@@ -238,11 +350,65 @@ class BallLocalizer(Node):
             self._kick_bearing_deadzone = abs(self._kick_bearing_deadzone)
         self._pre_kick_max_x = abs(self._pre_kick_max_x)
         self._pre_kick_max_yaw = abs(self._pre_kick_max_yaw)
-        if self._head_track_tilt_mode not in {"geometry", "distance", "fixed"}:
+        if self._head_track_tilt_mode not in {
+            "geometry",
+            "distance",
+            "fixed",
+            "pixel",
+            "table",
+        }:
             self.get_logger().warn(
                 f"Unknown head_track_tilt_mode '{self._head_track_tilt_mode}', using geometry"
             )
             self._head_track_tilt_mode = "geometry"
+        self._head_track_pixel_target_y = max(
+            0.0, min(1.0, self._head_track_pixel_target_y)
+        )
+        self._head_track_pixel_gain = abs(self._head_track_pixel_gain)
+        self._head_track_pixel_deadzone = abs(self._head_track_pixel_deadzone)
+        self._head_track_pan_smoothing = self._clamp(
+            self._head_track_pan_smoothing, 0.0, 1.0
+        )
+        self._head_track_tilt_smoothing = self._clamp(
+            self._head_track_tilt_smoothing, 0.0, 1.0
+        )
+        if self._head_track_pixel_timeout <= 0.0:
+            self._head_track_pixel_timeout = self._lost_timeout
+        self._head_track_tilt_table = self._build_tilt_table(
+            self._head_track_tilt_table_distances, self._head_track_tilt_table_tilts
+        )
+        self._head_track_tilt_table_distances_sorted = [
+            item[0] for item in self._head_track_tilt_table
+        ]
+        self._head_track_tilt_table_tilts_sorted = [
+            item[1] for item in self._head_track_tilt_table
+        ]
+        if self._head_track_tilt_mode == "table" and not self._head_track_tilt_table:
+            self.get_logger().warn("Tilt table invalid; falling back to distance mode")
+            self._head_track_tilt_mode = "distance"
+        if self._walking_enable_retry_sec < 0.0:
+            self._walking_enable_retry_sec = 0.0
+        if self._walking_start_retry_sec < 0.0:
+            self._walking_start_retry_sec = 0.0
+        if self._log_sample_period_sec <= 0.0:
+            self._log_sample_period_sec = self._status_log_period_sec
+        if self._log_only_mode:
+            self._log_sample_enable = True
+        self._fall_pitch_front_deg = abs(self._fall_pitch_front_deg)
+        self._fall_pitch_back_deg = abs(self._fall_pitch_back_deg)
+        self._fall_recover_pitch_deg = abs(self._fall_recover_pitch_deg)
+        if self._fall_hold_sec < 0.0:
+            self._fall_hold_sec = 0.0
+        if self._fall_cooldown_sec < 0.0:
+            self._fall_cooldown_sec = 0.0
+        if self._fall_imu_timeout_sec < 0.0:
+            self._fall_imu_timeout_sec = 0.0
+        if self._getup_apply_mode_delay_sec < 0.0:
+            self._getup_apply_mode_delay_sec = 0.0
+        if self._getup_timeout_sec < 0.0:
+            self._getup_timeout_sec = 0.0
+        if self._getup_cooldown_sec < 0.0:
+            self._getup_cooldown_sec = 0.0
         self._head_track_tilt_far_distance = abs(self._head_track_tilt_far_distance)
         self._head_track_tilt_near_distance = abs(self._head_track_tilt_near_distance)
         if self._head_track_tilt_far_distance < self._head_track_tilt_near_distance:
@@ -293,6 +459,8 @@ class BallLocalizer(Node):
         self._head_center_sent = False
         self._head_track_last_pan = 0.0
         self._head_track_last_tilt = self._head_track_tilt_far
+        self._head_track_target_pan = 0.0
+        self._head_track_target_tilt = self._head_track_tilt_far
         self._pre_kick_start_time = 0.0
         self._kick_ready_since: Optional[float] = None
         self._kick_stage = "idle"
@@ -300,11 +468,25 @@ class BallLocalizer(Node):
         self._kick_apply_time = 0.0
         self._kick_selected_page = 0
         self._last_kick_time = 0.0
+        self._getup_stage = "idle"
+        self._getup_start_time = 0.0
+        self._getup_apply_time = 0.0
+        self._getup_page = 0
+        self._last_getup_time = 0.0
+        self._fall_candidate: Optional[str] = None
+        self._fall_candidate_since = 0.0
+        self._fall_lock = False
+        self._fall_state = "upright"
+        self._last_roll: Optional[float] = None
+        self._last_pitch: Optional[float] = None
+        self._last_imu_time: Optional[float] = None
         self._last_ball_distance = 0.0
         self._last_ball_bearing = 0.0
 
         self._last_ball_time: Optional[float] = None
         self._last_ball_point: Optional[Tuple[float, float, float]] = None
+        self._last_ball_pixel: Optional[Tuple[float, float]] = None
+        self._last_ball_pixel_time: Optional[float] = None
 
         self._last_scan_step_time = 0.0
         self._scan_pan = self._scan_pan_min
@@ -314,10 +496,34 @@ class BallLocalizer(Node):
 
         self._last_log_times = {}
         self._last_head_module_pub_time = 0.0
+        self._last_walking_enable_time = 0.0
+        self._last_walking_start_time = 0.0
+        self._last_log_sample_time = 0.0
+        self._log_sample_fp = None
+        self._log_sample_writer = None
+        self._head_pan_actual = None
+        self._head_tilt_actual = None
+        self._head_joint_state_time = None
+        self._capture_sample_requested = False
+        self._capture_lock = threading.Lock()
+        self._capture_thread = None
 
         self.create_subscription(
             PointCloud2, self._ball_topic, self._ball_callback, 10
         )
+        if self._ball_center_topic:
+            self.create_subscription(
+                PointStamped,
+                self._ball_center_topic,
+                self._ball_center_callback,
+                10,
+            )
+        if self._imu_topic:
+            self.create_subscription(Imu, self._imu_topic, self._imu_callback, 10)
+        if self._joint_states_topic:
+            self.create_subscription(
+                JointState, self._joint_states_topic, self._joint_state_callback, 10
+            )
         self.create_subscription(
             String, "/robotis/movement_done", self._movement_done_callback, 10
         )
@@ -331,6 +537,8 @@ class BallLocalizer(Node):
             self.get_logger().warn("publish_rate <= 0; defaulting to 10.0")
             self._publish_rate = 10.0
         self.create_timer(1.0 / self._publish_rate, self._control_loop)
+        if self._log_sample_key_capture:
+            self._start_key_capture_thread()
 
     def _ball_callback(self, msg: PointCloud2) -> None:
         if self._output_frame and msg.header.frame_id:
@@ -363,7 +571,40 @@ class BallLocalizer(Node):
         self._last_ball_point = best_point
         self._last_ball_time = time.monotonic()
 
+    def _ball_center_callback(self, msg: PointStamped) -> None:
+        x = float(msg.point.x)
+        y = float(msg.point.y)
+        if math.isnan(x) or math.isnan(y):
+            return
+        x = self._clamp(x, 0.0, 1.0)
+        y = self._clamp(y, 0.0, 1.0)
+        self._last_ball_pixel = (x, y)
+        self._last_ball_pixel_time = time.monotonic()
+
+    def _joint_state_callback(self, msg: JointState) -> None:
+        if not msg.name or not msg.position:
+            return
+        name_to_index = {name: idx for idx, name in enumerate(msg.name)}
+        pan_idx = name_to_index.get(self._head_pan_joint)
+        tilt_idx = name_to_index.get(self._head_tilt_joint)
+        if pan_idx is not None and pan_idx < len(msg.position):
+            self._head_pan_actual = float(msg.position[pan_idx])
+        if tilt_idx is not None and tilt_idx < len(msg.position):
+            self._head_tilt_actual = float(msg.position[tilt_idx])
+        self._head_joint_state_time = time.monotonic()
+
+    def _imu_callback(self, msg: Imu) -> None:
+        q = msg.orientation
+        if q.x == 0.0 and q.y == 0.0 and q.z == 0.0 and q.w == 0.0:
+            return
+        roll, pitch = self._quat_to_roll_pitch(q.x, q.y, q.z, q.w)
+        self._last_roll = roll
+        self._last_pitch = pitch
+        self._last_imu_time = time.monotonic()
+
     def _try_fetch_baseline(self) -> None:
+        now = time.monotonic()
+        self._ensure_walking_module_enabled(now)
         if self._baseline_params is not None or self._baseline_request_in_flight:
             return
         if not self._param_client.service_is_ready():
@@ -404,6 +645,17 @@ class BallLocalizer(Node):
             self._last_ball_distance = distance
             self._last_ball_bearing = bearing
 
+        if self._getup_stage != "idle":
+            self._update_getup_state(now)
+            self._log_status(now, distance, bearing, ball_point)
+            return
+
+        fall_direction = self._check_fall(now)
+        if fall_direction is not None:
+            self._start_getup_sequence(now, fall_direction)
+            self._log_status(now, distance, bearing, ball_point)
+            return
+
         self._update_state(now, distance, bearing)
 
         if self._state == self.STATE_SCAN:
@@ -439,11 +691,13 @@ class BallLocalizer(Node):
                 self._update_head_on_ball(bearing, distance, ball_point)
 
         self._log_status(now, distance, bearing, ball_point)
+        self._log_sample(now, distance, bearing, ball_point)
 
     def _update_state(
         self, now: float, distance: Optional[float], bearing: Optional[float]
     ) -> None:
         ball_visible = distance is not None and bearing is not None
+        kick_enabled = self._kick_enable and not self._log_only_mode
 
         if self._state == self.STATE_SCAN:
             if ball_visible:
@@ -457,15 +711,15 @@ class BallLocalizer(Node):
             if not ball_visible:
                 self._set_state(self.STATE_SEARCH)
                 return
-            if self._kick_enable and distance <= self._pre_kick_distance:
+            if kick_enabled and distance <= self._pre_kick_distance:
                 self._set_state(self.STATE_PRE_KICK)
-            elif (not self._kick_enable) and distance <= self._arrive_distance:
+            elif (not kick_enabled) and distance <= self._arrive_distance:
                 self._set_state(self.STATE_ARRIVED)
         elif self._state == self.STATE_PRE_KICK:
             if not ball_visible:
                 self._set_state(self.STATE_SEARCH)
                 return
-            if not self._kick_enable:
+            if not kick_enabled:
                 self._set_state(self.STATE_ARRIVED)
                 return
             if distance > self._pre_kick_distance + self._arrive_hysteresis:
@@ -588,6 +842,8 @@ class BallLocalizer(Node):
         self._publish_walking_params(x_cmd, yaw)
 
     def _publish_walking_params(self, x: float, yaw: float) -> None:
+        if self._log_only_mode:
+            return
         if self._baseline_params is None:
             self._log_throttled(
                 "no_baseline",
@@ -609,22 +865,32 @@ class BallLocalizer(Node):
         self._param_pub.publish(params)
 
     def _start_walking(self) -> None:
-        if self._walking_active:
+        if self._log_only_mode:
             return
+        now = time.monotonic()
         if self._baseline_params is None:
             self._log_throttled(
                 "no_baseline_start",
-                "Baseline walking params not available; waiting to start walking",
+                "Baseline walking params not available; retrying start without params",
                 1.0,
             )
-            return
-        if self._auto_enable_walking_module and not self._dry_run:
-            self._enable_pub.publish(String(data=self._walking_module_name))
+        self._ensure_walking_module_enabled(now)
         if not self._dry_run:
-            self._command_pub.publish(String(data="start"))
+            should_retry = (
+                self._walking_start_retry_sec > 0.0
+                and now - self._last_walking_start_time
+                >= self._walking_start_retry_sec
+            )
+            if (not self._walking_active) or should_retry:
+                self._command_pub.publish(String(data="start"))
+                self._last_walking_start_time = now
         self._walking_active = True
+        if self._baseline_params is None:
+            return
 
     def _stop_walking(self) -> None:
+        if self._log_only_mode:
+            return
         if not self._walking_active:
             return
         if not self._dry_run:
@@ -647,6 +913,8 @@ class BallLocalizer(Node):
         self._param_pub.publish(params)
 
     def _publish_head_absolute(self, pan: float, tilt: float) -> None:
+        if self._log_only_mode:
+            return
         pan = self._clamp(pan, self._head_pan_min, self._head_pan_max)
         tilt = self._clamp(tilt, self._head_tilt_min, self._head_tilt_max)
         if self._dry_run:
@@ -686,9 +954,26 @@ class BallLocalizer(Node):
     def _publish_head_track(self, bearing: float, tilt: float) -> None:
         target_pan = bearing * self._head_track_pan_gain
         if abs(target_pan) < self._head_track_deadzone:
-            target_pan = 0.0
+            if self._head_track_pan_hold_deadzone:
+                target_pan = self._head_track_last_pan
+            else:
+                target_pan = 0.0
         target_pan = self._clamp(target_pan, self._head_pan_min, self._head_pan_max)
         target_tilt = self._clamp(tilt, self._head_tilt_min, self._head_tilt_max)
+
+        if self._head_track_pan_smoothing > 0.0:
+            alpha = self._head_track_pan_smoothing
+            target_pan = self._head_track_last_pan + alpha * (
+                target_pan - self._head_track_last_pan
+            )
+        if self._head_track_tilt_smoothing > 0.0:
+            alpha = self._head_track_tilt_smoothing
+            target_tilt = self._head_track_last_tilt + alpha * (
+                target_tilt - self._head_track_last_tilt
+            )
+
+        self._head_track_target_pan = target_pan
+        self._head_track_target_tilt = target_tilt
 
         if self._head_track_max_step > 0.0:
             delta = target_pan - self._head_track_last_pan
@@ -722,9 +1007,27 @@ class BallLocalizer(Node):
     ) -> float:
         if self._head_track_tilt_mode == "geometry":
             return self._compute_geometry_tilt(ball_point)
+        if self._head_track_tilt_mode == "pixel":
+            pixel_tilt = self._compute_pixel_tilt()
+            if pixel_tilt is not None:
+                return pixel_tilt
+            return self._compute_geometry_tilt(ball_point)
         if self._head_track_tilt_mode == "fixed":
             return self._head_track_tilt_far
+        if self._head_track_tilt_mode == "table":
+            return self._compute_table_tilt(distance)
         return self._compute_distance_tilt(distance)
+
+    def _compute_pixel_tilt(self) -> Optional[float]:
+        if self._last_ball_pixel_time is None or self._last_ball_pixel is None:
+            return None
+        if time.monotonic() - self._last_ball_pixel_time > self._head_track_pixel_timeout:
+            return None
+        _, y = self._last_ball_pixel
+        error = y - self._head_track_pixel_target_y
+        if abs(error) < self._head_track_pixel_deadzone:
+            return self._head_track_last_tilt
+        return self._head_track_last_tilt - self._head_track_pixel_gain * error
 
     def _compute_distance_tilt(self, distance: Optional[float]) -> float:
         if distance is None:
@@ -742,6 +1045,19 @@ class BallLocalizer(Node):
             self._head_track_tilt_far - self._head_track_tilt_near
         )
 
+    @staticmethod
+    def _quat_to_roll_pitch(x: float, y: float, z: float, w: float) -> Tuple[float, float]:
+        sinr_cosp = 2.0 * (w * x + y * z)
+        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2.0 * (w * y - z * x)
+        if abs(sinp) >= 1.0:
+            pitch = math.copysign(math.pi / 2.0, sinp)
+        else:
+            pitch = math.asin(sinp)
+        return roll, pitch
+
     def _compute_geometry_tilt(
         self, ball_point: Optional[Tuple[float, float, float]]
     ) -> float:
@@ -754,7 +1070,45 @@ class BallLocalizer(Node):
         angle_down = math.atan2(self._camera_height, horizontal)
         return self._head_track_tilt_offset - angle_down
 
+    def _compute_table_tilt(self, distance: Optional[float]) -> float:
+        if distance is None or not self._head_track_tilt_table:
+            return self._head_track_tilt_far
+        distances = self._head_track_tilt_table_distances_sorted
+        tilts = self._head_track_tilt_table_tilts_sorted
+        if distance <= distances[0]:
+            return tilts[0]
+        if distance >= distances[-1]:
+            return tilts[-1]
+        for idx in range(1, len(distances)):
+            if distance <= distances[idx]:
+                d0 = distances[idx - 1]
+                d1 = distances[idx]
+                t0 = tilts[idx - 1]
+                t1 = tilts[idx]
+                ratio = (distance - d0) / (d1 - d0)
+                return t0 + ratio * (t1 - t0)
+        return tilts[-1]
+
+    @staticmethod
+    def _build_tilt_table(distances: list, tilts: list) -> list:
+        if not distances or not tilts:
+            return []
+        if len(distances) != len(tilts):
+            return []
+        pairs = []
+        for dist, tilt in zip(distances, tilts):
+            try:
+                dist_value = abs(float(dist))
+                tilt_value = float(tilt)
+            except (TypeError, ValueError):
+                return []
+            pairs.append((dist_value, tilt_value))
+        pairs.sort(key=lambda item: item[0])
+        return pairs
+
     def _publish_head_module_assignment(self) -> None:
+        if self._log_only_mode:
+            return
         if not self._auto_enable_head_module or self._dry_run:
             return
         now = time.monotonic()
@@ -766,6 +1120,110 @@ class BallLocalizer(Node):
         self._joint_ctrl_pub.publish(msg)
         self._last_head_module_pub_time = now
 
+    def _ensure_walking_module_enabled(self, now: float) -> None:
+        if self._log_only_mode:
+            return
+        if not self._auto_enable_walking_module or self._dry_run:
+            return
+        if self._walking_enable_retry_sec == 0.0:
+            if self._last_walking_enable_time > 0.0:
+                return
+        else:
+            if now - self._last_walking_enable_time < self._walking_enable_retry_sec:
+                return
+        self._enable_pub.publish(String(data=self._walking_module_name))
+        self._last_walking_enable_time = now
+
+    def _check_fall(self, now: float) -> Optional[str]:
+        if not self._fall_enable or self._log_only_mode:
+            return None
+        if self._getup_stage != "idle" or self._kick_stage != "idle":
+            return None
+        if self._last_imu_time is None:
+            return None
+        if self._fall_imu_timeout_sec > 0.0 and now - self._last_imu_time > self._fall_imu_timeout_sec:
+            return None
+        if self._last_pitch is None:
+            return None
+
+        if self._fall_lock:
+            if abs(self._last_pitch) <= math.radians(self._fall_recover_pitch_deg):
+                self._fall_lock = False
+                self._fall_state = "upright"
+            else:
+                return None
+
+        front_thresh = math.radians(self._fall_pitch_front_deg)
+        back_thresh = math.radians(self._fall_pitch_back_deg)
+        candidate = None
+        if self._last_pitch <= -front_thresh:
+            candidate = "back"
+        elif self._last_pitch >= back_thresh:
+            candidate = "front"
+
+        if candidate is None:
+            self._fall_candidate = None
+            return None
+
+        if self._fall_candidate != candidate:
+            self._fall_candidate = candidate
+            self._fall_candidate_since = now
+            return None
+
+        if now - self._fall_candidate_since < self._fall_hold_sec:
+            return None
+        if now - self._last_getup_time < self._fall_cooldown_sec:
+            return None
+
+        return candidate
+
+    def _start_getup_sequence(self, now: float, direction: str) -> None:
+        if not self._getup_enable:
+            return
+        if now - self._last_getup_time < self._getup_cooldown_sec:
+            return
+        self._stop_walking()
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._action_module_name))
+        else:
+            self._log_throttled("getup_mode", "dry_run action module enable", 1.0)
+
+        self._getup_stage = "switching"
+        self._getup_start_time = now
+        self._getup_apply_time = now + self._getup_apply_mode_delay_sec
+        self._getup_page = (
+            self._getup_front_page if direction == "front" else self._getup_back_page
+        )
+        self._fall_lock = True
+        self._fall_state = direction
+        self.get_logger().info(f"Get-up start ({direction}) page={self._getup_page}")
+
+    def _update_getup_state(self, now: float) -> None:
+        if self._getup_stage == "idle":
+            return
+        if self._getup_stage == "switching" and now >= self._getup_apply_time:
+            if not self._dry_run:
+                self._action_page_pub.publish(Int32(data=self._getup_page))
+            else:
+                self._log_throttled("getup_page", f"dry_run page_num {self._getup_page}", 1.0)
+            self._getup_stage = "waiting"
+
+        if self._getup_stage == "waiting":
+            if now - self._getup_start_time >= self._getup_timeout_sec:
+                self._finish_getup("timeout")
+
+    def _finish_getup(self, result: str) -> None:
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._walking_module_name))
+        else:
+            self._log_throttled("getup_restore", "dry_run walking module restore", 1.0)
+        self._publish_head_module_assignment()
+        self._getup_stage = "idle"
+        self._last_getup_time = time.monotonic()
+        self._walking_active = False
+        self._set_state(self.STATE_SCAN)
+        self.get_logger().info(f"Get-up finished: {result}")
+
     def _reset_scan_pattern(self) -> None:
         self._scan_pan = self._scan_pan_min
         self._scan_tilt = self._scan_tilt_down
@@ -774,6 +1232,8 @@ class BallLocalizer(Node):
         self._last_scan_step_time = 0.0
 
     def _start_kick_sequence(self, now: float) -> None:
+        if self._log_only_mode:
+            return
         if not self._kick_enable:
             return
         if now - self._last_kick_time < self._kick_cooldown_sec:
@@ -812,12 +1272,16 @@ class BallLocalizer(Node):
                 self._finish_kick("timeout")
 
     def _movement_done_callback(self, msg: String) -> None:
+        if msg.data not in {"action", "action_failed"}:
+            return
+        if self._getup_stage != "idle":
+            self._finish_getup(msg.data)
+            return
         if self._state != self.STATE_KICKING:
             return
         if self._kick_stage == "idle":
             return
-        if msg.data in {"action", "action_failed"}:
-            self._finish_kick(msg.data)
+        self._finish_kick(msg.data)
 
     def _finish_kick(self, result: str) -> None:
         if not self._dry_run:
@@ -870,9 +1334,150 @@ class BallLocalizer(Node):
                 f"ball=({ball_point[0]:.3f},{ball_point[1]:.3f}) "
                 f"arrive={self._arrive_distance:.2f} "
                 f"pre_kick={self._pre_kick_distance:.2f} kick={self._kick_distance:.2f} "
-                f"head_pan={self._head_track_last_pan:.2f} head_tilt={self._head_track_last_tilt:.2f}"
+                f"tilt_mode={self._head_track_tilt_mode} "
+                f"head_pan={self._head_track_last_pan:.2f} "
+                f"head_tilt={self._head_track_last_tilt:.2f} "
+                f"target_pan={self._head_track_target_pan:.2f} "
+                f"target_tilt={self._head_track_target_tilt:.2f} "
+                f"getup={self._getup_stage} "
+                f"baseline={'yes' if self._baseline_params else 'no'} "
+                f"walking={'on' if self._walking_active else 'off'}"
             )
+            if self._head_pan_actual is not None and self._head_tilt_actual is not None:
+                message += (
+                    f" actual_pan={self._head_pan_actual:.2f} "
+                    f"actual_tilt={self._head_tilt_actual:.2f}"
+                )
+            if self._last_pitch is not None and self._last_roll is not None:
+                message += (
+                    f" pitch={math.degrees(self._last_pitch):.1f}deg "
+                    f"roll={math.degrees(self._last_roll):.1f}deg "
+                    f"fall={self._fall_state}"
+                )
         self._log_throttled("status", message, self._status_log_period_sec)
+
+    def _start_key_capture_thread(self) -> None:
+        if self._capture_thread is not None:
+            return
+
+        def _capture_loop() -> None:
+            self.get_logger().info(
+                "Sample capture enabled: press Enter to record a tilt sample"
+            )
+            while rclpy.ok():
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                with self._capture_lock:
+                    self._capture_sample_requested = True
+
+        self._capture_thread = threading.Thread(target=_capture_loop, daemon=True)
+        self._capture_thread.start()
+
+    def _consume_sample_request(self) -> bool:
+        if not self._capture_sample_requested:
+            return False
+        with self._capture_lock:
+            if not self._capture_sample_requested:
+                return False
+            self._capture_sample_requested = False
+            return True
+
+    def _log_sample(
+        self,
+        now: float,
+        distance: Optional[float],
+        bearing: Optional[float],
+        ball_point: Optional[Tuple[float, float, float]],
+    ) -> None:
+        force = self._consume_sample_request()
+        if not force and not self._log_sample_enable:
+            return
+        if distance is None or bearing is None or ball_point is None:
+            return
+        if not force and now - self._last_log_sample_time < self._log_sample_period_sec:
+            return
+        self._last_log_sample_time = now
+
+        tilt_table = None
+        if self._head_track_tilt_mode == "table":
+            tilt_table = self._compute_table_tilt(distance)
+        elif self._head_track_tilt_mode == "distance":
+            tilt_table = self._compute_distance_tilt(distance)
+        elif self._head_track_tilt_mode == "geometry":
+            tilt_table = self._compute_geometry_tilt(ball_point)
+
+        message = (
+            f"sample dist={distance:.3f} bearing={bearing:.2f} "
+            f"ball=({ball_point[0]:.3f},{ball_point[1]:.3f}) "
+            f"tilt_mode={self._head_track_tilt_mode}"
+        )
+        if tilt_table is not None:
+            message += f" tilt_table={tilt_table:.3f}"
+        if self._head_pan_actual is not None and self._head_tilt_actual is not None:
+            message += (
+                f" head_pan={self._head_pan_actual:.2f} "
+                f"head_tilt={self._head_tilt_actual:.2f}"
+            )
+        self._log_throttled("sample", message, 0.0)
+
+        if not self._log_sample_csv_path:
+            return
+        self._ensure_sample_csv_ready()
+        if self._log_sample_writer is None:
+            return
+        self._log_sample_writer.writerow(
+            {
+                "time": f"{now:.3f}",
+                "distance": f"{distance:.4f}",
+                "bearing": f"{bearing:.4f}",
+                "ball_x": f"{ball_point[0]:.4f}",
+                "ball_y": f"{ball_point[1]:.4f}",
+                "tilt_mode": self._head_track_tilt_mode,
+                "tilt_table": f"{tilt_table:.4f}" if tilt_table is not None else "",
+                "head_pan": f"{self._head_pan_actual:.4f}"
+                if self._head_pan_actual is not None
+                else "",
+                "head_tilt": f"{self._head_tilt_actual:.4f}"
+                if self._head_tilt_actual is not None
+                else "",
+            }
+        )
+        self._log_sample_fp.flush()
+
+    def _ensure_sample_csv_ready(self) -> None:
+        if self._log_sample_writer is not None:
+            return
+        try:
+            csv_path = os.path.expanduser(self._log_sample_csv_path)
+            csv_dir = os.path.dirname(csv_path)
+            if csv_dir:
+                os.makedirs(csv_dir, exist_ok=True)
+            new_file = not os.path.exists(csv_path)
+            self._log_sample_fp = open(csv_path, "a", newline="")
+            self._log_sample_writer = csv.DictWriter(
+                self._log_sample_fp,
+                fieldnames=[
+                    "time",
+                    "distance",
+                    "bearing",
+                    "ball_x",
+                    "ball_y",
+                    "tilt_mode",
+                    "tilt_table",
+                    "head_pan",
+                    "head_tilt",
+                ],
+            )
+            if new_file:
+                self._log_sample_writer.writeheader()
+            self.get_logger().info(f"Logging tilt samples to {csv_path}")
+        except OSError as exc:
+            self.get_logger().warn(f"Failed to open sample CSV: {exc}")
+            self._log_sample_writer = None
+            if self._log_sample_fp:
+                self._log_sample_fp.close()
+                self._log_sample_fp = None
 
 
 def main() -> None:

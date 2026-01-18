@@ -1,7 +1,10 @@
 op3_ball_localizer:
   ros__parameters:
     ball_topic: /vision/yolo/balls
+    ball_center_topic: /vision/yolo/ball_center
     output_frame: base
+    joint_states_topic: /robotis_op3/joint_states
+    imu_topic: /robotis_op3/imu
     publish_rate: 10.0
     status_log_enabled: true
     status_log_period_sec: 1.0
@@ -17,6 +20,13 @@ op3_ball_localizer:
     # arrive_distance: 0.25
 
     lost_timeout: 0.8
+    fall_enable: true
+    fall_pitch_front_deg: 60.0
+    fall_pitch_back_deg: 60.0
+    fall_hold_sec: 0.3
+    fall_recover_pitch_deg: 25.0
+    fall_cooldown_sec: 2.0
+    fall_imu_timeout_sec: 0.5
     arrive_distance: 0.18
     arrive_hysteresis: 0.05
     pre_kick_distance: 0.14
@@ -44,19 +54,28 @@ op3_ball_localizer:
     head_tilt_max: 0.8
     head_track_enable: true
     head_track_pan_gain: 1.0
-    head_track_tilt_mode: geometry
+    head_track_tilt_mode: table
     head_track_tilt: -0.5
     pre_kick_tilt: -0.6
+    head_track_pixel_target_y: 0.5
+    head_track_pixel_gain: 1.2
+    head_track_pixel_deadzone: 0.03
+    head_track_pixel_timeout: 0.8
+    head_track_tilt_table_distances: [0.09,0.11, 0.15, 0.20, 0.30, 0.45]
+    head_track_tilt_table_tilts: [-1.15,-0.95, -0.88, -0.62, -0.54, -0.48]
     head_track_tilt_far: -0.5
     head_track_tilt_near: -0.65
     head_track_tilt_far_distance: 0.45
-    head_track_tilt_near_distance: 0.15
+    head_track_tilt_near_distance: 0.35
     head_track_tilt_max_step: 0.2
     camera_height: 0.50
     camera_forward_offset: 0.0
     head_track_tilt_offset: -0.10
     head_track_min_distance: 0.03
     head_track_deadzone: 0.05
+    head_track_pan_hold_deadzone: true
+    head_track_pan_smoothing: 0.25
+    head_track_tilt_smoothing: 0.2
     head_track_max_step: 0.4
     kick_enable: true
     kick_left_page: 120
@@ -67,11 +86,24 @@ op3_ball_localizer:
     kick_apply_mode_delay_sec: 0.2
     kick_timeout_sec: 5.0
     kick_cooldown_sec: 1.0
+    getup_enable: true
+    getup_front_page: 122
+    getup_back_page: 123
+    getup_apply_mode_delay_sec: 0.2
+    getup_timeout_sec: 6.0
+    getup_cooldown_sec: 2.0
     action_module_name: action_module
     auto_enable_head_module: true
     head_module_name: head_control_module
 
     auto_enable_walking_module: true
     walking_module_name: walking_module
+    walking_enable_retry_sec: 2.0
+    walking_start_retry_sec: 2.0
+    log_only_mode: false
+    log_sample_enable: false
+    log_sample_csv_path: log/ball_localizer_tilt_samples.csv
+    log_sample_period_sec: 0.2
+    log_sample_key_capture: false
 
     dry_run: false

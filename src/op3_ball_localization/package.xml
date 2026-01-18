@@ -12,6 +12,8 @@
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>sensor_msgs_py</depend>
+  <depend>geometry_msgs</depend>
+  <depend>rcl_interfaces</depend>
   <depend>op3_walking_module_msgs</depend>
   <depend>robotis_controller_msgs</depend>
 
