@@ -208,6 +208,13 @@ export default function App() {
   const [showAllJoints, setShowAllJoints] = useState(false);
   const [upright, setUpright] = useState(true);
   const [mirrorView, setMirrorView] = useState(false);
+  const [sendStepToWebots, setSendStepToWebots] = useState(() => {
+    const raw = localStorage.getItem("op3SendStepToWebots");
+    if (raw === null || raw === undefined) {
+      return false;
+    }
+    return raw === "1" || raw === "true";
+  });
   const [autoEnableAction, setAutoEnableAction] = useState(true);
   const [showYaml, setShowYaml] = useState(true);
   const [scratchPageIndex, setScratchPageIndex] = useState(250);
@@ -389,6 +396,10 @@ export default function App() {
   }, [posePresets]);
 
   useEffect(() => {
+    localStorage.setItem("op3SendStepToWebots", sendStepToWebots ? "1" : "0");
+  }, [sendStepToWebots]);
+
+  useEffect(() => {
     if (!yamlText.trim()) {
       setYamlData(null);
       setParseError("");
@@ -501,8 +512,8 @@ export default function App() {
     resultSubRef.current.subscribe((msg) => {
       try {
         const payload = JSON.parse(msg.data);
-        setStatus(payload.message || "Result received");
-        setStatusError(!payload.ok);
+        setStatus(formatResultMessage(payload));
+        setStatusError(payload.ok === false);
         if (payload.action === "export" && payload.yaml) {
           setYamlText(payload.yaml);
         }
@@ -737,6 +748,45 @@ export default function App() {
       }
       updater(step, page);
     });
+  };
+
+  const clipStatus = (value) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) {
+      return "";
+    }
+    if (text.length > 260) {
+      return `${text.slice(0, 260)}…`;
+    }
+    return text;
+  };
+
+  const extractLastLine = (value) => {
+    const lines = String(value || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      return "";
+    }
+    return lines[lines.length - 1];
+  };
+
+  const formatResultMessage = (payload) => {
+    const parts = [];
+    if (payload?.message) {
+      parts.push(clipStatus(payload.message));
+    }
+    if (payload && payload.ok === false) {
+      const lastErr = extractLastLine(payload.stderr);
+      const lastOut = extractLastLine(payload.stdout);
+      if (lastErr) {
+        parts.push(clipStatus(lastErr));
+      } else if (lastOut) {
+        parts.push(clipStatus(lastOut));
+      }
+    }
+    return parts.filter(Boolean).join(" | ") || "Result received";
   };
 
   const stepHistoryKey = () => {
@@ -1191,12 +1241,28 @@ export default function App() {
     clearJointDraft(name);
   };
 
+  const sendStepPoseToWebots = (step) => {
+    if (!step) {
+      return;
+    }
+    if (!jointPubRef.current) {
+      setStatus("ROS not connected");
+      setStatusError(true);
+      return;
+    }
+    const pose = buildPose(step.positions || {}, livePoseRef.current);
+    const data = JOINT_ORDER.map((name) => pose[name] ?? 0);
+    jointPubRef.current.publish(new ROSLIB.Message({ data }));
+    setStatus("Sent step pose to Webots");
+    setStatusError(false);
+  };
+
   const handleStepClick = (page, step, stepIndex) => {
     const pose = buildPose(step.positions || {}, livePoseRef.current);
     setSelectedPageIndex(page.index);
     setSelectedStepIndex(stepIndex);
     setPreviewPose(pose);
-    if (jointPubRef.current) {
+    if (sendStepToWebots && jointPubRef.current) {
       const data = JOINT_ORDER.map((name) => pose[name] ?? 0);
       jointPubRef.current.publish(new ROSLIB.Message({ data }));
     }
@@ -1528,6 +1594,17 @@ export default function App() {
                       <label className="toggle">
                         <input
                           type="checkbox"
+                          checked={sendStepToWebots}
+                          onChange={(event) =>
+                            setSendStepToWebots(event.target.checked)
+                          }
+                          disabled={editorDisabled}
+                        />
+                        <span>Auto send</span>
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
                           checked={showAllJoints}
                           onChange={(event) =>
                             setShowAllJoints(event.target.checked)
@@ -1582,6 +1659,14 @@ export default function App() {
                             disabled={editorDisabled}
                           />
                         </label>
+                        <button
+                          className="ghost"
+                          type="button"
+                          onClick={() => sendStepPoseToWebots(activeStep)}
+                          disabled={editorDisabled || !activeStep || rosState !== "connected"}
+                        >
+                          Send Step
+                        </button>
                         <button
                           className="ghost"
                           type="button"
@@ -1840,7 +1925,7 @@ export default function App() {
             <div className="viewer-canvas" ref={viewerRef} />
             <div className="panel-footer">
               <span className="hint">
-                Click a step to send joint positions to Webots.
+                Select a step to preview in 3D. Use Send Step or Auto send to move Webots.
               </span>
             </div>
           </section>

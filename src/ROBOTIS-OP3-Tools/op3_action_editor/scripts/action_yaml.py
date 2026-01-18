@@ -135,7 +135,7 @@ def encode_position(value):
             return int(key, 16)
     if isinstance(value, (int, float)):
         ivalue = int(value)
-        if 0 <= ivalue <= 4095:
+        if 0 <= ivalue <= 0xFFFF:
             return ivalue
     raise ValueError(f"Invalid position value: {value}")
 

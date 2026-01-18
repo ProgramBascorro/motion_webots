@@ -161,6 +161,10 @@ class ActionWebNode(Node):
 
             code, stdout, stderr = run_action_yaml(self.action_file, self.robot_file, args)
             ok = code == 0
+            if not ok:
+                err_text = stderr.strip() or stdout.strip()
+                if err_text:
+                    self.get_logger().error(f"action_yaml import failed: {err_text}")
             self.publish_result(
                 {
                     "ok": ok,
@@ -193,6 +197,10 @@ class ActionWebNode(Node):
             args = ["export", "--out", tmp_path, "--pages", pages]
             code, stdout, stderr = run_action_yaml(self.action_file, self.robot_file, args)
             ok = code == 0
+            if not ok:
+                err_text = stderr.strip() or stdout.strip()
+                if err_text:
+                    self.get_logger().error(f"action_yaml export failed: {err_text}")
             yaml_text = ""
             if ok and os.path.isfile(tmp_path):
                 with open(tmp_path, "r", encoding="utf-8") as handle:
