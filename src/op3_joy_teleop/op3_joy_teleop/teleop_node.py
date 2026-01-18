@@ -125,6 +125,37 @@ class Op3JoyTeleop(Node):
         self._kick_cooldown_sec = float(
             self.declare_parameter("kick_cooldown_sec", 1.0).value
         )
+        self._enable_getups = bool(self.declare_parameter("enable_getups", True).value)
+        self._getup_front_page = int(
+            self.declare_parameter("getup_front_page", 122).value
+        )
+        self._getup_back_page = int(
+            self.declare_parameter("getup_back_page", 123).value
+        )
+        self._getup_mode_button = int(
+            self.declare_parameter("getup_mode_button", 1).value
+        )
+        self._getup_front_button = int(
+            self.declare_parameter("getup_front_button", 8).value
+        )
+        self._getup_back_button = int(
+            self.declare_parameter("getup_back_button", 9).value
+        )
+        self._require_deadman_released_for_getup = bool(
+            self.declare_parameter("require_deadman_released_for_getup", True).value
+        )
+        self._auto_stop_before_getup = bool(
+            self.declare_parameter("auto_stop_before_getup", True).value
+        )
+        self._getup_apply_mode_delay_sec = float(
+            self.declare_parameter("getup_apply_mode_delay_sec", 0.2).value
+        )
+        self._getup_timeout_sec = float(
+            self.declare_parameter("getup_timeout_sec", 6.0).value
+        )
+        self._getup_cooldown_sec = float(
+            self.declare_parameter("getup_cooldown_sec", 2.0).value
+        )
         self._action_module_name = str(
             self.declare_parameter("action_module_name", "action_module").value
         )
@@ -255,6 +286,15 @@ class Op3JoyTeleop(Node):
         self._kick_page = 0
         self._kick_last_done = ""
         self._last_kick_time = 0.0
+        self._getup_mode_active = False
+        self._getup_stage = "idle"
+        self._getup_start_time = 0.0
+        self._getup_apply_time = 0.0
+        self._getup_page = 0
+        self._getup_last_done = ""
+        self._last_getup_time = 0.0
+        self._getup_front_pressed = False
+        self._getup_back_pressed = False
 
         self.create_subscription(Joy, "/joy", self._joy_callback, 10)
         self._joint_state_sub = self.create_subscription(
@@ -291,6 +331,9 @@ class Op3JoyTeleop(Node):
         head_center_pressed = self._get_button(msg, self._head_center_button)
         init_pose_pressed = self._get_button(msg, self._init_pose_button)
         kick_mode_pressed = self._get_button(msg, self._kick_mode_button)
+        getup_mode_pressed = self._get_button(msg, self._getup_mode_button)
+        getup_front_pressed = self._get_button(msg, self._getup_front_button)
+        getup_back_pressed = self._get_button(msg, self._getup_back_button)
         self._turbo_active = self._get_button(msg, self._turbo_button)
 
         if stop and not self._stop_pressed:
@@ -307,6 +350,8 @@ class Op3JoyTeleop(Node):
         self._update_init_pose_longpress(init_pose_pressed, now)
         self._update_kick_mode(kick_mode_pressed, now)
         self._handle_kick_trigger(now)
+        self._update_getup_mode(getup_mode_pressed)
+        self._handle_getup_trigger(now, getup_front_pressed, getup_back_pressed)
 
         self._deadman_active = deadman
         self._stop_pressed = stop
@@ -343,9 +388,10 @@ class Op3JoyTeleop(Node):
 
     def _publish_loop(self) -> None:
         self._handle_joy_timeout()
+        self._update_getup_state()
         self._update_kick_state()
         self._handle_init_pose_request()
-        if not self._is_kick_blocking():
+        if not self._is_kick_blocking() and not self._is_getup_blocking():
             self._publish_walking()
             self._publish_head()
         self._log_debug_state()
@@ -517,7 +563,7 @@ class Op3JoyTeleop(Node):
     def _handle_init_pose_request(self) -> None:
         if not self._init_pose_request:
             return
-        if self._is_kick_blocking():
+        if self._is_kick_blocking() or self._is_getup_blocking():
             return
         if self._require_deadman_released_for_init_pose and self._deadman_active:
             self._log_throttled(
@@ -800,6 +846,9 @@ class Op3JoyTeleop(Node):
         kick_elapsed = 0.0
         if self._kick_stage != "idle":
             kick_elapsed = max(0.0, now - self._kick_start_time)
+        getup_elapsed = 0.0
+        if self._getup_stage != "idle":
+            getup_elapsed = max(0.0, now - self._getup_start_time)
         self._log_throttled(
             "debug",
             (
@@ -812,7 +861,10 @@ class Op3JoyTeleop(Node):
                 f"head_module_auto={self._auto_enable_head_module} backend={self._head_backend} "
                 f"kick_mode={self._kick_mode_active} kick_remain={kick_remaining:.1f} "
                 f"kick_stage={self._kick_stage} kick_elapsed={kick_elapsed:.1f} "
-                f"kick_page={self._kick_page} last_done={self._kick_last_done}"
+                f"kick_page={self._kick_page} last_done={self._kick_last_done} "
+                f"getup_mode={self._getup_mode_active} getup_stage={self._getup_stage} "
+                f"getup_elapsed={getup_elapsed:.1f} getup_page={self._getup_page} "
+                f"getup_done={self._getup_last_done}"
             ),
             1.0,
         )
@@ -833,6 +885,55 @@ class Op3JoyTeleop(Node):
 
         if self._kick_mode_active and now >= self._kick_mode_until:
             self._kick_mode_active = False
+
+    def _update_getup_mode(self, pressed: bool) -> None:
+        if not self._enable_getups:
+            self._getup_mode_active = False
+            return
+        self._getup_mode_active = pressed
+
+    def _handle_getup_trigger(
+        self, now: float, front_pressed: bool, back_pressed: bool
+    ) -> None:
+        if not self._enable_getups:
+            self._getup_front_pressed = front_pressed
+            self._getup_back_pressed = back_pressed
+            return
+        if not self._getup_mode_active:
+            self._getup_front_pressed = front_pressed
+            self._getup_back_pressed = back_pressed
+            return
+        if self._getup_stage != "idle":
+            return
+        if self._is_kick_blocking():
+            return
+        if self._require_deadman_released_for_getup and self._deadman_active:
+            return
+        if now - self._last_getup_time < self._getup_cooldown_sec:
+            return
+
+        trigger_front = front_pressed and not self._getup_front_pressed
+        trigger_back = back_pressed and not self._getup_back_pressed
+        self._getup_front_pressed = front_pressed
+        self._getup_back_pressed = back_pressed
+        if trigger_front and trigger_back:
+            return
+        if not trigger_front and not trigger_back:
+            return
+
+        if self._auto_stop_before_getup:
+            self._publish_stop_zero()
+
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._action_module_name))
+        else:
+            self._log_throttled("getup_mode", "dry_run action module enable", 1.0)
+
+        self._getup_stage = "switching"
+        self._getup_start_time = now
+        self._getup_apply_time = now + self._getup_apply_mode_delay_sec
+        self._getup_page = self._getup_front_page if trigger_front else self._getup_back_page
+        self._getup_mode_active = False
 
     def _handle_kick_trigger(self, now: float) -> None:
         if not self._enable_kicks:
@@ -884,12 +985,35 @@ class Op3JoyTeleop(Node):
                 self._kick_last_done = "timeout"
                 self._finish_kick()
 
+    def _update_getup_state(self) -> None:
+        if not self._enable_getups:
+            return
+        now = time.monotonic()
+        if self._getup_stage == "idle":
+            return
+        if self._getup_stage == "switching" and now >= self._getup_apply_time:
+            if not self._dry_run:
+                self._action_page_pub.publish(Int32(data=self._getup_page))
+            else:
+                self._log_throttled("getup_page", f"dry_run page_num {self._getup_page}", 1.0)
+            self._getup_stage = "waiting"
+
+        if self._getup_stage == "waiting":
+            if now - self._getup_start_time >= self._getup_timeout_sec:
+                self._getup_last_done = "timeout"
+                self._finish_getup()
+
     def _movement_done_callback(self, msg: String) -> None:
+        if msg.data not in {"action", "action_failed"}:
+            return
+        if self._getup_stage != "idle":
+            self._getup_last_done = msg.data
+            self._finish_getup()
+            return
         if self._kick_stage == "idle":
             return
-        if msg.data in {"action", "action_failed"}:
-            self._kick_last_done = msg.data
-            self._finish_kick()
+        self._kick_last_done = msg.data
+        self._finish_kick()
 
     def _finish_kick(self) -> None:
         if not self._dry_run:
@@ -899,6 +1023,15 @@ class Op3JoyTeleop(Node):
         self._publish_head_module_assignment()
         self._kick_stage = "idle"
         self._last_kick_time = time.monotonic()
+
+    def _finish_getup(self) -> None:
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._walking_module_name))
+        else:
+            self._log_throttled("getup_restore", "dry_run walking module restore", 1.0)
+        self._publish_head_module_assignment()
+        self._getup_stage = "idle"
+        self._last_getup_time = time.monotonic()
 
     def _get_kick_side(self) -> str:
         left_button = (
@@ -933,7 +1066,12 @@ class Op3JoyTeleop(Node):
     def _is_kick_blocking(self) -> bool:
         return self._kick_mode_active or self._kick_stage != "idle"
 
+    def _is_getup_blocking(self) -> bool:
+        return self._getup_stage != "idle"
+
     def _get_turning_yaw(self) -> Tuple[float, str]:
+        if self._getup_mode_active:
+            return 0.0, "none"
         if not self._deadman_active:
             return 0.0, "none"
 

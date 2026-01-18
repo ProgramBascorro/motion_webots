@@ -53,6 +53,17 @@ op3_joy_teleop:
     kick_apply_mode_delay_sec: 0.2
     kick_timeout_sec: 5.0
     kick_cooldown_sec: 1.0
+    enable_getups: true
+    getup_front_page: 122
+    getup_back_page: 123
+    getup_mode_button: 1
+    getup_front_button: 8
+    getup_back_button: 9
+    require_deadman_released_for_getup: true
+    auto_stop_before_getup: true
+    getup_apply_mode_delay_sec: 0.2
+    getup_timeout_sec: 6.0
+    getup_cooldown_sec: 2.0
     action_module_name: action_module
     walking_module_name: walking_module
 
