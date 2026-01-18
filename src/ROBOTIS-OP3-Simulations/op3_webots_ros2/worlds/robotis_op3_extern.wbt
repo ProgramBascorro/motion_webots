@@ -1,33 +1,65 @@
 #VRML_SIM R2023b utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackground.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/samples/contests/robocup/protos/RobocupSoccerField.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RoboCupBackground.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupSoccerField.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupTexturedSoccerBall.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupMainLight.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupOffLight.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupTopLight.proto"
 EXTERNPROTO "../protos/RobotisOp3.proto"
 
 WorldInfo {
   info [
-    "ROBOTIS OP3 robot."
-    "The ROBOTIS OP3 robot simulation model can be programmed using the ROBOTIS OP3 motions files."
+    "Description: official soccer simulation for the 2021 Robocup Virtual Humanoid League (kid size)"
+    "Version 0.3"
   ]
-  title "ROBOTIS OP3"
+  title "Robocup V-HL Kid"
   basicTimeStep 8
+  optimalThreadCount 8
+  physicsDisableTime 0.1
+  physicsDisableLinearThreshold 0.1
+  physicsDisableAngularThreshold 0.1
+  contactProperties [
+    ContactProperties {
+      material1 "grass"
+      coulombFriction [
+        0.5
+      ]
+      softCFM 0.03
+    }
+    ContactProperties {
+      material1 "grass"
+      material2 "robocup soccer ball"
+      coulombFriction [
+        0.5
+      ]
+      bounce 0.76
+      softCFM 0.05
+    }
+    ContactProperties {
+      material2 "robocup soccer ball"
+      bounce 0.76
+    }
+  ]
 }
 Viewpoint {
-  orientation -0.21330010458045784 0.2113459390792094 0.953853216915838 1.6272156543704595
-  position 0.562239037741489 -2.447558055557704 1.3939835768954514
-  follow "ROBOTIS OP3"
+  orientation -0.2805883411350746 -0.29578901747392383 0.9131150201156905 4.674266698949372
+  position 1.698849186322028 5.70392276065282 4.198898306747539
 }
-TexturedBackground {
-  skybox FALSE
-  skyColor [
-    0.5 0.5 0.5
-  ]
+RoboCupBackground {
 }
-TexturedBackgroundLight {
+RoboCupMainLight {
 }
-RobocupSoccerField {
+RoboCupOffLight {
+}
+RoboCupTopLight {
+}
+DEF FIELD RobocupSoccerField {
   size "kid"
+}
+DEF BALL RobocupTexturedSoccerBall {
+  translation 1.38 -1.26058e-07 0.0785294
+  rotation 0.9999999999999999 0 0 1.8715596617048374e-06
 }
 RobotisOp3 {
   translation 0 0 0.282665
