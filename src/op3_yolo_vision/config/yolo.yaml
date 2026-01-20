@@ -13,7 +13,7 @@ yolo_detector:
     dnn_target: cuda
     input_size: 640
     ball_confidence_threshold: 0.2
-    goalpost_confidence_threshold: 0.3
+    goalpost_confidence_threshold: 0.2
     robot_confidence_threshold: 0.2
     intersection_confidence_threshold: 0.4
     nms_threshold: 0.5
