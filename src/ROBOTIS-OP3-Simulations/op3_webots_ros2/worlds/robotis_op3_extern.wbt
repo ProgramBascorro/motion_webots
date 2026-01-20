@@ -1,12 +1,13 @@
-#VRML_SIM R2023b utf8
+#VRML_SIM R2025a utf8
 
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/RoboCupBackground.proto"
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupSoccerField.proto"
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupTexturedSoccerBall.proto"
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupMainLight.proto"
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupOffLight.proto"
-IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupTopLight.proto"
-EXTERNPROTO "../protos/RobotisOp3.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/RoboCupBackground.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/RobocupSoccerField.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/RobocupTexturedSoccerBall.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/lighting/RoboCupMainLight.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/lighting/RoboCupOffLight.proto"
+IMPORTABLE EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/robocup_field/lighting/RoboCupTopLight.proto"
+EXTERNPROTO "/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba/install/op3_webots_ros2/share/op3_webots_ros2/protos/RobotisOp3.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/balls/protos/RobocupSoccerBall.proto"
 
 WorldInfo {
   info [
@@ -43,8 +44,8 @@ WorldInfo {
   ]
 }
 Viewpoint {
-  orientation -0.2805883411350746 -0.29578901747392383 0.9131150201156905 4.674266698949372
-  position 1.698849186322028 5.70392276065282 4.198898306747539
+  orientation -0.14875635836227605 -0.23778049085624622 0.9598603981907767 5.127962611782665
+  position -1.973880443078877 5.8144828455107085 1.888405079136943
 }
 RoboCupBackground {
 }
@@ -57,10 +58,6 @@ RoboCupTopLight {
 DEF FIELD RobocupSoccerField {
   size "kid"
 }
-DEF BALL RobocupTexturedSoccerBall {
-  translation 1.38 -1.26058e-07 0.0785294
-  rotation 0.9999999999999999 0 0 1.8715596617048374e-06
-}
 RobotisOp3 {
   translation 0 0 0.282665
   controller "<extern>"
@@ -71,4 +68,7 @@ RobotisOp3 {
     InertialUnit {
     }
   ]
+}
+RobocupSoccerBall {
+  translation 0.8 0 0.07
 }
