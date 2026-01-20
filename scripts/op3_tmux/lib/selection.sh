@@ -1,5 +1,5 @@
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization ball_localizer action_editor action_web)
-COMPONENTS=(webots manager teleop foxglove tools rqt_image_view yolo_vision localization ball_localizer action_editor action_web)
+COMPONENTS=(webots manager teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
 
 usual_file_path() {
