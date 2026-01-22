@@ -1,0 +1,310 @@
+---
+title: Simulation
+description: Webots dan Gazebo untuk testing dan development
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Simulation
+
+Simulasi memungkinkan testing dan development tanpa robot fisik. BASCORRO menggunakan **Webots** sebagai simulator utama dan **Gazebo** sebagai alternatif.
+
+---
+
+## Why Simulation?
+
+| Keuntungan | Penjelasan |
+|------------|------------|
+| Safe Testing | Tidak ada risiko kerusakan hardware |
+| Fast Iteration | Bisa reset environment dalam hitungan detik |
+| Parallel Testing | Jalankan multiple instances |
+| Controlled Conditions | Lighting, physics, dll bisa dikontrol |
+| Cost Effective | Tidak perlu hardware untuk setiap developer |
+
+---
+
+## Webots (Primary)
+
+### Overview
+
+Webots adalah simulator robot open-source dengan physics engine yang akurat.
+
+```
+┌─────────────────────────────────────────────┐
+│                  Webots                     │
+├─────────────────────────────────────────────┤
+│  ┌─────────┐  ┌─────────┐  ┌─────────────┐ │
+│  │ Physics │  │ Sensors │  │ Rendering   │ │
+│  │ Engine  │  │  Sim    │  │   (OpenGL)  │ │
+│  └────┬────┘  └────┬────┘  └──────┬──────┘ │
+│       │            │              │        │
+│       └────────────┴──────────────┘        │
+│                    │                       │
+│              ROS 2 Bridge                  │
+│                    │                       │
+└────────────────────┼───────────────────────┘
+                     │
+              ROS 2 Topics/Services
+```
+
+### Installation
+
+```bash
+# Ubuntu 22.04
+sudo apt install webots
+
+# Atau download dari:
+# https://cyberbotics.com/download
+```
+
+### Package: op3_webots_ros2
+
+```
+ros_ws/src/ROBOTIS-OP3-Simulations/op3_webots_ros2/
+├── launch/
+│   └── robot_launch.py      # Main launch file
+├── worlds/
+│   └── op3_env.wbt         # Soccer field world
+├── protos/
+│   └── OP3.proto           # Robot model
+└── controllers/
+    └── op3_controller/     # Webots controller
+```
+
+### Launch Simulation
+
+```bash
+# Source workspace
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+# Launch Webots with OP3
+ros2 launch op3_webots_ros2 robot_launch.py world:=worlds/op3_env.wbt
+```
+
+---
+
+## World File (op3_env.wbt)
+
+### Soccer Field Setup
+
+```
+┌────────────────────────────────────────────────┐
+│                   World                        │
+│  ┌──────────────────────────────────────────┐  │
+│  │            Soccer Field                  │  │
+│  │  ┌────┐                        ┌────┐    │  │
+│  │  │Goal│      ┌──────────┐      │Goal│    │  │
+│  │  │ A  │      │  Center  │      │ B  │    │  │
+│  │  └────┘      │  Circle  │      └────┘    │  │
+│  │              └──────────┘                │  │
+│  │         Field Lines (white)              │  │
+│  │                                          │  │
+│  │             🤖 OP3 Robot                 │  │
+│  │             ⚽ Ball                       │  │
+│  └──────────────────────────────────────────┘  │
+│                                                │
+│  Lighting: Directional Sun                     │
+│  Ground: Artificial Turf (30mm)               │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+### KidSize Field Dimensions
+
+| Element | Size |
+|---------|------|
+| Field | 9m x 6m |
+| Goal | 2.6m x 1m |
+| Penalty Area | 3m x 1m |
+| Center Circle | 1.5m diameter |
+| Ball | FIFA Size 1 (orange) |
+
+---
+
+## Webots + ROS 2 Integration
+
+### Published Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/camera/image_raw` | sensor_msgs/Image | Camera feed |
+| `/imu/data` | sensor_msgs/Imu | IMU sensor |
+| `/joint_states` | sensor_msgs/JointState | Joint positions |
+
+### Subscribed Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/cmd_vel` | geometry_msgs/Twist | Velocity command |
+| `/joint_commands` | trajectory_msgs/JointTrajectory | Joint control |
+
+### Services
+
+```bash
+# Reset simulation
+ros2 service call /supervisor/reset_simulation std_srvs/srv/Empty
+```
+
+---
+
+## Gazebo (Alternative)
+
+### Package: op3_gazebo_ros2
+
+```bash
+# Launch Gazebo simulation
+ros2 launch op3_gazebo_ros2 op3_gazebo.launch.py
+```
+
+<Callout type="info">
+Webots adalah simulator utama untuk BASCORRO karena lebih ringan dan memiliki support yang baik untuk humanoid robots.
+</Callout>
+
+---
+
+## Development Workflow
+
+```
+┌─────────────────────────────────────────────────┐
+│           Development Workflow                  │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  1. Write Code                                  │
+│       │                                         │
+│       ▼                                         │
+│  2. Test in Simulation (Webots)                │
+│       │                                         │
+│   ┌───┴───┐                                    │
+│   │ Pass? │                                    │
+│   └───┬───┘                                    │
+│       │                                         │
+│   No ─┤─ Yes                                   │
+│       │    │                                   │
+│       ▼    ▼                                   │
+│   Fix Bug  3. Test on Real Robot               │
+│       │         │                              │
+│       └─────────┘                              │
+│                                                │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## Running Vision in Simulation
+
+```bash
+# Terminal 1: Launch Webots
+ros2 launch op3_webots_ros2 robot_launch.py
+
+# Terminal 2: Launch Vision
+ros2 launch soccer_vision soccer_vision.launch.py publish_debug_image:=true
+
+# Terminal 3: View camera
+ros2 run rqt_image_view rqt_image_view
+```
+
+---
+
+## Tips & Tricks
+
+### Speed Up Simulation
+
+```python
+# In world file, set:
+WorldInfo {
+  basicTimeStep 8  # Lower = faster, less accurate
+}
+```
+
+### Headless Mode
+
+```bash
+# Run without GUI (for CI/CD)
+webots --no-rendering --mode=fast world.wbt
+```
+
+### Record Video
+
+```bash
+# From Webots menu:
+# Tools → Export Movie
+```
+
+### Multiple Robots
+
+```python
+# In world file, add multiple OP3 protos
+OP3 {
+  name "robot1"
+  translation 0 0 0
+}
+OP3 {
+  name "robot2"
+  translation 1 0 0
+}
+```
+
+---
+
+## Common Issues
+
+### Webots Tidak Mau Buka
+
+```bash
+# Check OpenGL
+glxinfo | grep "OpenGL version"
+
+# Install dependencies
+sudo apt install libgl1-mesa-glx
+```
+
+### ROS 2 Topics Tidak Muncul
+
+```bash
+# Check if bridge is running
+ros2 node list | grep webots
+
+# Restart simulation
+ros2 service call /supervisor/reset_simulation std_srvs/srv/Empty
+```
+
+### Physics Tidak Akurat
+
+1. Reduce basicTimeStep
+2. Check collision shapes
+3. Verify mass/inertia values
+
+---
+
+## Custom World Creation
+
+### 1. Open Webots
+
+```bash
+webots
+```
+
+### 2. Create New World
+
+File → New Project Directory
+
+### 3. Add Elements
+
+- Add Arena (Rectangle Arena node)
+- Add OP3 Robot (import PROTO)
+- Add Ball (Sphere with physics)
+- Configure lighting
+
+### 4. Save World
+
+Save as `.wbt` file in `op3_webots_ros2/worlds/`
+
+---
+
+## Resources
+
+- [Webots User Guide](https://cyberbotics.com/doc/guide/index)
+- [Webots ROS 2 Interface](https://github.com/cyberbotics/webots_ros2)
+- [Gazebo Documentation](https://gazebosim.org/docs)
+- [RoboCup Simulation League](https://robocup.org/leagues/37)

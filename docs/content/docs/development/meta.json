@@ -1,0 +1,5 @@
+{
+  "title": "Development",
+  "icon": "Wrench",
+  "pages": ["index", "coding-standards", "contributing", "debugging", "design-system"]
+}

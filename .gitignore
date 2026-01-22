@@ -6,6 +6,7 @@
 build/
 install/
 log/
+ros2_logs/
 
 # =========================================
 # Standard build and temporary files
@@ -38,10 +39,6 @@ log/
 # Compiled Python files
 __pycache__/
 *.pyc
-
-# Frontend build artifacts
-src/op3_action_web/web/node_modules/
-src/op3_action_web/web/dist/
 
 # SCons build files
 .sconf_temp/
@@ -88,8 +85,9 @@ Thumbs.db
 *.orig
 *.rej
 
+# WEBDEV
 
-# WEB DEVELOPMENT
+
 # =========================
 # Dependencies
 # =========================

@@ -1,0 +1,178 @@
+---
+title: Software Stack
+description: Arsitektur software dan modul-modul BASCORRO
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Software Stack
+
+Dokumentasi lengkap software stack yang digunakan dalam project BASCORRO. Sistem ini dibangun di atas ROS 2 Humble dengan berbagai modul untuk vision, locomotion, localization, dan strategy.
+
+---
+
+## Overview
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    BASCORRO Software                     │
+├──────────────────────────────────────────────────────────┤
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │  Vision  │  │Locomotion│  │Localizatn│  │ Strategy │ │
+│  │  System  │  │  Module  │  │  Stack   │  │    AI    │ │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘ │
+│       │             │             │             │        │
+│       └─────────────┴─────────────┴─────────────┘        │
+│                          │                               │
+│                    ┌─────┴─────┐                        │
+│                    │ ROS 2     │                        │
+│                    │ Humble    │                        │
+│                    └───────────┘                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Modules
+
+<Cards>
+  <Card
+    title="Vision System"
+    description="Ball detection, field recognition, camera processing"
+    href="/docs/software/vision"
+  />
+  <Card
+    title="Locomotion"
+    description="Walking control, gait generation, balance"
+    href="/docs/software/locomotion"
+  />
+  <Card
+    title="Localization"
+    description="Position estimation, odometry, mapping"
+    href="/docs/software/localization"
+  />
+  <Card
+    title="Strategy"
+    description="Game strategy, behavior trees, decision making"
+    href="/docs/software/strategy"
+  />
+  <Card
+    title="Simulation"
+    description="Webots, Gazebo, testing environment"
+    href="/docs/software/simulation"
+  />
+</Cards>
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| Framework | ROS 2 Humble Hawksbill |
+| Languages | C++ (ament_cmake), Python 3 (ament_python) |
+| Vision | OpenCV, YOLO (optional) |
+| Motion | Dynamixel SDK, robotis_framework |
+| Simulation | Webots, Gazebo |
+| Math | Eigen3, robotis_math |
+| Navigation | SBPL, PCL, OctoMap |
+
+---
+
+## Package Categories
+
+### Core Packages (52 total)
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Motion Control | 10+ | op3_walking_module, op3_balance_control |
+| Vision | 2 | soccer_vision, face_detection |
+| Localization | 5+ | op3_localization, humanoid_localization |
+| Hardware | 3 | dynamixel_sdk, robotis_controller |
+| Simulation | 2 | op3_webots_ros2, op3_gazebo_ros2 |
+| Messages | 10+ | op3_*_msgs packages |
+
+---
+
+## Data Flow
+
+```
+Sensors (Camera, IMU)
+        │
+        ▼
+┌───────────────┐
+│ Perception    │ ← Vision, Sensor Processing
+│ (What do I see?)
+└───────┬───────┘
+        │
+        ▼
+┌───────────────┐
+│ Localization  │ ← Where am I?
+│ (Position)    │
+└───────┬───────┘
+        │
+        ▼
+┌───────────────┐
+│ Strategy      │ ← What should I do?
+│ (Decision)    │
+└───────┬───────┘
+        │
+        ▼
+┌───────────────┐
+│ Motion        │ ← How do I move?
+│ (Execution)   │
+└───────┬───────┘
+        │
+        ▼
+    Actuators (Servos)
+```
+
+---
+
+## Getting Started with Development
+
+### 1. Clone & Build
+
+```bash
+git clone https://github.com/ProgramBascorro/motion_webots.git
+cd motion_webots/ros_ws
+source /opt/ros/humble/setup.bash
+colcon build --continue-on-error
+source install/setup.bash
+```
+
+### 2. Launch Simulation
+
+```bash
+ros2 launch op3_webots_ros2 robot_launch.py world:=worlds/op3_env.wbt
+```
+
+### 3. Launch Vision
+
+```bash
+ros2 launch soccer_vision soccer_vision.launch.py publish_debug_image:=true
+```
+
+---
+
+## Key Configuration Files
+
+| File | Location | Purpose |
+|------|----------|---------|
+| soccer_vision.launch.py | `soccer_vision/launch/` | Vision parameters |
+| robot_launch.py | `op3_webots_ros2/launch/` | Simulation setup |
+| walking_module.yaml | `op3_walking_module/config/` | Walking parameters |
+
+<Callout type="info">
+Dokumentasi parameter launch file ada di masing-masing package README atau di comment dalam file launch.
+</Callout>
+
+---
+
+## Development Guidelines
+
+- Follow [Coding Standards](/docs/development/coding-standards)
+- Test with simulation before deploying to real robot
+- Use `colcon test` untuk menjalankan unit tests
+- Document all new parameters in launch files

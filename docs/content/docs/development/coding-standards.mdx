@@ -1,0 +1,349 @@
+---
+title: Coding Standards
+description: Standar penulisan kode C++, Python, dan ROS 2
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Coding Standards
+
+Dokumen ini menjelaskan standar penulisan kode yang digunakan dalam project BASCORRO.
+
+---
+
+## General Principles
+
+1. **Readability** - Kode harus mudah dibaca dan dipahami
+2. **Consistency** - Ikuti style yang sudah ada
+3. **Documentation** - Comment kode yang kompleks
+4. **Testing** - Tulis test untuk kode baru
+
+---
+
+## C++ Style Guide
+
+### Formatting
+
+| Rule | Standard |
+|------|----------|
+| Indentation | 2 spaces (no tabs) |
+| Line length | Max 100 characters |
+| Braces | Same line (K&R style) |
+| Naming | UpperCamelCase for classes |
+
+### Naming Conventions
+
+```cpp
+// Classes: UpperCamelCase
+class BallDetector {
+
+// Functions: lowerCamelCase
+void processImage();
+
+// Variables: snake_case
+int ball_count;
+
+// Constants: UPPER_SNAKE_CASE
+const int MAX_SPEED = 100;
+
+// Member variables: trailing underscore
+private:
+  int member_var_;
+};
+```
+
+### Example
+
+```cpp
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/image.hpp>
+
+class BallDetectorNode : public rclcpp::Node {
+public:
+  BallDetectorNode() : Node("ball_detector") {
+    subscription_ = this->create_subscription<sensor_msgs::msg::Image>(
+      "/camera/image_raw", 10,
+      std::bind(&BallDetectorNode::imageCallback, this, std::placeholders::_1));
+  }
+
+private:
+  void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg) {
+    // Process image
+    RCLCPP_INFO(this->get_logger(), "Received image");
+  }
+
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr subscription_;
+};
+```
+
+### Linting
+
+```bash
+# Run ament linters
+colcon test --packages-select <package> --ctest-args -R lint
+
+# Use clang-format
+clang-format -i src/*.cpp
+```
+
+---
+
+## Python Style Guide
+
+### Formatting
+
+| Rule | Standard |
+|------|----------|
+| Indentation | 4 spaces |
+| Line length | Max 100 characters |
+| Quotes | Single quotes for strings |
+| Docstrings | Google style |
+
+### Naming Conventions
+
+```python
+# Classes: UpperCamelCase
+class BallDetector:
+    pass
+
+# Functions: snake_case
+def process_image():
+    pass
+
+# Variables: snake_case
+ball_count = 0
+
+# Constants: UPPER_SNAKE_CASE
+MAX_SPEED = 100
+
+# Private: leading underscore
+def _private_method():
+    pass
+```
+
+### Example
+
+```python
+#!/usr/bin/env python3
+"""Ball detector node for soccer vision."""
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+
+
+class BallDetectorNode(Node):
+    """ROS 2 node for detecting soccer ball."""
+
+    def __init__(self):
+        super().__init__('ball_detector')
+
+        self.subscription = self.create_subscription(
+            Image,
+            '/camera/image_raw',
+            self.image_callback,
+            10
+        )
+
+        self.get_logger().info('Ball detector initialized')
+
+    def image_callback(self, msg: Image) -> None:
+        """
+        Process incoming camera image.
+
+        Args:
+            msg: ROS Image message
+        """
+        self.get_logger().info('Received image')
+
+
+def main(args=None):
+    """Main entry point."""
+    rclpy.init(args=args)
+    node = BallDetectorNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+```
+
+### Type Hints
+
+```python
+from typing import List, Optional, Tuple
+
+def detect_ball(image: np.ndarray) -> Optional[Tuple[int, int, int]]:
+    """
+    Detect ball in image.
+
+    Args:
+        image: OpenCV image (BGR)
+
+    Returns:
+        Tuple of (x, y, radius) or None if not found
+    """
+    pass
+```
+
+### Linting
+
+```bash
+# Run flake8
+flake8 src/
+
+# Run black (formatter)
+black src/
+
+# Run mypy (type checker)
+mypy src/
+```
+
+---
+
+## ROS 2 Conventions
+
+### Package Naming
+
+```
+package_name        # snake_case
+├── package_name    # Python module (same as package)
+│   ├── __init__.py
+│   └── node_name.py
+├── src             # C++ source
+│   └── node_name.cpp
+├── include         # C++ headers
+├── launch          # Launch files
+├── config          # YAML configs
+├── test            # Tests
+├── CMakeLists.txt
+├── package.xml
+└── setup.py        # (Python packages)
+```
+
+### Node Naming
+
+```python
+# Node name: snake_case
+node = Node('ball_detector')  # Good
+node = Node('BallDetector')   # Bad
+
+# Namespace: with forward slash
+# /vision/ball_detector
+```
+
+### Topic Naming
+
+```python
+# Topics: snake_case with forward slash
+'/camera/image_raw'     # Good
+'/ball_position'        # Good
+'/BallPosition'         # Bad
+'/ball-position'        # Bad
+```
+
+### Parameter Naming
+
+```python
+# Parameters: snake_case
+self.declare_parameter('max_speed', 100)
+self.declare_parameter('camera_height', 0.45)
+```
+
+---
+
+## Documentation
+
+### Python Docstrings (Google Style)
+
+```python
+def calculate_distance(point_a: Tuple[float, float],
+                       point_b: Tuple[float, float]) -> float:
+    """
+    Calculate Euclidean distance between two points.
+
+    Args:
+        point_a: First point (x, y)
+        point_b: Second point (x, y)
+
+    Returns:
+        Distance between points in meters
+
+    Raises:
+        ValueError: If points have invalid dimensions
+    """
+    pass
+```
+
+### C++ Doxygen
+
+```cpp
+/**
+ * @brief Calculate distance between two points
+ *
+ * @param point_a First point (x, y)
+ * @param point_b Second point (x, y)
+ * @return Distance in meters
+ */
+double calculateDistance(Point point_a, Point point_b);
+```
+
+---
+
+## Commit Messages
+
+```
+<type>: <short description>
+
+[optional body]
+
+[optional footer]
+```
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| feat | New feature |
+| fix | Bug fix |
+| docs | Documentation |
+| style | Formatting (no code change) |
+| refactor | Code restructuring |
+| test | Adding tests |
+| chore | Maintenance |
+
+### Examples
+
+```bash
+# Good
+feat: add ball detection using YOLO
+fix: correct walking speed parameter
+docs: update installation guide
+
+# Bad
+update
+fixed bug
+stuff
+```
+
+---
+
+## Code Review Checklist
+
+- [ ] Code compiles without warnings
+- [ ] Tests pass
+- [ ] Follows coding standards
+- [ ] Documentation updated
+- [ ] No debug print statements
+- [ ] No hardcoded values
+- [ ] Error handling present
+
+---
+
+## Resources
+
+- [ROS 2 Style Guide](https://docs.ros.org/en/humble/Contributing/Code-Style-Language-Versions.html)
+- [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html)
+- [PEP 8](https://peps.python.org/pep-0008/)

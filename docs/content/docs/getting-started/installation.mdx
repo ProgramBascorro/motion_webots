@@ -1,0 +1,197 @@
+---
+title: Installation
+description: Panduan instalasi ROS 2 Humble dan workspace BASCORRO
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+# Installation
+
+Panduan lengkap untuk menginstall semua dependensi yang dibutuhkan untuk development BASCORRO.
+
+---
+
+## System Requirements
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| OS | Ubuntu 22.04 LTS | Ubuntu 22.04 LTS |
+| RAM | 8 GB | 16 GB |
+| Storage | 20 GB | 50 GB |
+| GPU | OpenGL 3.3 | NVIDIA dengan CUDA |
+| CPU | 4 cores | 8 cores |
+
+---
+
+## Step 1: Install ROS 2 Humble
+
+<Callout type="info">
+ROS 2 Humble Hawksbill adalah versi LTS (Long Term Support) yang didukung hingga 2027.
+</Callout>
+
+<Steps>
+<Step>
+### Setup Locale
+
+```bash
+locale  # check for UTF-8
+
+sudo apt update && sudo apt install locales
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+```
+</Step>
+
+<Step>
+### Setup Sources
+
+```bash
+# Enable Ubuntu Universe repository
+sudo apt install software-properties-common
+sudo add-apt-repository universe
+
+# Add ROS 2 GPG key
+sudo apt update && sudo apt install curl -y
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+# Add repository to sources list
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+```
+</Step>
+
+<Step>
+### Install ROS 2 Packages
+
+```bash
+sudo apt update
+sudo apt upgrade
+
+# Desktop install (recommended) - includes RViz, demos, tutorials
+sudo apt install ros-humble-desktop
+
+# Development tools
+sudo apt install ros-dev-tools
+```
+</Step>
+
+<Step>
+### Setup Environment
+
+Tambahkan ke `~/.bashrc`:
+
+```bash
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+Verifikasi instalasi:
+
+```bash
+ros2 --version
+# Output: ros2 0.x.x
+```
+</Step>
+</Steps>
+
+---
+
+## Step 2: Install Webots
+
+Webots adalah simulator robot yang digunakan untuk testing tanpa hardware fisik.
+
+```bash
+# Install Webots dari apt
+sudo apt install webots
+
+# Atau download dari website resmi:
+# https://cyberbotics.com/download
+```
+
+<Callout type="info">
+Webots versi 2023a atau lebih baru direkomendasikan untuk kompatibilitas dengan ROS 2.
+</Callout>
+
+---
+
+## Step 3: Install Tambahan
+
+### Python Dependencies
+
+```bash
+pip3 install opencv-python numpy transforms3d
+```
+
+### Colcon (Build Tool)
+
+```bash
+sudo apt install python3-colcon-common-extensions
+```
+
+### Dynamixel SDK
+
+```bash
+sudo apt install ros-humble-dynamixel-sdk
+```
+
+---
+
+## Step 4: Clone Repository
+
+```bash
+# Clone repository BASCORRO
+git clone https://github.com/ProgramBascorro/motion_webots.git
+cd motion_webots
+
+# Pastikan berada di branch yang benar
+git checkout main  # atau branch development
+```
+
+---
+
+## Step 5: Build Workspace
+
+```bash
+# Masuk ke ROS workspace
+cd ros_ws
+
+# Source ROS 2
+source /opt/ros/humble/setup.bash
+
+# Build semua packages
+colcon build --continue-on-error
+
+# Source workspace yang sudah di-build
+source install/setup.bash
+```
+
+<Callout type="warn">
+**Troubleshooting Build Errors**
+
+Jika ada error saat build:
+1. Pastikan semua dependensi terinstall
+2. Jalankan `rosdep install --from-paths src --ignore-src -r -y`
+3. Coba build package satu per satu untuk identifikasi error
+</Callout>
+
+---
+
+## Verifikasi Instalasi
+
+```bash
+# Check ROS 2 packages
+ros2 pkg list | grep op3
+
+# Harusnya muncul:
+# op3_action_editor
+# op3_action_module
+# op3_balance_control
+# ... dan lainnya
+```
+
+---
+
+## Next Steps
+
+Setelah instalasi selesai, lanjut ke [First Run](/docs/getting-started/first-run) untuk menjalankan simulasi pertama kamu.

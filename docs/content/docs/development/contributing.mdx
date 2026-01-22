@@ -1,0 +1,337 @@
+---
+title: Contributing
+description: Panduan kontribusi dan Git workflow
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Contributing
+
+Panduan untuk berkontribusi ke project BASCORRO.
+
+---
+
+## Getting Started
+
+### 1. Fork & Clone
+
+```bash
+# Fork repository di GitHub, lalu clone fork kamu
+git clone https://github.com/YOUR_USERNAME/motion_webots.git
+cd motion_webots
+
+# Add upstream remote
+git remote add upstream https://github.com/ProgramBascorro/motion_webots.git
+```
+
+### 2. Setup Development Environment
+
+```bash
+# Install dependencies
+source /opt/ros/humble/setup.bash
+cd ros_ws
+rosdep install --from-paths src --ignore-src -r -y
+
+# Build
+colcon build --continue-on-error
+source install/setup.bash
+```
+
+---
+
+## Git Workflow
+
+### Branch Strategy
+
+```
+main ──────────────────────────────────────────→
+    │                    │               │
+    │ feature/vision     │               │
+    └──────┬────────────────────────────→ merge
+           │
+           │ feature/walking
+           └────────────────────→ merge
+```
+
+### Branch Naming
+
+```bash
+# Feature
+feature/add-yolo-detection
+feature/improve-walking-speed
+
+# Bug fix
+fix/ball-detection-crash
+fix/walking-drift
+
+# Documentation
+docs/update-installation-guide
+
+# Experiment (not for merge)
+experiment/new-localization
+```
+
+---
+
+## Development Cycle
+
+### 1. Create Branch
+
+```bash
+# Sync with upstream
+git fetch upstream
+git checkout main
+git merge upstream/main
+
+# Create new branch
+git checkout -b feature/your-feature
+```
+
+### 2. Make Changes
+
+```bash
+# Edit files
+# ...
+
+# Check status
+git status
+
+# Stage changes
+git add .
+
+# Commit
+git commit -m "feat: add new feature"
+```
+
+### 3. Keep Branch Updated
+
+```bash
+# Regularly sync with main
+git fetch upstream
+git rebase upstream/main
+
+# Resolve conflicts if any
+```
+
+### 4. Push & Create PR
+
+```bash
+# Push to your fork
+git push origin feature/your-feature
+
+# Create Pull Request on GitHub
+```
+
+---
+
+## Commit Guidelines
+
+### Format
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Types
+
+| Type | Use Case |
+|------|----------|
+| feat | New feature |
+| fix | Bug fix |
+| docs | Documentation only |
+| style | Formatting |
+| refactor | Code restructuring |
+| test | Adding tests |
+| chore | Build/tooling |
+
+### Examples
+
+```bash
+# Simple commit
+git commit -m "feat: add ball tracking"
+
+# With scope
+git commit -m "feat(vision): add YOLO detection"
+
+# With body
+git commit -m "fix(walking): correct step calculation
+
+The step length was calculated incorrectly causing drift.
+Added proper conversion from meters to motor units.
+
+Fixes #123"
+```
+
+---
+
+## Pull Request Process
+
+### Before Creating PR
+
+- [ ] Code compiles without errors
+- [ ] All tests pass (`colcon test`)
+- [ ] Follows [coding standards](/docs/development/coding-standards)
+- [ ] Documentation updated if needed
+- [ ] Tested in simulation
+
+### PR Template
+
+```markdown
+## Description
+Brief description of changes
+
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
+
+## Testing
+How was this tested?
+
+## Checklist
+- [ ] Code follows style guidelines
+- [ ] Tests added/updated
+- [ ] Documentation updated
+- [ ] No new warnings
+
+## Screenshots (if applicable)
+```
+
+### Review Process
+
+1. Create PR → Assigned reviewers
+2. Reviewers provide feedback
+3. Address feedback, push updates
+4. Approval from reviewer(s)
+5. Merge to main
+
+<Callout type="info">
+Minimal **1 approval** required untuk merge. Untuk critical changes, perlu **2 approvals**.
+</Callout>
+
+---
+
+## Code Review Guidelines
+
+### For Authors
+
+- Keep PRs small and focused
+- Write clear PR description
+- Respond to feedback constructively
+- Don't take feedback personally
+
+### For Reviewers
+
+- Be constructive, not critical
+- Explain the "why" behind suggestions
+- Approve when satisfied, don't block unnecessarily
+- Review within 24-48 hours
+
+### What to Look For
+
+| Category | Check |
+|----------|-------|
+| Logic | Does it work correctly? |
+| Design | Is it well-structured? |
+| Style | Follows conventions? |
+| Tests | Adequate coverage? |
+| Docs | Clear documentation? |
+| Performance | Any obvious issues? |
+
+---
+
+## Common Tasks
+
+### Add New ROS 2 Package
+
+```bash
+# Create package (Python)
+cd ros_ws/src
+ros2 pkg create --build-type ament_python my_package
+
+# Create package (C++)
+ros2 pkg create --build-type ament_cmake my_package
+
+# Edit package.xml, CMakeLists.txt/setup.py
+# Add source files
+# Build and test
+```
+
+### Update Dependencies
+
+```bash
+# Add dependency to package.xml
+<depend>new_package</depend>
+
+# Install dependencies
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+### Run Tests
+
+```bash
+# All tests
+colcon test
+
+# Specific package
+colcon test --packages-select soccer_vision
+
+# With output
+colcon test --event-handlers console_direct+
+```
+
+---
+
+## Troubleshooting
+
+### Merge Conflicts
+
+```bash
+# When rebasing
+git rebase upstream/main
+
+# If conflicts:
+# 1. Edit conflicted files
+# 2. git add <resolved files>
+# 3. git rebase --continue
+
+# Abort if needed
+git rebase --abort
+```
+
+### Build Errors After Merge
+
+```bash
+# Clean and rebuild
+rm -rf build/ install/ log/
+colcon build --continue-on-error
+```
+
+### CI Failed
+
+1. Check CI logs
+2. Reproduce locally
+3. Fix and push
+
+---
+
+## Getting Help
+
+- **Stuck?** Ask in WhatsApp/Discord
+- **Bug?** Open GitHub Issue
+- **Ideas?** Discuss in weekly meeting
+- **Pairing?** Request pair programming session
+
+---
+
+## Recognition
+
+Contributors akan dicantumkan di:
+- README contributors section
+- Team Description Paper
+- Competition acknowledgments

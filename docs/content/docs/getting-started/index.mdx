@@ -1,0 +1,93 @@
+---
+title: Getting Started
+description: Panduan memulai development BASCORRO
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Getting Started
+
+Selamat datang di panduan pengembangan BASCORRO! Halaman ini akan membantu kamu mempersiapkan environment development untuk project robot humanoid sepakbola.
+
+<Callout type="info">
+**Prasyarat (Prerequisites)**
+
+- Ubuntu 22.04 LTS (Jammy Jellyfish)
+- Minimal 16 GB RAM (untuk simulasi)
+- GPU dengan dukungan OpenGL 3.3+ (untuk Webots)
+- Git dan terminal dasar
+</Callout>
+
+---
+
+## Overview
+
+Project BASCORRO menggunakan stack teknologi berikut:
+
+| Komponen | Teknologi |
+|----------|-----------|
+| Robot OS | ROS 2 Humble |
+| Bahasa | C++ (ament_cmake), Python 3 (ament_python) |
+| Simulasi | Webots, Gazebo |
+| Vision | OpenCV, YOLO (opsional) |
+| Hardware | ROBOTIS OP3, Dynamixel SDK |
+
+---
+
+## Langkah-Langkah
+
+<Cards>
+  <Card
+    title="1. Installation"
+    description="Install ROS 2 Humble dan setup workspace"
+    href="/docs/getting-started/installation"
+  />
+  <Card
+    title="2. First Run"
+    description="Jalankan simulasi pertama kamu"
+    href="/docs/getting-started/first-run"
+  />
+  <Card
+    title="3. Architecture"
+    description="Pahami struktur sistem dan ROS 2 nodes"
+    href="/docs/getting-started/architecture"
+  />
+</Cards>
+
+---
+
+## Quick Start (TL;DR)
+
+Jika kamu sudah familiar dengan ROS 2, berikut adalah langkah cepat:
+
+```bash
+# 1. Clone repository
+git clone https://github.com/ProgramBascorro/motion_webots.git
+cd motion_webots
+
+# 2. Source ROS 2
+source /opt/ros/humble/setup.bash
+
+# 3. Build workspace
+cd ros_ws
+colcon build --continue-on-error
+
+# 4. Source workspace
+source install/setup.bash
+
+# 5. Run simulation
+./run/run_vision_and_webots.sh
+```
+
+<Callout type="warn">
+Pastikan sudah menginstall ROS 2 Humble dan Webots sebelum menjalankan langkah di atas.
+</Callout>
+
+---
+
+## Butuh Bantuan?
+
+- Tanya di grup WhatsApp/Discord tim
+- Baca [References](/docs/references) untuk link dokumentasi resmi
+- Hubungi divisi Software & AI

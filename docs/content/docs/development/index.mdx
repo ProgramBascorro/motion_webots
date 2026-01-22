@@ -1,0 +1,183 @@
+---
+title: Development
+description: Panduan development dan kontribusi untuk BASCORRO
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+# Development
+
+Panduan untuk developer yang ingin berkontribusi ke project BASCORRO.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone repo
+git clone https://github.com/ProgramBascorro/motion_webots.git
+cd motion_webots
+
+# 2. Setup environment
+source /opt/ros/humble/setup.bash
+
+# 3. Build
+cd ros_ws
+colcon build --continue-on-error
+source install/setup.bash
+
+# 4. Test
+colcon test
+```
+
+---
+
+## Development Guides
+
+<Cards>
+  <Card
+    title="Coding Standards"
+    description="C++, Python, dan ROS 2 conventions"
+    href="/docs/development/coding-standards"
+  />
+  <Card
+    title="Contributing"
+    description="Git workflow dan pull request guidelines"
+    href="/docs/development/contributing"
+  />
+  <Card
+    title="Debugging"
+    description="Tips debugging dan troubleshooting"
+    href="/docs/development/debugging"
+  />
+  <Card
+    title="Design System"
+    description="Warna, tipografi, dan komponen visual"
+    href="/docs/development/design-system"
+  />
+</Cards>
+
+---
+
+## Development Workflow
+
+```
+┌─────────────────────────────────────────────────┐
+│                Development Cycle                │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  1. Create Branch                               │
+│       │                                         │
+│       ▼                                         │
+│  2. Write Code                                  │
+│       │                                         │
+│       ▼                                         │
+│  3. Test in Simulation                          │
+│       │                                         │
+│       ▼                                         │
+│  4. Code Review (PR)                            │
+│       │                                         │
+│       ▼                                         │
+│  5. Merge to Main                               │
+│       │                                         │
+│       ▼                                         │
+│  6. Test on Real Robot                          │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## Tools & Environment
+
+| Tool | Purpose |
+|------|---------|
+| VS Code | IDE dengan ROS extension |
+| Git | Version control |
+| Colcon | ROS 2 build tool |
+| Webots | Simulation |
+| Biome/Clang-format | Code formatting |
+
+### Recommended VS Code Extensions
+
+```json
+{
+  "recommendations": [
+    "ms-iot.vscode-ros",
+    "ms-vscode.cpptools",
+    "ms-python.python",
+    "ms-python.vscode-pylance"
+  ]
+}
+```
+
+---
+
+## Build Commands
+
+```bash
+# Build all packages
+colcon build --continue-on-error
+
+# Build specific package
+colcon build --packages-select soccer_vision
+
+# Build with debug symbols
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug
+
+# Clean build
+rm -rf build/ install/ log/
+colcon build
+```
+
+---
+
+## Test Commands
+
+```bash
+# Run all tests
+colcon test
+
+# Test specific package
+colcon test --packages-select soccer_vision
+
+# View test results
+colcon test-result --verbose
+```
+
+---
+
+## Key Directories
+
+```
+motion_webots/
+├── ros_ws/
+│   ├── src/                 # Source packages
+│   │   ├── ROBOTIS-OP3/     # Core OP3 packages
+│   │   ├── soccer_vision/   # Vision system
+│   │   └── ...
+│   ├── build/               # Build artifacts
+│   ├── install/             # Installed packages
+│   └── log/                 # Build/test logs
+├── run/                     # Shell scripts
+├── docs/                    # This documentation
+└── README.md
+```
+
+---
+
+## Communication
+
+- **GitHub Issues** - Bug reports & feature requests
+- **WhatsApp Group** - Daily communication
+- **Weekly Meeting** - Progress updates
+- **Discord** - Technical discussions
+
+---
+
+## Need Help?
+
+1. Check existing documentation
+2. Search GitHub issues
+3. Ask in WhatsApp/Discord
+4. Pair programming dengan senior member

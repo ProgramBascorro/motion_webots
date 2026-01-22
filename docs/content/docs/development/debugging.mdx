@@ -1,0 +1,389 @@
+---
+title: Debugging
+description: Tips dan tools untuk debugging ROS 2 dan robot OP3
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Debugging
+
+Panduan debugging untuk project BASCORRO menggunakan ROS 2 tools dan teknik umum.
+
+---
+
+## ROS 2 CLI Tools
+
+### Node Inspection
+
+```bash
+# List all nodes
+ros2 node list
+
+# Node info
+ros2 node info /ball_detector
+
+# Output:
+#   Subscribers:
+#     /camera/image_raw: sensor_msgs/msg/Image
+#   Publishers:
+#     /ball_position: geometry_msgs/msg/Point
+```
+
+### Topic Debugging
+
+```bash
+# List all topics
+ros2 topic list
+
+# Topic info
+ros2 topic info /ball_position
+
+# Echo topic (see messages)
+ros2 topic echo /ball_position
+
+# Echo with rate limit
+ros2 topic echo /ball_position --once
+
+# Publish test message
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.1}, angular: {z: 0.0}}"
+
+# Check publishing rate
+ros2 topic hz /camera/image_raw
+```
+
+### Service Debugging
+
+```bash
+# List services
+ros2 service list
+
+# Service type
+ros2 service type /reset_simulation
+
+# Call service
+ros2 service call /reset_simulation std_srvs/srv/Empty
+```
+
+### Parameter Debugging
+
+```bash
+# List parameters
+ros2 param list /ball_detector
+
+# Get parameter
+ros2 param get /ball_detector camera_height
+
+# Set parameter
+ros2 param set /ball_detector camera_height 0.5
+```
+
+---
+
+## Visualization Tools
+
+### RQT
+
+```bash
+# Launch RQT
+rqt
+
+# Useful plugins:
+# - Node Graph (visualize nodes & topics)
+# - Image View (see camera feed)
+# - Plot (graph numeric values)
+# - Console (see log messages)
+```
+
+### RViz2
+
+```bash
+# Launch RViz
+rviz2
+
+# Add displays:
+# - TF (coordinate frames)
+# - Image (camera)
+# - Marker (custom visualization)
+# - PointCloud2 (3D points)
+```
+
+### Image Debugging
+
+```bash
+# View camera feed
+ros2 run rqt_image_view rqt_image_view
+
+# Select topic: /camera/image_raw or /debug_image
+```
+
+---
+
+## Logging
+
+### Log Levels
+
+| Level | Use Case |
+|-------|----------|
+| DEBUG | Detailed debugging info |
+| INFO | Normal operation info |
+| WARN | Potential issues |
+| ERROR | Errors (recoverable) |
+| FATAL | Critical errors |
+
+### Python Logging
+
+```python
+# Log messages
+self.get_logger().debug('Detailed info')
+self.get_logger().info('Normal info')
+self.get_logger().warn('Warning!')
+self.get_logger().error('Error occurred')
+self.get_logger().fatal('Critical failure')
+```
+
+### C++ Logging
+
+```cpp
+RCLCPP_DEBUG(this->get_logger(), "Detailed info");
+RCLCPP_INFO(this->get_logger(), "Normal info");
+RCLCPP_WARN(this->get_logger(), "Warning!");
+RCLCPP_ERROR(this->get_logger(), "Error occurred");
+RCLCPP_FATAL(this->get_logger(), "Critical failure");
+```
+
+### Set Log Level
+
+```bash
+# At runtime
+ros2 run <package> <node> --ros-args --log-level debug
+
+# Specific logger
+ros2 run <package> <node> --ros-args \
+  --log-level my_node:=debug
+```
+
+---
+
+## Common Issues
+
+### Node Doesn't Start
+
+```bash
+# Check if package built
+ros2 pkg list | grep <package>
+
+# Check executable exists
+ros2 run <package> <node> --help
+
+# Check dependencies
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+### Topics Not Connecting
+
+```bash
+# Check QoS compatibility
+ros2 topic info /topic_name -v
+
+# Common QoS issues:
+# - Publisher/subscriber have different reliability
+# - Different durability settings
+```
+
+### TF Errors
+
+```bash
+# View TF tree
+ros2 run tf2_tools view_frames
+
+# Look up specific transform
+ros2 run tf2_ros tf2_echo odom base_link
+
+# Common errors:
+# - "Could not find a connection" → missing TF publisher
+# - "Lookup would require extrapolation" → time sync issue
+```
+
+### Camera Issues
+
+```bash
+# Check if camera detected
+ls /dev/video*
+
+# Check camera info
+v4l2-ctl --list-devices
+
+# Adjust camera settings
+v4l2-ctl -d /dev/video0 --list-ctrls
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=1
+```
+
+---
+
+## Python Debugging
+
+### Print Debugging
+
+```python
+# Quick print
+print(f"ball_position: {x}, {y}")
+
+# With type info
+print(f"image type: {type(image)}, shape: {image.shape}")
+```
+
+### PDB (Python Debugger)
+
+```python
+import pdb
+
+def my_function():
+    x = calculate_something()
+    pdb.set_trace()  # Breakpoint here
+    return x
+```
+
+### OpenCV Image Debugging
+
+```python
+import cv2
+
+# Save intermediate images
+cv2.imwrite('/tmp/debug_mask.png', mask)
+cv2.imwrite('/tmp/debug_edges.png', edges)
+
+# Show in window (if display available)
+cv2.imshow('Debug', image)
+cv2.waitKey(1)
+```
+
+---
+
+## C++ Debugging
+
+### GDB
+
+```bash
+# Build with debug symbols
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug
+
+# Run with GDB
+gdb --args ros2 run <package> <node>
+
+# GDB commands:
+# run          - start program
+# break <line> - set breakpoint
+# next         - next line
+# step         - step into function
+# print <var>  - print variable
+# backtrace    - show call stack
+```
+
+### Sanitizers
+
+```cmake
+# In CMakeLists.txt
+add_compile_options(-fsanitize=address)
+add_link_options(-fsanitize=address)
+```
+
+---
+
+## Performance Debugging
+
+### CPU Profiling
+
+```bash
+# Check node CPU usage
+top
+htop
+
+# ROS 2 specific
+ros2 topic hz /camera/image_raw  # Check rate
+ros2 topic delay /camera/image_raw  # Check latency
+```
+
+### Timing
+
+```python
+import time
+
+start = time.time()
+# ... code to measure ...
+elapsed = time.time() - start
+self.get_logger().info(f'Processing took {elapsed*1000:.1f} ms')
+```
+
+### Bottleneck Detection
+
+```python
+import cProfile
+
+cProfile.run('my_function()')
+```
+
+---
+
+## Simulation Debugging
+
+### Webots
+
+```bash
+# Verbose output
+webots --stdout --stderr world.wbt
+
+# Log file
+webots --log-file=webots.log world.wbt
+```
+
+### Reset Simulation
+
+```bash
+# Reset via service
+ros2 service call /supervisor/reset_simulation std_srvs/srv/Empty
+```
+
+---
+
+## Recording & Playback
+
+### ROS 2 Bags
+
+```bash
+# Record topics
+ros2 bag record /camera/image_raw /imu/data
+
+# Record all topics
+ros2 bag record -a
+
+# Playback
+ros2 bag play rosbag2_*/
+
+# Info
+ros2 bag info rosbag2_*/
+```
+
+<Callout type="info">
+Bag files sangat berguna untuk mereproduksi bug yang sulit di-debug secara real-time.
+</Callout>
+
+---
+
+## Checklist: Bug Not Reproducing?
+
+1. [ ] Sama persis workspace version?
+2. [ ] Sama environment variables?
+3. [ ] Sama hardware?
+4. [ ] Sama kondisi (lighting, battery, etc.)?
+5. [ ] Ada race condition (timing-dependent)?
+6. [ ] Coba record bag saat bug terjadi
+
+---
+
+## Resources
+
+- [ROS 2 Debugging Tutorial](https://docs.ros.org/en/humble/Tutorials/Beginner-CLI-Tools.html)
+- [RQT Documentation](http://wiki.ros.org/rqt)
+- [Python PDB Docs](https://docs.python.org/3/library/pdb.html)
+- [GDB Tutorial](https://www.gnu.org/software/gdb/documentation/)

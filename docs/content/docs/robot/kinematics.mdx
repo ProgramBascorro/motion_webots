@@ -1,0 +1,241 @@
+---
+title: Kinematics
+description: Forward dan Inverse Kinematics robot OP3
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Kinematics
+
+Dokumentasi kinematika robot OP3, termasuk forward kinematics, inverse kinematics, dan perhitungan gerakan.
+
+---
+
+## Degrees of Freedom (DOF)
+
+OP3 memiliki **20 DOF** yang terdistribusi sebagai berikut:
+
+```
+┌────────────────────────────────────────┐
+│              HEAD (2 DOF)              │
+│         Pan (yaw) + Tilt (pitch)       │
+├────────────────────────────────────────┤
+│     LEFT ARM (3)    │    RIGHT ARM (3) │
+│  Shoulder P/R + Elbow│ Shoulder P/R + Elbow│
+├────────────────────────────────────────┤
+│     LEFT LEG (6)    │    RIGHT LEG (6)  │
+│  Hip Y/R/P + Knee   │  Hip Y/R/P + Knee │
+│  + Ankle P/R        │  + Ankle P/R      │
+└────────────────────────────────────────┘
+              Total: 20 DOF
+```
+
+---
+
+## Forward Kinematics (FK)
+
+Forward Kinematics menghitung posisi end-effector (kaki/tangan) berdasarkan sudut joint yang diberikan.
+
+### Konsep Dasar
+
+```
+Joint Angles (θ₁, θ₂, ..., θₙ) → FK → End-Effector Position (x, y, z, roll, pitch, yaw)
+```
+
+### Denavit-Hartenberg (DH) Parameters
+
+Setiap joint didefinisikan dengan 4 parameter DH:
+- **a** (link length)
+- **α** (link twist)
+- **d** (link offset)
+- **θ** (joint angle)
+
+### Transformation Matrix
+
+Untuk setiap joint, transformation matrix adalah:
+
+```
+T = Rz(θ) × Tz(d) × Tx(a) × Rx(α)
+```
+
+Posisi end-effector dihitung dengan:
+
+```
+T_total = T₁ × T₂ × T₃ × ... × Tₙ
+```
+
+---
+
+## Inverse Kinematics (IK)
+
+Inverse Kinematics menghitung sudut joint yang diperlukan untuk mencapai posisi target.
+
+### Konsep Dasar
+
+```
+Target Position (x, y, z, roll, pitch, yaw) → IK → Joint Angles (θ₁, θ₂, ..., θₙ)
+```
+
+### Metode yang Digunakan
+
+OP3 menggunakan **Analytical IK** untuk kaki karena:
+1. Lebih cepat dari numerical methods
+2. Solusi eksak (bukan aproksimasi)
+3. Cocok untuk struktur kaki 6-DOF
+
+### Leg IK Algorithm
+
+```python
+def leg_ik(target_position, target_orientation):
+    """
+    Calculate joint angles for leg to reach target.
+
+    Args:
+        target_position: (x, y, z) in hip frame
+        target_orientation: (roll, pitch, yaw)
+
+    Returns:
+        joint_angles: [hip_yaw, hip_roll, hip_pitch,
+                      knee_pitch, ankle_pitch, ankle_roll]
+    """
+    # 1. Calculate hip yaw based on foot position
+    hip_yaw = atan2(y, x)
+
+    # 2. Transform to sagittal plane
+    # 3. Solve for hip pitch and knee using geometry
+    # 4. Calculate ankle angles for foot orientation
+
+    return joint_angles
+```
+
+<Callout type="info">
+Package `op3_kinematics_dynamics` berisi implementasi lengkap FK/IK untuk OP3.
+</Callout>
+
+---
+
+## Kinematic Chain
+
+### Leg Kinematic Chain
+
+```
+Base → Hip_Yaw → Hip_Roll → Hip_Pitch → Knee → Ankle_Pitch → Ankle_Roll → Foot
+```
+
+Link lengths (approximate):
+- Hip to Knee: 110 mm
+- Knee to Ankle: 110 mm
+- Ankle to Foot: 45 mm
+
+### Head Kinematic Chain
+
+```
+Body → Head_Pan → Head_Tilt → Camera
+```
+
+---
+
+## Walking Kinematics
+
+### Gait Cycle
+
+```
+┌─────────────┬─────────────┐
+│  Stance     │  Swing      │
+│  Phase      │  Phase      │
+│  (60%)      │  (40%)      │
+└─────────────┴─────────────┘
+```
+
+### Center of Mass (CoM) Trajectory
+
+Selama berjalan, CoM robot mengikuti trajectory:
+
+```
+       CoM Path
+         ___
+        /   \
+    ___/     \___
+
+   Left    Mid    Right
+   Foot         Foot
+```
+
+### Zero Moment Point (ZMP)
+
+ZMP harus tetap dalam support polygon untuk menjaga keseimbangan:
+
+```
+Support Polygon:
+┌─────────────────┐
+│                 │
+│  ┌───┐   ┌───┐  │
+│  │ L │   │ R │  │  ← Feet
+│  └───┘   └───┘  │
+│                 │
+└─────────────────┘
+    ZMP harus di dalam area ini
+```
+
+---
+
+## Coordinate Frames
+
+### Standard Frames
+
+| Frame | Origin | Orientation |
+|-------|--------|-------------|
+| World | Field center | X forward, Y left, Z up |
+| Base | Robot torso | X forward, Y left, Z up |
+| Camera | Camera optical center | Z forward, X right, Y down |
+
+### TF Tree
+
+```
+world
+  └── odom
+        └── base_link
+              ├── head_link
+              │     └── camera_optical_frame
+              ├── l_hip_yaw_link
+              │     └── ... → l_foot_link
+              └── r_hip_yaw_link
+                    └── ... → r_foot_link
+```
+
+---
+
+## Code Reference
+
+### Package: op3_kinematics_dynamics
+
+```cpp
+// Forward Kinematics
+Eigen::MatrixXd getJointPose(std::string joint_name);
+
+// Inverse Kinematics
+bool calcInverseKinematics(
+    int to,                    // target link ID
+    Eigen::MatrixXd tar_pos,   // target position
+    Eigen::MatrixXd tar_rot,   // target rotation
+    std::map<std::string, double> &joint_angle_map
+);
+```
+
+### ROS 2 Interface
+
+```bash
+# Get current joint positions
+ros2 topic echo /joint_states
+
+# View TF tree
+ros2 run tf2_tools view_frames
+```
+
+---
+
+## Resources
+
+- [Robotics, Vision and Control (Peter Corke)](https://petercorke.com/rvc/)
+- [Modern Robotics (Lynch & Park)](http://hades.mech.northwestern.edu/index.php/Modern_Robotics)
+- [ROBOTIS OP3 Kinematics](https://emanual.robotis.com/docs/en/platform/op3/robotis_ros_packages/)

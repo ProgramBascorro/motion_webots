@@ -1,0 +1,302 @@
+---
+title: Competition Preparation
+description: Persiapan kompetisi RoboCup dan KRI
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Competition Preparation
+
+Panduan lengkap untuk mempersiapkan tim BASCORRO menghadapi kompetisi RoboCup dan KRI.
+
+---
+
+## Competition Calendar
+
+### 2025
+
+| Event | Date | Location | Status |
+|-------|------|----------|--------|
+| KRI Regional | Feb-Mar | Regional | Qualification |
+| KRI Nasional | Apr-May | TBD | National |
+| RoboCup 2025 | Jul 15-21 | Salvador, Brazil | International |
+
+---
+
+## Team Description Paper (TDP)
+
+### Apa itu TDP?
+
+TDP adalah dokumen teknis yang menjelaskan robot dan pendekatan tim. **WAJIB** untuk qualification.
+
+### TDP Structure
+
+```
+1. Introduction
+   - Team background
+   - Previous participations
+
+2. Hardware
+   - Robot specifications
+   - Sensors & actuators
+   - Innovations
+
+3. Software
+   - Architecture overview
+   - Vision system
+   - Locomotion
+   - Strategy
+
+4. Experimental Results
+   - Performance metrics
+   - Testing results
+
+5. Conclusion
+   - Future plans
+
+References
+```
+
+### TDP Tips
+
+<Callout type="info">
+**Best Practices:**
+- Focus on **innovations**, bukan deskripsi umum
+- Include **quantitative results** (accuracy %, speed, etc.)
+- Add **diagrams** dan **photos**
+- Max 8 pages (usually)
+- Submit before deadline!
+</Callout>
+
+### Contoh Topics untuk TDP
+
+| Section | Content Ideas |
+|---------|---------------|
+| Vision | Ball detection accuracy, FPS, lighting robustness |
+| Walking | Speed, stability metrics, power consumption |
+| Localization | Accuracy dalam cm, update rate |
+| Strategy | Behavior description, coordination method |
+
+---
+
+## Qualification Requirements
+
+### RoboCup Humanoid League
+
+1. **TDP Submission** - Before deadline
+2. **Qualification Video** - Robot demo
+3. **Registration Fee** - Team registration
+4. **Technical Inspection** - At competition
+
+### Qualification Video Content
+
+Rekam video (3-5 menit) yang menunjukkan:
+
+```
+1. Robot Overview
+   - Full body shot
+   - Size measurement
+   - Emergency stop demo
+
+2. Walking Demo
+   - Forward walking
+   - Turning
+   - Walking on grass/carpet
+
+3. Vision Demo
+   - Ball tracking
+   - Field recognition
+
+4. Game Demo
+   - Approaching ball
+   - Kicking
+   - Get-up from fall
+```
+
+---
+
+## Hardware Preparation
+
+### Checklist
+
+**Robot:**
+- [ ] All servos functioning
+- [ ] Battery cells balanced
+- [ ] Camera calibrated
+- [ ] IMU calibrated
+- [ ] Emergency stop tested
+- [ ] Handle installed
+
+**Spare Parts:**
+- [ ] Backup servos (2-3)
+- [ ] Extra batteries (2+)
+- [ ] Cables & connectors
+- [ ] Screws & bolts
+- [ ] Tools kit
+
+**Logistics:**
+- [ ] Robot case/transport
+- [ ] Chargers
+- [ ] Laptop(s)
+- [ ] Ethernet cables
+- [ ] USB hubs
+
+---
+
+## Software Preparation
+
+### Pre-Competition Testing
+
+```bash
+# Full system test
+./run/run_vision_and_webots.sh
+
+# Individual module tests
+ros2 launch soccer_vision soccer_vision.launch.py
+ros2 launch op3_walking_module walking.launch.py
+```
+
+### Testing Checklist
+
+| Module | Test | Pass? |
+|--------|------|-------|
+| Vision | Ball detection (near/far) | [ ] |
+| Vision | Field line detection | [ ] |
+| Walking | Forward 1m | [ ] |
+| Walking | Turn 360° | [ ] |
+| Walking | Walk + turn | [ ] |
+| Balance | Push recovery | [ ] |
+| Get-up | From face down | [ ] |
+| Get-up | From face up | [ ] |
+| Kick | Left kick | [ ] |
+| Kick | Right kick | [ ] |
+| Full | Approach + kick | [ ] |
+
+---
+
+## Competition Day
+
+### Schedule Template
+
+```
+Day 0 (Setup):
+- Robot transport & setup
+- Technical inspection
+- Field testing
+
+Day 1-2 (Preliminaries):
+- Pool matches
+- Technical challenges
+- Fix issues
+
+Day 3+ (Knockout):
+- Quarterfinals
+- Semifinals
+- Finals
+```
+
+### At Competition
+
+#### Before Each Match
+
+```bash
+# Checklist:
+1. Battery fully charged? ✓
+2. Software latest version? ✓
+3. Camera clean? ✓
+4. Servos working? ✓
+5. Emergency stop tested? ✓
+6. WiFi connected? ✓
+```
+
+#### During Match
+
+- **1 operator** untuk handling robot
+- **1 technician** untuk monitoring software
+- **Communicate** dengan referee
+
+#### Between Matches
+
+- Charge batteries
+- Review logs
+- Fix bugs
+- Adjust parameters
+
+---
+
+## Common Issues & Solutions
+
+### Robot Falls Often
+
+| Cause | Solution |
+|-------|----------|
+| Battery low | Charge/swap battery |
+| Surface slippery | Check foot grip |
+| Balance gains wrong | Tune PD controller |
+| Speed too high | Reduce walking speed |
+
+### Vision Not Working
+
+| Cause | Solution |
+|-------|----------|
+| Lighting different | Adjust HSV thresholds |
+| Camera dirty | Clean lens |
+| Exposure wrong | Adjust camera settings |
+
+### WiFi Issues
+
+| Cause | Solution |
+|-------|----------|
+| Interference | Switch channel |
+| Weak signal | Get closer to router |
+| Wrong network | Check SSID/password |
+
+---
+
+## Team Roles at Competition
+
+| Role | Responsibilities |
+|------|------------------|
+| Team Captain | Strategy, communication with officials |
+| Robot Handler | Physical handling during match |
+| Software Lead | Debugging, parameter tuning |
+| Hardware Tech | Repairs, battery management |
+| Scout | Observe opponents, take notes |
+
+---
+
+## Post-Competition
+
+### After Competition
+
+1. **Debrief** - Apa yang worked, apa yang tidak
+2. **Documentation** - Update wiki, write report
+3. **Backup** - Save all code and logs
+4. **Maintenance** - Service robot, clean, store properly
+
+### Improvement Plan
+
+```
+Analysis:
+- What went well?
+- What failed?
+- What was close?
+
+Action Items:
+- Priority 1: ...
+- Priority 2: ...
+- Priority 3: ...
+
+Timeline:
+- Next competition: ...
+- Development milestones: ...
+```
+
+---
+
+## Resources
+
+- [RoboCup Call for Participation](https://humanoid.robocup.org/robocup-2025/call-for-participation/)
+- [TDP Archive](https://archive.robocup.info/)
+- [Past Winners Videos](https://www.youtube.com/robocup)
+- [KRI Guidelines](https://kontesrobotindonesia.id/)

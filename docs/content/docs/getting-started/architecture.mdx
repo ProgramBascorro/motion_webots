@@ -1,0 +1,215 @@
+---
+title: System Architecture
+description: Arsitektur sistem dan struktur ROS 2 nodes BASCORRO
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# System Architecture
+
+Dokumentasi arsitektur sistem robot BASCORRO, termasuk struktur workspace, ROS 2 nodes, dan aliran data.
+
+---
+
+## Workspace Structure
+
+```
+motion_webots/
+├── ros_ws/                    # ROS 2 Workspace
+│   ├── src/                   # Source packages
+│   │   ├── ROBOTIS-OP3/       # OP3 control modules
+│   │   ├── ROBOTIS-OP3-Common/       # Shared utilities
+│   │   ├── ROBOTIS-OP3-msgs/         # Message definitions
+│   │   ├── ROBOTIS-OP3-Simulations/  # Webots/Gazebo
+│   │   ├── ROBOTIS-OP3-Tools/        # Utilities
+│   │   ├── humanoid_navigation/      # Localization
+│   │   ├── soccer_vision/            # Vision system
+│   │   └── walking_imu_to_odometry/  # Odometry
+│   ├── build/                 # Build artifacts
+│   ├── install/               # Installed packages
+│   └── log/                   # Build/test logs
+├── run/                       # Launch scripts
+├── assets/                    # Images, resources
+└── README.md
+```
+
+---
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         BASCORRO                            │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │
+│  │ Vision  │→ │ Strategy │→ │ Motion   │→ │  Hardware   │  │
+│  │ System  │  │    AI    │  │ Control  │  │  Interface  │  │
+│  └─────────┘  └──────────┘  └──────────┘  └─────────────┘  │
+│       ↑                                          ↓          │
+│  ┌─────────┐                              ┌─────────────┐   │
+│  │ Camera  │                              │  Actuators  │   │
+│  │  IMU    │←─────── Feedback ───────────│   Sensors   │   │
+│  └─────────┘                              └─────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Core ROS 2 Packages
+
+### 1. ROBOTIS-OP3 (Control Modules)
+
+| Package | Fungsi |
+|---------|--------|
+| `op3_manager` | Main controller, orchestrates all modules |
+| `op3_walking_module` | Standard walking gait |
+| `op3_online_walking_module` | Real-time walking control |
+| `op3_action_module` | Pre-programmed actions (kick, getup) |
+| `op3_balance_control` | Dynamic balance during movement |
+| `op3_head_control_module` | Head/camera pan-tilt |
+| `op3_direct_control_module` | Direct servo control |
+| `op3_kinematics_dynamics` | Forward/inverse kinematics |
+
+### 2. soccer_vision (Vision System)
+
+```
+soccer_vision/
+├── detector_node.py     # Main vision node
+├── ball_detector.py     # Ball detection (orange color)
+├── field_detector.py    # Field lines, landmarks
+└── launch/
+    └── soccer_vision.launch.py
+```
+
+**Features:**
+- Color-based ball detection (HSV filtering)
+- Field line detection (white lines)
+- Optional YOLO integration for ML detection
+- Ground plane projection for 3D localization
+
+### 3. walking_imu_to_odometry (Odometry)
+
+Mengkonversi data IMU dan langkah kaki menjadi odometry:
+
+```python
+# Input
+- IMU data (orientation, acceleration)
+- Walking step commands
+
+# Output
+- nav_msgs/Odometry (position, velocity)
+- TF transforms (odom → base_link)
+```
+
+### 4. humanoid_navigation (Localization)
+
+| Package | Fungsi |
+|---------|--------|
+| `op3_localization` | Position estimation |
+| `humanoid_localization` | Probabilistic localization |
+| `humanoid_planner_2d` | 2D path planning |
+| `footstep_planner` | Footstep sequence planning |
+| `gridmap_2d` | Occupancy grid for navigation |
+
+---
+
+## ROS 2 Node Graph
+
+```
+                    ┌──────────────┐
+                    │   Webots     │
+                    │  Simulator   │
+                    └──────┬───────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+      ┌──────────────┐          ┌──────────────┐
+      │    Camera    │          │     IMU      │
+      │    Node      │          │    Node      │
+      └──────┬───────┘          └──────┬───────┘
+             │                         │
+             ▼                         ▼
+      ┌──────────────┐          ┌──────────────┐
+      │ Soccer Vision│          │   Odometry   │
+      │    Node      │          │    Node      │
+      └──────┬───────┘          └──────┬───────┘
+             │                         │
+             └──────────┬──────────────┘
+                        ▼
+                ┌──────────────┐
+                │   Strategy   │
+                │     Node     │
+                └──────┬───────┘
+                       │
+                       ▼
+                ┌──────────────┐
+                │   Walking    │
+                │   Module     │
+                └──────┬───────┘
+                       │
+                       ▼
+                ┌──────────────┐
+                │  Dynamixel   │
+                │  Controller  │
+                └──────────────┘
+```
+
+---
+
+## Key Topics
+
+| Topic | Type | Deskripsi |
+|-------|------|-----------|
+| `/camera/image_raw` | sensor_msgs/Image | Raw camera feed |
+| `/ball_position` | geometry_msgs/Point | Detected ball position |
+| `/imu/data` | sensor_msgs/Imu | IMU measurements |
+| `/odom` | nav_msgs/Odometry | Robot odometry |
+| `/cmd_vel` | geometry_msgs/Twist | Velocity commands |
+| `/walking/command` | Custom | Walking step commands |
+
+---
+
+## TF Tree
+
+```
+world
+  └── odom
+        └── base_link
+              ├── head_link
+              │     └── camera_link
+              ├── l_leg_link
+              │     └── l_foot_link
+              └── r_leg_link
+                    └── r_foot_link
+```
+
+---
+
+## Communication Patterns
+
+### Publisher-Subscriber
+Digunakan untuk streaming data (kamera, sensor):
+```
+Camera → /image_raw → Vision Node → /ball_position → Strategy
+```
+
+### Service-Client
+Digunakan untuk request-response:
+```
+Strategy → GetBallPosition → Vision
+Strategy → SetWalkingParams → Walking Module
+```
+
+### Action
+Digunakan untuk long-running tasks:
+```
+Strategy → WalkToGoal → Walking Module (with feedback)
+```
+
+---
+
+## Next Steps
+
+- Pelajari detail [Vision System](/docs/software/vision)
+- Explore [Locomotion Module](/docs/software/locomotion)
+- Lihat [Robot Hardware](/docs/robot) untuk spesifikasi OP3

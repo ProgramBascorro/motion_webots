@@ -1,0 +1,327 @@
+---
+title: Localization
+description: Position estimation dan odometry untuk robot OP3
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Localization
+
+Localization adalah proses menentukan posisi robot di lapangan. Ini penting untuk navigasi, strategy, dan koordinasi tim.
+
+---
+
+## Overview
+
+```
+┌─────────────────────────────────────────────────┐
+│              Localization Stack                 │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ Odometry │  │  Vision  │  │   Particle   │  │
+│  │   (IMU)  │  │Landmarks │  │   Filter     │  │
+│  └────┬─────┘  └────┬─────┘  └──────┬───────┘  │
+│       │             │               │          │
+│       └─────────────┴───────────────┘          │
+│                     │                          │
+│                     ▼                          │
+│            Robot Position (x, y, θ)            │
+│                                                │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## Core Packages
+
+| Package | Fungsi |
+|---------|--------|
+| `walking_imu_to_odometry` | IMU + walking → odometry |
+| `op3_localization` | Field-based localization |
+| `humanoid_localization` | Probabilistic localization |
+| `humanoid_planner_2d` | 2D path planning |
+| `footstep_planner` | Footstep sequence planning |
+
+---
+
+## Odometry
+
+### walking_imu_to_odometry
+
+Mengkonversi data walking + IMU menjadi odometry estimate.
+
+```python
+# Pipeline
+Walking Commands → Step Integration → Position Update
+IMU Data → Orientation Update → Heading Correction
+```
+
+### Output
+
+```bash
+# Odometry topic
+ros2 topic echo /odom
+
+# TF transform
+odom → base_link
+```
+
+### Message Structure
+
+```python
+# nav_msgs/Odometry
+pose:
+  pose:
+    position:
+      x: 1.5    # meters
+      y: 0.3
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.1    # quaternion
+      w: 0.99
+twist:
+  twist:
+    linear:
+      x: 0.2    # m/s
+    angular:
+      z: 0.1    # rad/s
+```
+
+<Callout type="warn">
+**Odometry Drift**: Odometry terakumulasi error seiring waktu. Perlu reset atau koreksi dari vision landmarks.
+</Callout>
+
+---
+
+## Vision-Based Localization
+
+### Landmarks
+
+Lapangan RoboCup memiliki landmark yang bisa dikenali:
+- **Field lines** (garis putih)
+- **Center circle** (lingkaran tengah)
+- **Goal posts** (tiang gawang)
+- **Penalty area** (kotak penalti)
+
+```
+┌────────────────────────────────────────┐
+│                                        │
+│    ┌────┐              ┌────┐          │
+│    │Goal│              │Goal│          │
+│    └────┘              └────┘          │
+│         ┌──────────────┐               │
+│         │              │               │
+│         │    ○         │ ← Center      │
+│         │  Circle      │               │
+│         │              │               │
+│         └──────────────┘               │
+│                                        │
+│    ═══════════════════════════════     │ ← Field Lines
+│                                        │
+└────────────────────────────────────────┘
+```
+
+### Line Detection → Localization
+
+```python
+def localize_from_lines(detected_lines, map_lines):
+    """
+    Match detected lines to map lines.
+    Estimate robot pose from correspondences.
+    """
+    # 1. Transform detected lines to robot frame
+    # 2. Find matching lines in map
+    # 3. Calculate pose from matches
+    pass
+```
+
+---
+
+## Particle Filter
+
+### Monte Carlo Localization (MCL)
+
+Metode probabilistik untuk estimasi posisi.
+
+```
+┌────────────────────────────────────────┐
+│           Particle Cloud               │
+│                                        │
+│     .  . .   .  .                     │
+│    . . . . . . . .   ← Particles      │
+│     .  .  *  . .        (possible     │
+│    . . . . . . .         positions)   │
+│     .  . .   .                        │
+│                * ← True position      │
+│                                        │
+└────────────────────────────────────────┘
+```
+
+### Algorithm
+
+```python
+for each timestep:
+    # 1. Motion Update (Prediction)
+    for particle in particles:
+        particle.move(odometry + noise)
+
+    # 2. Sensor Update (Correction)
+    for particle in particles:
+        particle.weight = likelihood(sensor_data, particle.pose)
+
+    # 3. Resampling
+    particles = resample(particles, weights)
+```
+
+### Parameters
+
+| Parameter | Typical Value | Description |
+|-----------|---------------|-------------|
+| num_particles | 100-500 | More = more accurate, slower |
+| motion_noise | 0.1 m/step | Uncertainty in motion |
+| sensor_noise | 0.05 m | Uncertainty in sensor |
+
+---
+
+## TF Tree
+
+```
+world
+  │
+  └── map
+        │
+        └── odom
+              │
+              └── base_link
+                    │
+                    ├── camera_link
+                    └── imu_link
+```
+
+### Frame Descriptions
+
+| Frame | Description |
+|-------|-------------|
+| world | Fixed world frame |
+| map | Field coordinate frame |
+| odom | Odometry frame (drifts) |
+| base_link | Robot body center |
+
+---
+
+## Path Planning
+
+### humanoid_planner_2d
+
+2D path planning untuk navigasi.
+
+```bash
+ros2 run humanoid_planner_2d planner_node
+```
+
+### footstep_planner
+
+Merencanakan sequence footsteps untuk mencapai goal.
+
+```
+Start Position                    Goal Position
+     ○                                 ○
+     │                                 │
+     ▼                                 ▼
+   [Left]  →  [Right]  →  [Left]  →  [Right]
+     1          2           3          4
+```
+
+---
+
+## Field Coordinate System
+
+```
+         Y
+         ↑
+         │         ┌────────────────────┐
+         │         │    Opponent Goal   │
+         │         └────────────────────┘
+         │
+    ─────┼─────────────────────────────→ X
+         │         (Center of Field)
+         │
+         │         ┌────────────────────┐
+         │         │     Our Goal       │
+         │         └────────────────────┘
+
+    X: Positive toward opponent goal
+    Y: Positive toward left
+    θ: Counter-clockwise from X-axis
+```
+
+---
+
+## Troubleshooting
+
+### Odometry Drift
+
+```python
+# Reset odometry periodically
+ros2 service call /reset_odometry std_srvs/srv/Empty
+```
+
+### Localization Lost
+
+1. Check if landmarks visible
+2. Increase number of particles
+3. Add "kidnapped robot" recovery
+
+### Path Planning Fails
+
+1. Check if goal is reachable
+2. Increase planning timeout
+3. Simplify obstacle map
+
+---
+
+## Code Reference
+
+### Get Robot Position
+
+```python
+import tf2_ros
+
+# Create TF buffer and listener
+tf_buffer = tf2_ros.Buffer()
+tf_listener = tf2_ros.TransformListener(tf_buffer, node)
+
+# Get transform
+transform = tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+
+# Extract position
+x = transform.transform.translation.x
+y = transform.transform.translation.y
+```
+
+### Publish Odometry
+
+```python
+from nav_msgs.msg import Odometry
+
+odom = Odometry()
+odom.header.stamp = self.get_clock().now().to_msg()
+odom.header.frame_id = 'odom'
+odom.child_frame_id = 'base_link'
+odom.pose.pose.position.x = x
+odom.pose.pose.position.y = y
+odom.pose.pose.orientation = quaternion
+
+publisher.publish(odom)
+```
+
+---
+
+## Resources
+
+- [ROS 2 TF2 Tutorial](https://docs.ros.org/en/humble/Tutorials/Intermediate/Tf2/Tf2-Main.html)
+- [AMCL (Adaptive Monte Carlo Localization)](http://wiki.ros.org/amcl)
+- [Probabilistic Robotics (Thrun, Burgard, Fox)](http://www.probabilistic-robotics.org/)

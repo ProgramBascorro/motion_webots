@@ -1,0 +1,321 @@
+---
+title: Strategy
+description: Game strategy, behavior trees, dan decision making
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Strategy
+
+Modul strategy menentukan perilaku robot selama pertandingan: kapan mengejar bola, kapan menendang, kapan bertahan, dll.
+
+---
+
+## Overview
+
+```
+┌─────────────────────────────────────────────────┐
+│              Strategy Layer                     │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  Perception ──→ World Model ──→ Decision ──→   │
+│      │              │            │             │
+│      ▼              ▼            ▼             │
+│  Ball Position  Robot State  Action Selection  │
+│  Field Lines    Team Status  Motion Command    │
+│  Obstacles      Game State                     │
+│                                                │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## Game Roles
+
+### KidSize (4 Robots)
+
+| Role | Jumlah | Fungsi |
+|------|--------|--------|
+| Goalkeeper | 1 | Menjaga gawang |
+| Striker | 1-2 | Menyerang, menendang |
+| Defender | 1-2 | Bertahan, blocking |
+
+<Callout type="info">
+Minimal 1 robot harus menjadi Goalkeeper. Role assignment bisa dinamis tergantung situasi.
+</Callout>
+
+---
+
+## Behavior Trees
+
+### Konsep
+
+Behavior Tree adalah struktur hierarkis untuk decision making:
+
+```
+            [Root]
+               │
+        ┌──────┼──────┐
+        ▼      ▼      ▼
+    [Selector]  [Sequence]  [Parallel]
+        │
+   ┌────┼────┐
+   ▼    ▼    ▼
+ [A]  [B]  [C]  ← Actions/Conditions
+```
+
+### Node Types
+
+| Node | Symbol | Behavior |
+|------|--------|----------|
+| Selector | ? | Try children until one succeeds |
+| Sequence | → | Execute all children in order |
+| Parallel | ⇉ | Execute all children simultaneously |
+| Action | ◆ | Perform an action |
+| Condition | ◇ | Check a condition |
+
+---
+
+## Example: Striker Behavior
+
+```
+                [Striker Root]
+                      │
+               [Selector ?]
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+    [Ball Close?] [Ball Far?]  [Search]
+          │           │
+    [Sequence →] [Sequence →]
+     │    │        │    │
+    [Aim][Kick]  [Go to][Track]
+                   Ball   Ball
+```
+
+### Pseudocode
+
+```python
+def striker_behavior():
+    if ball_distance < KICK_RANGE:
+        aim_at_goal()
+        kick()
+    elif ball_visible:
+        walk_to_ball()
+    else:
+        search_for_ball()
+```
+
+---
+
+## State Machine
+
+Alternative approach menggunakan Finite State Machine (FSM):
+
+```
+┌────────────────────────────────────────────────┐
+│                                                │
+│   ┌─────────┐    ball_seen    ┌─────────────┐ │
+│   │ SEARCH  │ ──────────────→ │ APPROACH    │ │
+│   │         │ ←────────────── │             │ │
+│   └─────────┘    ball_lost    └──────┬──────┘ │
+│                                      │        │
+│                              ball_close       │
+│                                      │        │
+│                                      ▼        │
+│                               ┌─────────────┐ │
+│                               │    KICK     │ │
+│                               └─────────────┘ │
+│                                               │
+└────────────────────────────────────────────────┘
+```
+
+---
+
+## Multi-Robot Coordination
+
+### Role Assignment
+
+```python
+def assign_roles(robots, ball_position):
+    """
+    Dynamically assign roles based on situation.
+    """
+    # Find robot closest to ball
+    distances = [distance(r.position, ball_position) for r in robots]
+    striker_idx = argmin(distances)
+
+    for i, robot in enumerate(robots):
+        if i == 0:  # First robot is always goalkeeper
+            robot.role = GOALKEEPER
+        elif i == striker_idx:
+            robot.role = STRIKER
+        else:
+            robot.role = DEFENDER
+```
+
+### Communication
+
+Robots dapat berkomunikasi via:
+1. **Shared World Model** - Central server menerima data dari semua robot
+2. **Direct Messaging** - Robot-to-robot communication (WiFi)
+3. **Implicit Coordination** - Rules-based, no direct communication
+
+<Callout type="warn">
+Dalam RoboCup, komunikasi antar robot dibatasi. Cek rulebook untuk batasan bandwidth.
+</Callout>
+
+---
+
+## Game States
+
+Sesuai aturan RoboCup:
+
+| State | Aksi Robot |
+|-------|-----------|
+| INITIAL | Berdiri diam |
+| READY | Pergi ke posisi awal |
+| SET | Tunggu di posisi |
+| PLAYING | Main! |
+| FINISHED | Berhenti |
+| PENALIZED | Keluar lapangan |
+
+### Game Controller
+
+```bash
+# Receive game state from GameController
+ros2 topic echo /game_state
+
+# States: 0=INITIAL, 1=READY, 2=SET, 3=PLAYING, 4=FINISHED
+```
+
+---
+
+## Strategy Parameters
+
+### Tunable Values
+
+```yaml
+# strategy_params.yaml
+kick_range: 0.3          # meters
+aim_tolerance: 0.1       # radians
+search_turn_speed: 0.5   # rad/s
+approach_speed: 0.2      # m/s
+defense_zone_x: -2.0     # meters from center
+```
+
+---
+
+## Implementation Tips
+
+### 1. Start Simple
+
+```python
+# Basic striker behavior
+while True:
+    if see_ball():
+        if ball_close():
+            kick()
+        else:
+            walk_to_ball()
+    else:
+        turn_to_search()
+```
+
+### 2. Add Complexity Gradually
+
+```python
+# More sophisticated
+if game_state == PLAYING:
+    if role == STRIKER:
+        striker_behavior()
+    elif role == GOALKEEPER:
+        goalkeeper_behavior()
+    else:
+        defender_behavior()
+```
+
+### 3. Test in Simulation First
+
+```bash
+# Run Webots simulation
+ros2 launch op3_webots_ros2 robot_launch.py
+
+# Run strategy node
+ros2 run strategy_node strategy
+```
+
+---
+
+## Code Reference
+
+### Simple Striker
+
+```python
+class StrikerNode(Node):
+    def __init__(self):
+        super().__init__('striker_node')
+
+        # Subscribers
+        self.ball_sub = self.create_subscription(
+            Point, '/ball_position', self.ball_callback, 10)
+
+        # Publishers
+        self.walk_pub = self.create_publisher(
+            Twist, '/cmd_vel', 10)
+
+    def ball_callback(self, msg):
+        ball_x, ball_y = msg.x, msg.y
+
+        if ball_x < KICK_DISTANCE:
+            self.kick()
+        else:
+            self.walk_to(ball_x, ball_y)
+
+    def walk_to(self, x, y):
+        cmd = Twist()
+        cmd.linear.x = 0.2  # forward speed
+        cmd.angular.z = atan2(y, x) * 0.5  # turn toward ball
+        self.walk_pub.publish(cmd)
+```
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+
+```python
+def test_role_assignment():
+    robots = [Robot(0,0), Robot(1,1), Robot(2,2)]
+    ball = Point(1.5, 1.5)
+
+    assign_roles(robots, ball)
+
+    assert robots[0].role == GOALKEEPER
+    assert robots[1].role == STRIKER  # closest to ball
+```
+
+### Simulation Tests
+
+1. Single robot vs ball
+2. Two robots cooperation
+3. Full team coordination
+4. Against opponent (if available)
+
+---
+
+## Future Improvements
+
+- [ ] Machine Learning untuk decision making
+- [ ] Opponent modeling
+- [ ] Dynamic formation
+- [ ] Passing between robots
+- [ ] Set plays (corner, free kick)
+
+---
+
+## Resources
+
+- [Behavior Trees in Robotics and AI](https://arxiv.org/abs/1709.00084)
+- [RoboCup Game Controller](https://github.com/RoboCup-Humanoid-TC/GameController)
+- [Multi-Agent Systems](https://en.wikipedia.org/wiki/Multi-agent_system)

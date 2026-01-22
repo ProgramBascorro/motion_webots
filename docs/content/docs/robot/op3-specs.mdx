@@ -1,0 +1,199 @@
+---
+title: OP3 Specifications
+description: Spesifikasi lengkap ROBOTIS OP3
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# ROBOTIS OP3 Specifications
+
+ROBOTIS OP3 adalah platform robot humanoid open-source generasi ketiga dari ROBOTIS. Ini adalah penerus dari ROBOTIS OP (DARWIN OP) dan ROBOTIS OP2.
+
+---
+
+## Overview
+
+| Kategori | Spesifikasi |
+|----------|-------------|
+| Tinggi | 510.76 mm (20.1 in) |
+| Berat | 3.5 kg (7.7 lbs) |
+| DOF | 20 (6 per kaki, 3 per lengan, 2 di kepala) |
+| Walking Speed | 24.0 cm/sec (default) |
+| Step Time | 0.25 sec/step |
+
+---
+
+## Computing Power
+
+### Intel NUC (Onboard Computer)
+
+| Komponen | Spesifikasi |
+|----------|-------------|
+| Processor | Intel Core i3 |
+| RAM | 8 GB DDR4 (expandable to 32 GB) |
+| Storage | 250 GB SSD |
+| OS Support | Ubuntu 22.04, ROS 2 |
+
+<Callout type="info">
+Intel NUC memberikan computing power yang jauh lebih baik dibanding versi sebelumnya, mendukung 64-bit OS dan aplikasi AI/ML yang lebih kompleks.
+</Callout>
+
+---
+
+## Actuators (Servo Motors)
+
+### Dynamixel XM430-W350
+
+OP3 menggunakan 20 servo Dynamixel XM430 yang menggantikan MX-28 dari versi sebelumnya.
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Jumlah | 20 units |
+| Protocol | Dynamixel Protocol 2.0 |
+| Torque | 4.1 N.m (at 12V) |
+| Speed | 57 RPM (at 12V) |
+| Resolution | 4096 steps (0.088°) |
+| Control Modes | Position, Velocity, Torque, Extended Position |
+| Feedback | Position, Velocity, Load, Voltage, Temperature |
+
+**Keunggulan XM430 vs MX-28:**
+- Torque lebih tinggi
+- Current-based control
+- Lebih presisi
+- Lebih tahan lama
+
+---
+
+## Joint Configuration
+
+### Legs (6 DOF per leg = 12 total)
+
+| Joint | Nama | Fungsi |
+|-------|------|--------|
+| 1 | Hip Yaw | Rotasi pinggul |
+| 2 | Hip Roll | Gerakan samping pinggul |
+| 3 | Hip Pitch | Gerakan depan-belakang pinggul |
+| 4 | Knee Pitch | Tekukan lutut |
+| 5 | Ankle Pitch | Gerakan depan-belakang pergelangan |
+| 6 | Ankle Roll | Gerakan samping pergelangan |
+
+### Arms (3 DOF per arm = 6 total)
+
+| Joint | Nama | Fungsi |
+|-------|------|--------|
+| 1 | Shoulder Pitch | Ayunan bahu |
+| 2 | Shoulder Roll | Rotasi bahu |
+| 3 | Elbow Pitch | Tekukan siku |
+
+### Head (2 DOF)
+
+| Joint | Nama | Fungsi |
+|-------|------|--------|
+| 1 | Head Pan | Rotasi kiri-kanan |
+| 2 | Head Tilt | Gerakan atas-bawah |
+
+---
+
+## Sensors
+
+### IMU (Inertial Measurement Unit)
+
+| Sensor | Axis | Fungsi |
+|--------|------|--------|
+| Gyroscope | 3-axis | Kecepatan rotasi |
+| Accelerometer | 3-axis | Percepatan linear |
+| Magnetometer | 3-axis | Arah kompas |
+
+### Camera
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Model | Logitech C920 |
+| Resolution | 1080p Full HD |
+| FPS | 30 fps |
+| FOV | 78° diagonal |
+| Interface | USB 2.0 |
+
+### Audio
+
+| Komponen | Jumlah |
+|----------|--------|
+| Microphones | 2 |
+| Speaker | 1 |
+
+### Buttons
+
+| Button | Fungsi |
+|--------|--------|
+| Button 1 | Mode Select |
+| Button 2 | Start |
+| Button 3 | User-defined |
+| Button 4 | User-defined |
+
+---
+
+## Connectivity
+
+| Interface | Spesifikasi |
+|-----------|-------------|
+| Ethernet | Gigabit Ethernet |
+| WiFi | WiFi 6 (2.4 GHz & 5 GHz) |
+| Bluetooth | Bluetooth 5 |
+| USB | Multiple USB 2.0/3.0 ports |
+
+---
+
+## Power
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Battery | 1800 mAh LiPo |
+| Voltage | 11.1V (3S) |
+| Runtime | ~30 minutes |
+| Charging | External charger included |
+
+<Callout type="warn">
+**Hot-swap capability**: Battery bisa dilepas tanpa mematikan robot jika external power adapter terhubung terlebih dahulu.
+</Callout>
+
+---
+
+## Physical Dimensions
+
+```
+        ┌─────┐
+        │Head │ ← Camera, IMU
+        └──┬──┘
+     ┌─────┴─────┐
+     │   Torso   │ ← Intel NUC, Battery
+     │  (Body)   │
+     ├─────┬─────┤
+    Arm   │   Arm
+          │
+     ┌────┴────┐
+     │         │
+    Leg       Leg
+     │         │
+    Foot     Foot
+
+Total Height: 510.76 mm
+```
+
+---
+
+## Software Compatibility
+
+| Software | Version |
+|----------|---------|
+| Ubuntu | 22.04 LTS |
+| ROS 2 | Humble Hawksbill |
+| Webots | 2023a+ |
+| Gazebo | Fortress+ |
+
+---
+
+## Resources
+
+- [ROBOTIS OP3 E-Manual](https://emanual.robotis.com/docs/en/platform/op3/introduction/)
+- [Dynamixel XM430 Datasheet](https://emanual.robotis.com/docs/en/dxl/x/xm430-w350/)
+- [ROBOTIS GitHub](https://github.com/ROBOTIS-GIT)

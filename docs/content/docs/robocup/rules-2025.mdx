@@ -1,0 +1,236 @@
+---
+title: RoboCup Rules 2025
+description: Ringkasan peraturan RoboCup Humanoid League 2025
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# RoboCup Humanoid League Rules 2025
+
+Ringkasan peraturan penting dari [RC-HL-2025-Rules.pdf](http://humanoid.robocup.org/wp-content/uploads/RC-HL-2025-Rules.pdf).
+
+<Callout type="warn">
+Dokumen ini adalah **ringkasan**. Selalu baca rulebook resmi untuk informasi lengkap dan terbaru.
+</Callout>
+
+---
+
+## Robot Requirements
+
+### Humanoid Form
+
+Robot HARUS memiliki bentuk seperti manusia:
+- **2 kaki** - untuk berjalan bipedal
+- **2 lengan** - proporsional dengan tubuh
+- **1 kepala** - untuk kamera/sensor
+- **1 torso** - menghubungkan semua bagian
+
+### Size Classes
+
+| Class | Tinggi (H) | Lebar Max | Lengan Max |
+|-------|------------|-----------|------------|
+| KidSize | 40-100 cm | 0.55 × H | 0.4 × H |
+| AdultSize | 100-200 cm | 0.55 × H | 0.4 × H |
+
+### Locomotion
+
+- **Hanya bipedal walking** yang diperbolehkan
+- Semua gerakan harus kinematically equivalent dengan gerakan manusia
+- Robot harus bisa berdiri dari posisi jatuh (KidSize)
+
+### Safety Requirements
+
+| Requirement | Detail |
+|-------------|--------|
+| Emergency Stop | Harus ada tombol yang langsung menghentikan robot |
+| Handle | KidSize wajib punya handle untuk diangkat |
+| No Sharp Edges | Tidak boleh ada bagian tajam |
+| Weight | Sesuai dengan struktur untuk bipedal |
+
+---
+
+## Field & Ball
+
+### KidSize Field
+
+```
+┌────────────────────────────────────────────────┐
+│                   9.0 m                        │
+│  ┌──────────────────────────────────────────┐  │
+│  │                                          │  │
+│  │   ┌────┐                      ┌────┐     │  │
+│  │   │Goal│   ┌──────────────┐   │Goal│     │  │
+│  │   │2.6m│   │    Center    │   │2.6m│     │  │6.0m
+│  │   │    │   │    Circle    │   │    │     │  │
+│  │   └────┘   │    1.5m Ø    │   └────┘     │  │
+│  │            └──────────────┘              │  │
+│  │                                          │  │
+│  └──────────────────────────────────────────┘  │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+### Field Specifications
+
+| Element | KidSize | AdultSize |
+|---------|---------|-----------|
+| Field Size | 9m × 6m | 14m × 9m |
+| Goal Size | 2.6m × 1m | 3m × 1.8m |
+| Penalty Area | 3m × 1m | 5m × 2m |
+| Center Circle | 1.5m Ø | 3m Ø |
+| Surface | Artificial turf ~30mm | Artificial turf |
+
+### Ball
+
+| Class | Ball Size | Color |
+|-------|-----------|-------|
+| KidSize | FIFA Size 1 | Orange |
+| AdultSize | FIFA Size 5 | Standard |
+
+---
+
+## Team Composition
+
+### KidSize
+
+- **Max 4 players** di lapangan
+- **Min 1 player** untuk memulai match
+- **1 goalkeeper** wajib ditunjuk
+
+### Substitution
+
+- Pergantian pemain diperbolehkan saat stoppage
+- Robot yang diganti tidak boleh masuk lagi di half yang sama
+
+---
+
+## Game Duration
+
+| Phase | Duration |
+|-------|----------|
+| Half | 10 minutes |
+| Half-time | 5 minutes |
+| Overtime (if tie) | 2 × 5 minutes |
+
+---
+
+## Game States
+
+### State Transitions
+
+```
+INITIAL → READY → SET → PLAYING → FINISHED
+                    ↓
+              (PENALIZED)
+```
+
+| State | Robot Action |
+|-------|--------------|
+| INITIAL | Berdiri diam, tidak bergerak |
+| READY | Pergi ke posisi awal |
+| SET | Tunggu di posisi, tidak bergerak |
+| PLAYING | Bermain! |
+| FINISHED | Berhenti |
+| PENALIZED | Keluar lapangan, timer penalty |
+
+### Game Controller
+
+Semua state dikontrol via **GameController**:
+```bash
+# Message format
+GameControlData:
+  state: 3  # PLAYING
+  secondary_state: 0
+  kick_off_team: 0
+  # ... etc
+```
+
+---
+
+## Penalties & Fouls
+
+### Common Penalties
+
+| Foul | Penalty Time |
+|------|--------------|
+| Pushing | 30 seconds |
+| Holding | 30 seconds |
+| Fallen too long | 20 seconds |
+| Ball manipulation | 30 seconds |
+| Illegal motion | 30 seconds |
+
+### Red Card Offenses
+
+- Request to pick up (third offense)
+- Violent conduct
+- Repeated yellow cards
+
+---
+
+## Scoring
+
+### Goal Rules
+
+- Ball must completely cross goal line
+- No goal if scored during illegal play
+- Own goals count
+
+### Tie Breaker (Knockout)
+
+1. Overtime (2 × 5 min)
+2. Penalty kicks (extended if still tied)
+
+---
+
+## Technical Challenges
+
+Selain match, ada technical challenges untuk demonstrasi kemampuan:
+
+| Challenge | Focus |
+|-----------|-------|
+| Push Recovery | Balance saat didorong |
+| High Jump | Melompat tinggi |
+| High Kick | Tendangan tinggi |
+| Parkour | Obstacle course |
+
+---
+
+## Important Changes 2025
+
+<Callout type="info">
+Check rulebook resmi untuk perubahan terbaru dari 2024 ke 2025.
+</Callout>
+
+Perubahan yang umum terjadi tiap tahun:
+- Field size adjustments
+- Penalty time modifications
+- Technical challenge updates
+- Communication protocol changes
+
+---
+
+## Checklist Robot
+
+### Pre-Competition
+
+- [ ] Robot memenuhi size requirements
+- [ ] Emergency stop button berfungsi
+- [ ] Handle terpasang (KidSize)
+- [ ] Tidak ada bagian tajam
+- [ ] Battery fully charged
+- [ ] Software tested
+
+### At Competition
+
+- [ ] Robot inspection passed
+- [ ] GameController connected
+- [ ] Communication tested
+- [ ] Backup robot ready
+
+---
+
+## Resources
+
+- [Official Rules 2025 (PDF)](http://humanoid.robocup.org/wp-content/uploads/RC-HL-2025-Rules.pdf)
+- [Humanoid League Website](https://humanoid.robocup.org/)
+- [Technical Committee Updates](https://humanoid.robocup.org/materials/rules/)

@@ -1,0 +1,100 @@
+---
+title: Robot Hardware
+description: Dokumentasi hardware robot BASCORRO
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Robot Hardware
+
+BASCORRO menggunakan platform **ROBOTIS OP3** sebagai basis robot humanoid untuk kompetisi RoboCup Humanoid League.
+
+---
+
+## Robot Kami
+
+### OP3 BASCORRO v1 (Primary Striker)
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Platform | ROBOTIS OP3 |
+| Tinggi | 510 mm |
+| Berat | 3.5 kg |
+| DOF | 20 joints |
+| OS | ROS 2 Humble |
+| Status | **Active** |
+
+Robot utama yang digunakan untuk development dan kompetisi. Berbasis platform OP3 dengan custom kinematics dan vision system.
+
+### BASCORRO G-1 (Goalkeeper Prototype)
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Tinggi | 525 mm |
+| Berat | 3.8 kg |
+| DOF | 22 joints |
+| Vision | Stereo Camera |
+| Status | **In Development** |
+
+Prototipe kiper generasi berikutnya dengan trajectory prediction dan stability control yang lebih baik.
+
+---
+
+## Dokumentasi Hardware
+
+<Cards>
+  <Card
+    title="OP3 Specifications"
+    description="Detail spesifikasi ROBOTIS OP3"
+    href="/docs/robot/op3-specs"
+  />
+  <Card
+    title="Kinematics"
+    description="Forward/Inverse kinematics dan DOF"
+    href="/docs/robot/kinematics"
+  />
+  <Card
+    title="Sensors"
+    description="IMU, kamera, dan sensor lainnya"
+    href="/docs/robot/sensors"
+  />
+</Cards>
+
+---
+
+## RoboCup Size Class
+
+BASCORRO berkompetisi di **KidSize** class:
+
+| Class | Tinggi Robot | Ukuran Bola |
+|-------|--------------|-------------|
+| **KidSize** | 40-100 cm | FIFA Size 1 |
+| AdultSize | 100-200 cm | FIFA Size 5 |
+
+<Callout type="info">
+OP3 dengan tinggi 510mm masuk kategori **KidSize** di RoboCup Humanoid League.
+</Callout>
+
+---
+
+## Hardware Safety
+
+### Emergency Stop Button
+
+Semua robot HARUS memiliki emergency stop button yang:
+- Mudah dijangkau
+- Langsung menghentikan semua gerakan
+- Memutus power ke aktuator
+
+### Handle
+
+Robot KidSize wajib memiliki handle untuk diangkat dengan aman oleh operator.
+
+---
+
+## Vendor & Resources
+
+- **ROBOTIS** - [emanual.robotis.com](https://emanual.robotis.com/docs/en/platform/op3/introduction/)
+- **Dynamixel** - [dynamixel.com](https://dynamixel.com/)
+- **Intel NUC** - Onboard computer

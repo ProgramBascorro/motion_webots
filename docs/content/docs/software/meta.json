@@ -1,0 +1,5 @@
+{
+  "title": "Software",
+  "icon": "Code",
+  "pages": ["index", "vision", "locomotion", "localization", "strategy", "simulation"]
+}

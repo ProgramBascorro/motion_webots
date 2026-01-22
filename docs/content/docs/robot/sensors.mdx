@@ -1,0 +1,290 @@
+---
+title: Sensors
+description: Sensor pada robot OP3 - IMU, kamera, dan lainnya
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Sensors
+
+Dokumentasi sensor yang terdapat pada robot ROBOTIS OP3, termasuk IMU, kamera, dan sensor tambahan.
+
+---
+
+## IMU (Inertial Measurement Unit)
+
+IMU adalah sensor kunci untuk balance control dan odometry.
+
+### Spesifikasi
+
+| Sensor | Axis | Output |
+|--------|------|--------|
+| Gyroscope | 3-axis | Angular velocity (rad/s) |
+| Accelerometer | 3-axis | Linear acceleration (m/s²) |
+| Magnetometer | 3-axis | Magnetic field (μT) |
+
+### ROS 2 Topic
+
+```bash
+# IMU data topic
+ros2 topic echo /imu/data
+
+# Message type: sensor_msgs/Imu
+```
+
+### Data Structure
+
+```python
+# sensor_msgs/Imu
+orientation:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+  w: 1.0
+angular_velocity:
+  x: 0.01  # rad/s
+  y: -0.02
+  z: 0.0
+linear_acceleration:
+  x: 0.1   # m/s²
+  y: 0.0
+  z: 9.81  # gravity
+```
+
+### Penggunaan
+
+1. **Balance Control** - Deteksi kemiringan tubuh untuk koreksi postur
+2. **Odometry** - Estimasi orientasi robot
+3. **Fall Detection** - Deteksi ketika robot jatuh
+
+<Callout type="warn">
+IMU bisa mengalami drift seiring waktu. Gunakan sensor fusion (EKF/UKF) untuk hasil yang lebih akurat.
+</Callout>
+
+---
+
+## Camera
+
+Kamera adalah sensor utama untuk vision system.
+
+### Logitech C920 HD Pro
+
+| Spesifikasi | Detail |
+|-------------|--------|
+| Resolution | 1920x1080 (Full HD) |
+| Frame Rate | 30 fps |
+| Field of View | 78° diagonal |
+| Focus | Auto/Manual |
+| Interface | USB 2.0 |
+
+### ROS 2 Topics
+
+```bash
+# Raw camera image
+ros2 topic echo /camera/image_raw
+
+# Camera info (calibration)
+ros2 topic echo /camera/camera_info
+
+# Message types
+# sensor_msgs/Image
+# sensor_msgs/CameraInfo
+```
+
+### Camera Calibration
+
+Kamera perlu dikalibrasi untuk menghilangkan distorsi lensa:
+
+```bash
+# Run calibration tool
+ros2 run camera_calibration cameracalibrator \
+  --size 8x6 \
+  --square 0.025 \
+  image:=/camera/image_raw
+```
+
+Output kalibrasi disimpan dalam format:
+```yaml
+camera_matrix:
+  - [fx, 0, cx]
+  - [0, fy, cy]
+  - [0, 0, 1]
+distortion_coefficients: [k1, k2, p1, p2, k3]
+```
+
+### Vision Pipeline
+
+```
+Camera → Undistort → Color Filter → Detection → 3D Projection
+                                        ↓
+                                  Ball Position
+                                  Field Lines
+```
+
+---
+
+## Dynamixel Servo Feedback
+
+Setiap servo Dynamixel XM430 memberikan feedback:
+
+### Data yang Tersedia
+
+| Data | Unit | Penggunaan |
+|------|------|------------|
+| Position | degrees/ticks | Joint angle |
+| Velocity | RPM | Motion speed |
+| Load/Torque | % | Force applied |
+| Voltage | V | Power monitoring |
+| Temperature | °C | Overheat protection |
+
+### ROS 2 Topic
+
+```bash
+# Joint states
+ros2 topic echo /joint_states
+
+# Message type: sensor_msgs/JointState
+```
+
+### Data Structure
+
+```python
+# sensor_msgs/JointState
+name: ['r_sho_pitch', 'l_sho_pitch', ...]
+position: [0.5, -0.3, ...]    # radians
+velocity: [0.1, -0.05, ...]   # rad/s
+effort: [10.0, 8.5, ...]      # N.m or %
+```
+
+---
+
+## Buttons
+
+OP3 memiliki 4 tombol fisik:
+
+| Button | Default Function | Customizable |
+|--------|------------------|--------------|
+| Button 1 | Mode Select | Yes |
+| Button 2 | Start | Yes |
+| Button 3 | User-defined | Yes |
+| Button 4 | User-defined | Yes |
+
+### ROS 2 Topic
+
+```bash
+ros2 topic echo /button_status
+```
+
+---
+
+## Microphones
+
+2 microphone untuk audio input:
+
+### Penggunaan Potensial
+- Voice commands
+- Whistle detection (start signal)
+- Sound localization
+
+<Callout type="info">
+Audio processing belum diimplementasikan di codebase BASCORRO saat ini. Ini bisa menjadi area pengembangan di masa depan.
+</Callout>
+
+---
+
+## Speaker
+
+1 speaker untuk audio output:
+
+### Penggunaan
+- Status announcements
+- Debug audio
+- Game state feedback
+
+---
+
+## Sensor Fusion
+
+### Extended Kalman Filter (EKF)
+
+Menggabungkan data dari multiple sensors:
+
+```
+IMU Data ─────┐
+               ├───→ EKF ───→ Robot State
+Odometry ─────┤              (position, velocity,
+               │               orientation)
+Vision Data ──┘
+```
+
+### Implementasi
+
+Package `robot_localization` menyediakan EKF/UKF nodes:
+
+```bash
+ros2 launch robot_localization ekf.launch.py
+```
+
+---
+
+## Sensor Coordinate Frames
+
+```
+      Camera Frame          IMU Frame
+      (Optical)
+         Z                     Z (up)
+         ↑                     ↑
+         │                     │
+         │                     │
+    X ←──┼── Y            X ───┼───→ Y
+                          (forward)
+```
+
+<Callout type="warn">
+**Perhatian**: Frame kamera (optical convention) berbeda dengan frame robot. Perlu transformasi saat memproses data vision.
+</Callout>
+
+---
+
+## Troubleshooting
+
+### IMU Tidak Terbaca
+
+```bash
+# Check USB connection
+lsusb
+
+# Check permissions
+sudo chmod 666 /dev/ttyUSB0
+```
+
+### Kamera Tidak Terdeteksi
+
+```bash
+# List video devices
+ls /dev/video*
+
+# Check camera
+v4l2-ctl --list-devices
+
+# Test camera
+cheese  # atau aplikasi webcam lainnya
+```
+
+### Servo Tidak Merespons
+
+```bash
+# Check Dynamixel connection
+ros2 run dynamixel_sdk scan_dynamixel
+
+# Check power
+# Pastikan battery charged atau power adapter terhubung
+```
+
+---
+
+## Resources
+
+- [sensor_msgs Documentation](http://docs.ros2.org/latest/api/sensor_msgs/)
+- [Logitech C920 Specs](https://www.logitech.com/en-us/products/webcams/c920-pro-hd-webcam.html)
+- [Dynamixel XM430 Datasheet](https://emanual.robotis.com/docs/en/dxl/x/xm430-w350/)

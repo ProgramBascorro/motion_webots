@@ -1,0 +1,298 @@
+---
+title: Vision System
+description: Computer vision untuk deteksi bola, lapangan, dan landmark
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Vision System
+
+Package `soccer_vision` adalah sistem computer vision untuk mendeteksi objek-objek penting di lapangan sepakbola robot: bola, garis lapangan, gawang, dan landmark lainnya.
+
+---
+
+## Overview
+
+```
+Camera Image
+     │
+     ▼
+┌─────────────────┐
+│  Preprocessing  │ ← Undistort, Color Conversion
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌────────┐ ┌────────┐
+│  Ball  │ │ Field  │
+│Detector│ │Detector│
+└────┬───┘ └────┬───┘
+     │          │
+     ▼          ▼
+┌─────────────────┐
+│  3D Projection  │ ← Ground Plane
+└────────┬────────┘
+         │
+         ▼
+    Ball Position
+    Field Lines
+```
+
+---
+
+## Package: soccer_vision
+
+### Location
+```
+ros_ws/src/soccer_vision/
+├── soccer_vision/
+│   ├── detector_node.py      # Main node
+│   ├── ball_detector.py      # Ball detection
+│   └── field_detector.py     # Field/line detection
+├── launch/
+│   └── soccer_vision.launch.py
+└── package.xml
+```
+
+### Launch Command
+
+```bash
+ros2 launch soccer_vision soccer_vision.launch.py publish_debug_image:=true
+```
+
+---
+
+## Ball Detection
+
+### Metode: Color-Based Detection (HSV Filtering)
+
+Bola RoboCup KidSize berwarna **oranye**. Deteksi menggunakan color segmentation di color space HSV.
+
+```python
+# HSV ranges for orange ball
+HSV_LOWER = (5, 100, 100)    # Hue, Saturation, Value
+HSV_UPPER = (15, 255, 255)
+```
+
+### Pipeline
+
+```python
+def detect_ball(image):
+    # 1. Convert BGR to HSV
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # 2. Create mask for orange color
+    mask = cv2.inRange(hsv, HSV_LOWER, HSV_UPPER)
+
+    # 3. Morphological operations (remove noise)
+    mask = cv2.erode(mask, kernel, iterations=2)
+    mask = cv2.dilate(mask, kernel, iterations=2)
+
+    # 4. Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # 5. Find largest circle (ball)
+    for contour in contours:
+        (x, y), radius = cv2.minEnclosingCircle(contour)
+        if radius > MIN_RADIUS:
+            return (x, y, radius)
+
+    return None
+```
+
+### Output Topic
+
+```bash
+# Ball position in image coordinates
+ros2 topic echo /ball_position
+
+# Message type: geometry_msgs/Point
+# x, y: pixel coordinates
+# z: radius (size)
+```
+
+---
+
+## Field Detection
+
+### Metode: White Line Detection
+
+Garis lapangan berwarna **putih**. Deteksi menggunakan:
+1. Color filtering (white)
+2. Edge detection (Canny)
+3. Hough Line Transform
+
+```python
+def detect_field_lines(image):
+    # 1. Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # 2. Threshold for white
+    _, white_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+
+    # 3. Edge detection
+    edges = cv2.Canny(white_mask, 50, 150)
+
+    # 4. Hough Line Transform
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50,
+                            minLineLength=50, maxLineGap=10)
+
+    return lines
+```
+
+---
+
+## 3D Projection (Ground Plane)
+
+Mengkonversi koordinat piksel (2D) ke koordinat dunia (3D).
+
+### Camera Model
+
+```
+        Optical Axis
+             │
+             │
+    ┌────────┼────────┐
+    │        │        │
+    │    Camera       │  ← Height: h
+    │        │        │  ← Pitch: θ
+    └────────┼────────┘
+             │
+             │  Field of View
+            / \
+           /   \
+          /     \
+    ─────/───────\─────  Ground Plane (z=0)
+```
+
+### Projection Formula
+
+```python
+def pixel_to_world(u, v, camera_height, camera_pitch, fx, fy, cx, cy):
+    """
+    Convert pixel (u, v) to world (x, y) on ground plane.
+
+    Args:
+        u, v: pixel coordinates
+        camera_height: height of camera from ground (m)
+        camera_pitch: camera tilt angle (rad)
+        fx, fy: focal lengths
+        cx, cy: principal point
+
+    Returns:
+        x, y: position on ground (m)
+    """
+    # Normalized coordinates
+    x_norm = (u - cx) / fx
+    y_norm = (v - cy) / fy
+
+    # Ray direction in camera frame
+    ray = np.array([x_norm, y_norm, 1.0])
+
+    # Rotate by camera pitch
+    R = rotation_matrix(camera_pitch, axis='x')
+    ray_world = R @ ray
+
+    # Intersect with ground plane (z = 0)
+    t = -camera_height / ray_world[2]
+    x = ray_world[0] * t
+    y = ray_world[1] * t
+
+    return x, y
+```
+
+---
+
+## Launch Parameters
+
+```python
+# soccer_vision.launch.py
+
+DeclareLaunchArgument('camera_topic', default_value='/camera/image_raw'),
+DeclareLaunchArgument('publish_debug_image', default_value='false'),
+DeclareLaunchArgument('camera_height', default_value='0.45'),  # meters
+DeclareLaunchArgument('camera_pitch', default_value='0.3'),    # radians
+DeclareLaunchArgument('use_yolo', default_value='false'),
+```
+
+---
+
+## YOLO Integration (Opsional)
+
+Untuk deteksi yang lebih robust, bisa menggunakan YOLO:
+
+```python
+# Enable YOLO in launch
+ros2 launch soccer_vision soccer_vision.launch.py use_yolo:=true
+
+# Requires:
+# - YOLO model trained on RoboCup ball/field
+# - GPU with CUDA support (recommended)
+```
+
+<Callout type="info">
+YOLO memberikan hasil lebih baik dalam kondisi pencahayaan berubah, tapi membutuhkan GPU dan lebih lambat dari color-based detection.
+</Callout>
+
+---
+
+## Debug Visualization
+
+```bash
+# Enable debug image
+ros2 launch soccer_vision soccer_vision.launch.py publish_debug_image:=true
+
+# View debug image
+ros2 run rqt_image_view rqt_image_view
+# Select topic: /debug_image
+```
+
+Debug image menampilkan:
+- Detected ball (green circle)
+- Detected lines (red lines)
+- Ball position text
+
+---
+
+## Tuning Tips
+
+### Ball Not Detected?
+
+1. **Check HSV values** - Lighting affects color. Adjust HSV ranges.
+2. **Check minimum radius** - Ball terlalu kecil/jauh mungkin tidak terdeteksi.
+3. **Print mask** - Visualisasi mask untuk debug.
+
+```python
+# Save mask for debugging
+cv2.imwrite('ball_mask.png', mask)
+```
+
+### False Positives?
+
+1. **Tighten HSV range** - Kurangi range untuk lebih spesifik.
+2. **Add shape validation** - Check circularity.
+3. **Filter by size** - Ignore objects too small/large.
+
+---
+
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| FPS | ~30 fps (color-based) |
+| FPS | ~10-15 fps (YOLO) |
+| Latency | ~30-50 ms |
+
+<Callout type="warn">
+Performance tergantung pada resolusi kamera dan spesifikasi komputer. Untuk real-time, pertimbangkan resize image sebelum processing.
+</Callout>
+
+---
+
+## Future Improvements
+
+- [ ] Upgrade ke YOLO sebagai default
+- [ ] Multi-ball detection
+- [ ] Goal post detection
+- [ ] Robot detection (opponent/teammate)
+- [ ] Field localization via landmarks

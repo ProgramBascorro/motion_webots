@@ -1,0 +1,332 @@
+---
+title: Locomotion
+description: Walking control, gait generation, dan balance untuk robot OP3
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Locomotion
+
+Modul locomotion mengontrol gerakan berjalan robot, termasuk gait generation, balance control, dan action execution.
+
+---
+
+## Overview
+
+```
+Walking Command
+      │
+      ▼
+┌─────────────────┐
+│ Walking Module  │ ← Gait Generator
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│Balance Control  │ ← IMU Feedback
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Kinematics (IK) │ ← Joint Angles
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Motor Control   │ ← Dynamixel SDK
+└─────────────────┘
+```
+
+---
+
+## Core Packages
+
+| Package | Fungsi |
+|---------|--------|
+| `op3_walking_module` | Standard walking gait |
+| `op3_online_walking_module` | Real-time walking (adjustable) |
+| `op3_balance_control` | Dynamic balance during motion |
+| `op3_action_module` | Pre-programmed actions |
+| `op3_kinematics_dynamics` | Inverse kinematics |
+
+---
+
+## Walking Module
+
+### op3_walking_module
+
+Standard walking dengan parameter preset. Cocok untuk gerakan sederhana.
+
+```bash
+# Enable walking
+ros2 service call /walking_module/enable std_srvs/srv/Empty
+
+# Set walking parameters
+ros2 topic pub /walking/command op3_walking_module_msgs/msg/WalkingParam ...
+```
+
+### Parameters
+
+| Parameter | Range | Default | Description |
+|-----------|-------|---------|-------------|
+| x_move | -0.3 ~ 0.3 m | 0.0 | Forward/backward |
+| y_move | -0.2 ~ 0.2 m | 0.0 | Left/right strafe |
+| turn | -30 ~ 30 deg | 0.0 | Rotation |
+| step_time | 0.2 ~ 0.5 s | 0.25 | Duration per step |
+| z_move | 0.02 ~ 0.06 m | 0.04 | Foot lift height |
+
+---
+
+## Online Walking Module
+
+### op3_online_walking_module
+
+Real-time walking dengan footstep planning. Bisa adjust trajectory mid-motion.
+
+```bash
+# Launch online walking
+ros2 run op3_online_walking_module online_walking_node
+
+# Send footstep sequence
+ros2 topic pub /walking/footsteps op3_online_walking_module_msgs/msg/Step2DArray ...
+```
+
+### Step2DArray Message
+
+```python
+# Step definition
+step:
+  - position:
+      x: 0.05   # meters forward
+      y: 0.0    # meters left
+    theta: 0.0  # radians rotation
+    foot: 0     # 0=left, 1=right
+```
+
+---
+
+## Balance Control
+
+### op3_balance_control
+
+Menggunakan feedback IMU untuk menjaga keseimbangan saat berjalan.
+
+```
+IMU Data ───┐
+            │
+            ▼
+    ┌───────────────┐
+    │   PD Control  │ ← Kp, Kd gains
+    └───────┬───────┘
+            │
+            ▼
+    Joint Compensation
+```
+
+### Tuning Gains
+
+```yaml
+# balance_control.yaml
+balance_control:
+  roll_p_gain: 0.1
+  roll_d_gain: 0.01
+  pitch_p_gain: 0.1
+  pitch_d_gain: 0.01
+```
+
+<Callout type="warn">
+Gain yang terlalu tinggi menyebabkan oscillation. Gain terlalu rendah menyebabkan robot tidak stabil. Tuning harus dilakukan dengan hati-hati.
+</Callout>
+
+---
+
+## Action Module
+
+### op3_action_module
+
+Pre-programmed motion sequences untuk gerakan kompleks:
+- Get up from fall (face up/down)
+- Kick (left/right)
+- Goal celebration
+- Defense stance
+
+```bash
+# Play action
+ros2 service call /action_module/play std_srvs/srv/Trigger
+
+# Action editor untuk membuat action baru
+ros2 run op3_action_editor webots_executor.py
+```
+
+### Action File Format
+
+```yaml
+# action.yaml
+kick_right:
+  - time: 0.0
+    joints:
+      r_hip_pitch: -0.5
+      r_knee: 1.0
+      # ... other joints
+  - time: 0.3
+    joints:
+      r_hip_pitch: 0.8
+      r_knee: 0.2
+```
+
+---
+
+## Gait Cycle
+
+### Walking Phases
+
+```
+      Stance Phase (60%)         Swing Phase (40%)
+    ┌───────────────────┐     ┌─────────────────┐
+    │   Foot on ground  │     │  Foot in air    │
+    │   - Support body  │     │  - Move forward │
+    │   - Shift CoM     │     │  - Clear ground │
+    └───────────────────┘     └─────────────────┘
+
+    Double Support    Single Support    Double Support
+    ┌────────┐       ┌────────────┐    ┌────────┐
+    │ Both   │       │   One      │    │ Both   │
+    │ feet   │       │   foot     │    │ feet   │
+    └────────┘       └────────────┘    └────────┘
+       10%               80%               10%
+```
+
+### Center of Mass (CoM) Trajectory
+
+```
+        CoM position (top view)
+              ↑
+              │    ___
+              │   /   \
+     Left ────│──/─────\──── Right
+              │  \     /
+              │   \___/
+              │
+        ──────┼───────────→ Forward
+
+    CoM bergerak ke kiri-kanan untuk menjaga balance
+    saat satu kaki terangkat (swing phase)
+```
+
+---
+
+## Zero Moment Point (ZMP)
+
+ZMP adalah titik di mana total moment dari gravitasi dan inersia = 0.
+
+### Stability Criterion
+
+```
+┌─────────────────────────┐
+│    Support Polygon      │
+│  ┌─────┐       ┌─────┐  │
+│  │Left │       │Right│  │
+│  │Foot │   *   │Foot │  │  ← ZMP (*) harus di dalam
+│  └─────┘       └─────┘  │    support polygon
+│                         │
+└─────────────────────────┘
+```
+
+Jika ZMP keluar dari support polygon → robot jatuh.
+
+---
+
+## Odometry
+
+### walking_imu_to_odometry
+
+Mengkonversi walking commands + IMU data menjadi odometry.
+
+```python
+# Input
+- Walking step commands (direction, speed)
+- IMU orientation
+
+# Output
+- nav_msgs/Odometry
+- TF: odom → base_link
+```
+
+```bash
+# View odometry
+ros2 topic echo /odom
+```
+
+---
+
+## Performance Specs
+
+| Metric | Value |
+|--------|-------|
+| Max Walking Speed | 24 cm/s |
+| Step Time | 0.25 s |
+| Step Length | 6 cm |
+| Turn Rate | ~30 deg/s |
+
+---
+
+## Troubleshooting
+
+### Robot Tidak Berjalan
+
+```bash
+# Check if walking module is enabled
+ros2 service list | grep walking
+
+# Check joint state
+ros2 topic echo /joint_states
+```
+
+### Robot Terjatuh Saat Berjalan
+
+1. **Check battery** - Low voltage menyebabkan servo lemah
+2. **Reduce speed** - Turunkan x_move dan step_time
+3. **Check balance gains** - Tuning PD controller
+4. **Check ground surface** - Permukaan licin/tidak rata
+
+### Gerakan Tidak Smooth
+
+1. **Increase step_time** - Gerakan lebih lambat tapi smooth
+2. **Check servo temperature** - Overheat menyebabkan lag
+3. **Reduce payload** - Kurangi beban pada robot
+
+---
+
+## Code Reference
+
+### Walking Command (Python)
+
+```python
+from op3_walking_module_msgs.msg import WalkingParam
+
+msg = WalkingParam()
+msg.x_move = 0.03       # 3 cm forward
+msg.y_move = 0.0        # no strafe
+msg.angle_move = 0.0    # no turn
+
+publisher.publish(msg)
+```
+
+### Stop Walking
+
+```python
+msg = WalkingParam()
+msg.x_move = 0.0
+msg.y_move = 0.0
+msg.angle_move = 0.0
+# Send zero command to stop
+publisher.publish(msg)
+```
+
+---
+
+## Resources
+
+- [Humanoid Robot Walking Control](https://www.cs.cmu.edu/~hgeyer/Teaching/R16-899B/Papers/Kajita01PEDESTRIAN.pdf)
+- [ROBOTIS OP3 Walking](https://emanual.robotis.com/docs/en/platform/op3/robotis_ros_packages/#walking)
+- [ZMP Stability](https://en.wikipedia.org/wiki/Zero_moment_point)

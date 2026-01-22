@@ -1,0 +1,170 @@
+---
+title: First Run
+description: Jalankan simulasi BASCORRO pertama kamu
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+# First Run
+
+Setelah instalasi selesai, saatnya menjalankan simulasi robot OP3 di Webots!
+
+---
+
+## Quick Run (Cara Cepat)
+
+Cara termudah untuk menjalankan simulasi adalah menggunakan script yang sudah disediakan:
+
+```bash
+# Dari root directory project
+cd motion_webots
+
+# Berikan permission
+chmod +x ./run/run_vision_and_webots.sh
+
+# Jalankan
+./run/run_vision_and_webots.sh
+```
+
+Script ini akan otomatis:
+1. Menjalankan Webots simulator
+2. Memulai node vision
+3. Menghubungkan semua ROS 2 nodes
+
+---
+
+## Manual Run (Step by Step)
+
+Jika kamu ingin memahami prosesnya secara detail:
+
+<Steps>
+<Step>
+### Terminal 1: Source Workspace
+
+```bash
+cd motion_webots/ros_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+```
+</Step>
+
+<Step>
+### Terminal 2: Launch Webots Simulation
+
+```bash
+ros2 launch op3_webots_ros2 robot_launch.py world:=worlds/op3_env.wbt
+```
+
+Webots akan terbuka dengan environment lapangan sepakbola dan robot OP3.
+</Step>
+
+<Step>
+### Terminal 3: Launch Vision Node
+
+```bash
+ros2 launch soccer_vision soccer_vision.launch.py publish_debug_image:=true
+```
+
+Node vision akan mulai memproses gambar dari kamera robot.
+</Step>
+
+<Step>
+### Terminal 4: View Camera Feed (Optional)
+
+```bash
+ros2 run rqt_image_view rqt_image_view
+```
+
+Pilih topic `/camera/image_raw` atau `/debug_image` untuk melihat output.
+</Step>
+</Steps>
+
+---
+
+## Apa yang Akan Kamu Lihat
+
+Setelah berhasil menjalankan:
+
+1. **Webots Window** - Simulasi 3D robot OP3 di lapangan
+2. **Terminal Output** - Log dari ROS 2 nodes
+3. **RQT Image View** - Feed kamera robot (jika diaktifkan)
+
+<Callout type="info">
+Robot mungkin tidak langsung bergerak. Kamu perlu mengirim command melalui ROS 2 topics atau menggunakan action editor.
+</Callout>
+
+---
+
+## Basic Commands
+
+### Melihat ROS 2 Topics
+
+```bash
+# List semua topics
+ros2 topic list
+
+# Echo topic tertentu
+ros2 topic echo /ball_position
+```
+
+### Melihat ROS 2 Nodes
+
+```bash
+# List semua nodes
+ros2 node list
+
+# Info node tertentu
+ros2 node info /soccer_vision_node
+```
+
+### Action Editor
+
+Untuk membuat dan mengedit gerakan robot:
+
+```bash
+ros2 run op3_action_editor webots_executor.py
+```
+
+---
+
+## Troubleshooting
+
+### Webots Tidak Terbuka
+
+```bash
+# Pastikan Webots terinstall
+webots --version
+
+# Jika tidak ada, install:
+sudo apt install webots
+```
+
+### Vision Node Error
+
+```bash
+# Check apakah camera topic aktif
+ros2 topic list | grep camera
+
+# Pastikan OpenCV terinstall
+python3 -c "import cv2; print(cv2.__version__)"
+```
+
+### Build Error
+
+```bash
+# Rebuild workspace
+cd ros_ws
+colcon build --continue-on-error
+
+# Install missing dependencies
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+---
+
+## Next Steps
+
+- Pelajari [Architecture](/docs/getting-started/architecture) untuk memahami struktur sistem
+- Explore [Software Stack](/docs/software) untuk detail modul vision, locomotion, dll
+- Coba modifikasi parameter di launch files

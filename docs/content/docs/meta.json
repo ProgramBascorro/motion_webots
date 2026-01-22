@@ -1,0 +1,21 @@
+{
+  "title": "Documentation",
+  "icon": "Bot",
+  "pages": [
+    "index",
+    "---Getting Started---",
+    "getting-started",
+    "---Robot---",
+    "robot",
+    "---Software---",
+    "software",
+    "---RoboCup---",
+    "robocup",
+    "---Development---",
+    "development",
+    "---Team---",
+    "(onboarding)",
+    "---Resources---",
+    "references"
+  ]
+}
