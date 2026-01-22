@@ -18,13 +18,16 @@ detect_setup_optional() {
     return 1
   fi
 
-  local cand1="$WS/install/setup.zsh"
-  local cand2="$WS/install/setup.bash"
-  local cand3="$WS/install/setup.sh"
-  local cand4="$WS/install/local_setup.zsh"
-  local cand5="$WS/install/local_setup.bash"
+  # Prefer bash/sh setup scripts since the project entrypoint is bash. Use zsh
+  # only if explicitly requested via --setup/OP3_SETUP or OP3_SHELL_RUNNER.
+  local cand1="$WS/install/setup.bash"
+  local cand2="$WS/install/setup.sh"
+  local cand3="$WS/install/setup.zsh"
+  local cand4="$WS/install/local_setup.bash"
+  local cand5="$WS/install/local_setup.sh"
+  local cand6="$WS/install/local_setup.zsh"
 
-  for c in "$cand1" "$cand2" "$cand3" "$cand4" "$cand5"; do
+  for c in "$cand1" "$cand2" "$cand3" "$cand4" "$cand5" "$cand6"; do
     if [[ -f "$c" ]]; then
       SETUP="$c"
       return 0
@@ -63,13 +66,15 @@ auto_detect_setup() {
     return 0
   fi
 
-  local cand1="$WS/install/setup.zsh"
-  local cand2="$WS/install/setup.bash"
-  local cand3="$WS/install/setup.sh"
-  local cand4="$WS/install/local_setup.zsh"
-  local cand5="$WS/install/local_setup.bash"
+  # Prefer bash/sh setup scripts since the project entrypoint is bash.
+  local cand1="$WS/install/setup.bash"
+  local cand2="$WS/install/setup.sh"
+  local cand3="$WS/install/setup.zsh"
+  local cand4="$WS/install/local_setup.bash"
+  local cand5="$WS/install/local_setup.sh"
+  local cand6="$WS/install/local_setup.zsh"
 
-  for c in "$cand1" "$cand2" "$cand3" "$cand4" "$cand5"; do
+  for c in "$cand1" "$cand2" "$cand3" "$cand4" "$cand5" "$cand6"; do
     if [[ -f "$c" ]]; then
       SETUP="$c"
       return 0
@@ -81,12 +86,37 @@ auto_detect_setup() {
 
 auto_detect_shell_runner() {
   if [[ -n "$SHELL_RUNNER" ]]; then
+    # If the user forces zsh, fail fast with a clearer message.
+    if [[ "$SHELL_RUNNER" == zsh* ]] && ! command -v zsh >/dev/null 2>&1; then
+      die "OP3_SHELL_RUNNER is set to zsh but zsh is not installed. Install zsh or set OP3_SHELL_RUNNER='bash -lc'."
+    fi
     return 0
   fi
-  case "$SETUP" in
-    *.zsh) SHELL_RUNNER="zsh -lc" ;;
-    *)     SHELL_RUNNER="bash -lc" ;;
-  esac
+
+  if [[ "$SETUP" == *.zsh ]]; then
+    if command -v zsh >/dev/null 2>&1; then
+      SHELL_RUNNER="zsh -lc"
+      return 0
+    fi
+
+    # zsh isn't available; fall back to a bash/sh setup script if present.
+    local alt_bash="${SETUP%.zsh}.bash"
+    local alt_sh="${SETUP%.zsh}.sh"
+    if [[ -f "$alt_bash" ]]; then
+      SETUP="$alt_bash"
+      SHELL_RUNNER="bash -lc"
+      return 0
+    fi
+    if [[ -f "$alt_sh" ]]; then
+      SETUP="$alt_sh"
+      SHELL_RUNNER="bash -lc"
+      return 0
+    fi
+
+    die "Setup script is zsh-only ($SETUP) but zsh is not installed. Use --setup '$WS/install/setup.bash' or install zsh."
+  fi
+
+  SHELL_RUNNER="bash -lc"
 }
 
 health_check() {
@@ -98,10 +128,10 @@ health_check() {
   [[ -f "$SETUP" ]] || die "Setup file not found: $SETUP"
   ensure_webots_bin
 
-  if ! $SHELL_RUNNER "source '$SETUP'; ros2 pkg list | grep -q '^op3_joy_teleop$'"; then
+  if ! $SHELL_RUNNER "source '$SETUP'; ros2 pkg prefix op3_joy_teleop >/dev/null 2>&1"; then
     echo "${RED}ERROR:${RST} Workspace is not built/installed (missing op3_joy_teleop)." >&2
     echo "${DIM}Try:${RST} colcon build --packages-select op3_joy_teleop" >&2
-    echo "${DIM}Then:${RST} source install/setup.bash | source install/setup.zsh" >&2
+    echo "${DIM}Then:${RST} source install/setup.bash" >&2
     exit 1
   fi
 }
@@ -160,7 +190,7 @@ doctor_check() {
   if detect_setup_optional; then
     auto_detect_shell_runner
     echo "${GRN}OK:${RST} setup: $SETUP"
-    if $SHELL_RUNNER "source '$SETUP'; ros2 pkg list | grep -q '^op3_joy_teleop$'"; then
+    if $SHELL_RUNNER "source '$SETUP'; ros2 pkg prefix op3_joy_teleop >/dev/null 2>&1"; then
       echo "${GRN}OK:${RST} workspace install (op3_joy_teleop)"
     else
       echo "${YLW}WARN:${RST} workspace not built (missing op3_joy_teleop)"

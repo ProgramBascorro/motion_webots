@@ -29,7 +29,7 @@ fallback_menu_selection() {
     "Base + Teleop + Foxglove + Tools + RQT" \
     "Base + Vision + Ball Localizer" \
     "Base + Action Editor" \
-    "Base + Action Web" \
+    "Base + Bascorro Studio" \
     "Attach to existing session" \
     "Exit (kill session)" \
     "Status" \
@@ -45,7 +45,7 @@ fallback_menu_selection() {
     "Base + Teleop + Foxglove + Tools + RQT") printf "%s\n" webots manager teleop foxglove tools rqt_image_view ;;
     "Base + Vision + Ball Localizer") printf "%s\n" webots manager yolo_vision ball_localizer ;;
     "Base + Action Editor") printf "%s\n" webots manager action_editor ;;
-    "Base + Action Web") printf "%s\n" webots manager action_web ;;
+    "Base + Bascorro Studio") printf "%s\n" webots manager action_web ;;
     "Attach to existing session") MENU_ACTION="attach" ;;
     "Exit (kill session)") MENU_ACTION="exit" ;;
     "Status") MENU_ACTION="status" ;;

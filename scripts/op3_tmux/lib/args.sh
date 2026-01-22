@@ -11,7 +11,8 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --ball${RST}          Start: webots + manager + yolo_vision + ball_localizer
   ${BOLD}./$(basename "$0") --ball-localizer${RST}Start: webots + manager + ball_localizer
   ${BOLD}./$(basename "$0") --action-editor${RST} Start: webots + manager + action_editor
-  ${BOLD}./$(basename "$0") --action-web${RST}    Start: webots + manager + action_web
+  ${BOLD}./$(basename "$0") --studio${RST}        Start: webots + manager + bascorro studio
+  ${BOLD}./$(basename "$0") --action-web${RST}    Alias for --studio
   ${BOLD}./$(basename "$0") --localization${RST}  Start: webots + manager + localization (+ rviz)
   ${BOLD}./$(basename "$0") --tools${RST}         Start: add quick ROS tools pane
   ${BOLD}./$(basename "$0") -u${RST}              Start: usual selection from ~/.config/op3-stack/usual.txt
@@ -40,7 +41,8 @@ ${BOLD}Options${RST}
   --ball               Enable vision + ball_localizer
   --ball-localizer     Enable ball_localizer
   --action-editor      Enable action editor (bridge + editor)
-  --action-web         Enable action web UI (bridge + apply node + Vite)
+  --studio             Enable bascorro studio UI (bridge + apply node + Vite)
+  --action-web         Alias for --studio
   --localization       Enable localization stack (soccer_localization + rviz)
   --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web
   --doctor              Health check (deps + workspace)
@@ -57,7 +59,7 @@ ${BOLD}Defaults (env override)${RST}
   WEBOTS:  ${WEBOTS_CMD}
   MANAGER: ${MANAGER_CMD}
   ACTION_EDITOR: ${ACTION_EDITOR_CMD}
-  ACTION_WEB: ${ACTION_WEB_CMD}
+  STUDIO: ${ACTION_WEB_CMD}
   ACTION_FILE: ${ACTION_FILE_PATH}
   ACTION_EDITOR_LOG: ${ACTION_EDITOR_LOG}
 
@@ -66,7 +68,7 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_WEBOTS_CMD, OP3_MANAGER_CMD, OP3_TELEOP_CMD, OP3_FOXGLOVE_CMD
   OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD, OP3_BALL_LOCALIZER_CMD
   OP3_ACTION_EDITOR_CMD, OP3_ACTION_FILE, OP3_ACTION_FILE_SEED, OP3_ACTION_EDITOR_LOG
-  OP3_ACTION_WEB_CMD
+  OP3_STUDIO_CMD, OP3_ACTION_WEB_CMD
   OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
   OP3_DOCKER_TAG, OP3_DOCKER_RUN_ROSDEP, OP3_DOCKER_BUILD_WS
@@ -128,7 +130,7 @@ op3_tmux_dispatch() {
       --ball) WITH_YOLO_VISION=1; WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --ball-localizer) WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --action-editor) WITH_ACTION_EDITOR=1; START_EXPLICIT=1; shift ;;
-      --action-web) WITH_ACTION_WEB=1; START_EXPLICIT=1; shift ;;
+      --studio|--action-web) WITH_ACTION_WEB=1; START_EXPLICIT=1; shift ;;
       --localization) WITH_LOCALIZATION=1; START_EXPLICIT=1; shift ;;
       --tools) WITH_TOOLS=1; START_EXPLICIT=1; shift ;;
     --usual|-u) DO_USUAL=1; shift ;;
