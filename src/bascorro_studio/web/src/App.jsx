@@ -1,5 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ROSLIB from "roslib";
+import {
+  Activity,
+  AlertCircle,
+  Battery,
+  Camera,
+  Cpu,
+  Gauge,
+  HardDrive,
+  History,
+  LayoutDashboard,
+  Menu,
+  Play,
+  Power,
+  RefreshCw,
+  Settings,
+  StopCircle,
+  Terminal,
+  Video,
+  Wifi,
+  Zap,
+} from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 
@@ -21,27 +42,29 @@ const YOLO_PARAM_KEYS = [
   "robot_confidence_threshold",
 ];
 
+// --- Utilities ---
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return "n/a";
+    return "-";
   }
   return Number(value).toFixed(digits);
 }
 
 function formatPercent(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return "n/a";
+    return "-%";
   }
   return `${Math.round(value)}%`;
 }
 
 function formatAge(seconds) {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-    return "n/a";
+    return "-";
   }
   if (seconds < 1) {
     return `${Math.round(seconds * 1000)}ms`;
@@ -104,20 +127,45 @@ function makeParamValue(type, rawValue) {
   return { type: PARAM_TYPES.double, double_value: Number(value) };
 }
 
+// --- Components ---
+
+const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) => (
+  <div className={`stat-card ${status}`}>
+    <div className="stat-header">
+      <span className="stat-title">{title}</span>
+      {Icon && <Icon size={16} className="stat-icon" />}
+    </div>
+    <div className="stat-body">
+      <span className="stat-value">{value}</span>
+      {subValue && <span className="stat-sub">{subValue}</span>}
+    </div>
+  </div>
+);
+
+const SectionHeader = ({ title, children }) => (
+  <div className="section-header">
+    <h2>{title}</h2>
+    <div className="section-actions">{children}</div>
+  </div>
+);
+
 export default function App() {
-  const [view, setView] = useState("studio");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [rosUrl, setRosUrl] = useState(DEFAULT_ROSBRIDGE);
-  const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
   const [rosState, setRosState] = useState("disconnected");
+  
+  // Data State
   const [metrics, setMetrics] = useState(null);
   const [events, setEvents] = useState([]);
-  const [overlayStats, setOverlayStats] = useState({
-    fps: 0,
-    lastFrameMs: null,
-    dropped: 0,
-  });
   const [studioStatus, setStudioStatus] = useState("");
   const [studioError, setStudioError] = useState(false);
+  
+  // Vision
+  const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [overlayStats, setOverlayStats] = useState({ fps: 0, lastFrameMs: null, dropped: 0 });
+  
+  // Tuning
   const [yoloParams, setYoloParams] = useState({
     ball_confidence_threshold: 0.2,
     goalpost_confidence_threshold: 0.5,
@@ -133,13 +181,17 @@ export default function App() {
   const [paramName, setParamName] = useState("ball_confidence_threshold");
   const [paramType, setParamType] = useState("double");
   const [paramValue, setParamValue] = useState("0.2");
+  
+  // Input
   const [joyState, setJoyState] = useState(null);
-  const [showOverlay, setShowOverlay] = useState(true);
 
+  // Refs
   const rosRef = useRef(null);
   const overlayCanvasRef = useRef(null);
   const overlayLastRef = useRef({ stampMs: null, fps: 0, dropped: 0 });
   const showOverlayRef = useRef(true);
+  
+  // Topic/Service Refs
   const metricsSubRef = useRef(null);
   const eventsSubRef = useRef(null);
   const overlaySubRef = useRef(null);
@@ -156,14 +208,14 @@ export default function App() {
   const bagStartServiceRef = useRef(null);
   const bagStopServiceRef = useRef(null);
 
+  // --- Effects ---
+
   useEffect(() => {
     showOverlayRef.current = showOverlay;
   }, [showOverlay]);
 
   useEffect(() => {
-    if (!rosUrl) {
-      return undefined;
-    }
+    if (!rosUrl) return;
 
     const ros = new ROSLIB.Ros({ url: rosUrl });
     rosRef.current = ros;
@@ -172,21 +224,38 @@ export default function App() {
     ros.on("error", () => setRosState("error"));
     ros.on("close", () => setRosState("disconnected"));
 
+    // Subscriptions
     metricsSubRef.current = new ROSLIB.Topic({
       ros,
       name: "/bascorro_studio/metrics",
       messageType: "std_msgs/String",
     });
+    metricsSubRef.current.subscribe((msg) => {
+      try {
+        setMetrics(JSON.parse(msg.data));
+      } catch (e) { console.error(e); }
+    });
+
     eventsSubRef.current = new ROSLIB.Topic({
       ros,
       name: "/bascorro_studio/events",
       messageType: "std_msgs/String",
     });
+    eventsSubRef.current.subscribe((msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        if (Array.isArray(payload.events)) setEvents(payload.events);
+      } catch (e) { console.error(e); }
+    });
+
     joySubRef.current = new ROSLIB.Topic({
       ros,
       name: "/joy",
       messageType: "sensor_msgs/Joy",
     });
+    joySubRef.current.subscribe(setJoyState);
+
+    // Publishers & Services
     joyPubRef.current = new ROSLIB.Topic({
       ros,
       name: "/joy",
@@ -243,68 +312,35 @@ export default function App() {
       serviceType: "std_srvs/srv/Trigger",
     });
 
-    metricsSubRef.current.subscribe((msg) => {
-      try {
-        const payload = JSON.parse(msg.data);
-        setMetrics(payload);
-      } catch (err) {
-        setStudioStatus("Metrics parse error");
-        setStudioError(true);
-      }
-    });
-
-    eventsSubRef.current.subscribe((msg) => {
-      try {
-        const payload = JSON.parse(msg.data);
-        if (Array.isArray(payload.events)) {
-          setEvents(payload.events);
-        }
-      } catch (err) {
-        setStudioStatus("Events parse error");
-        setStudioError(true);
-      }
-    });
-
-    joySubRef.current.subscribe((msg) => setJoyState(msg));
-
-    const loadYoloParams = () => {
-      if (!yoloGetServiceRef.current) {
-        return;
-      }
-      const request = new ROSLIB.ServiceRequest({
-        names: YOLO_PARAM_KEYS,
-      });
-      yoloGetServiceRef.current.callService(request, (result) => {
-        if (!result || !Array.isArray(result.values)) {
-          return;
-        }
-        const next = { ...yoloParams };
-        result.values.forEach((value, idx) => {
-          const key = YOLO_PARAM_KEYS[idx];
-          if (key && value && typeof value.double_value === "number") {
-            next[key] = value.double_value;
-          }
+    // Load initial params
+    if (yoloGetServiceRef.current) {
+        const request = new ROSLIB.ServiceRequest({ names: YOLO_PARAM_KEYS });
+        yoloGetServiceRef.current.callService(request, (result) => {
+            if (result && Array.isArray(result.values)) {
+                const next = { ...yoloParams };
+                result.values.forEach((val, i) => {
+                    if (val && typeof val.double_value === 'number') {
+                        next[YOLO_PARAM_KEYS[i]] = val.double_value;
+                    }
+                });
+                setYoloParams(next);
+            }
         });
-        setYoloParams(next);
-      });
-    };
-
-    loadYoloParams();
+    }
 
     return () => {
       metricsSubRef.current?.unsubscribe();
       eventsSubRef.current?.unsubscribe();
       joySubRef.current?.unsubscribe();
-      joyPubRef.current = null;
       ros.close();
     };
   }, [rosUrl]);
 
   useEffect(() => {
-    if (!rosRef.current || rosState === "disconnected") {
-      return undefined;
-    }
-    overlaySubRef.current?.unsubscribe();
+    if (!rosRef.current || rosState === "disconnected") return;
+    
+    if (overlaySubRef.current) overlaySubRef.current.unsubscribe();
+    
     overlaySubRef.current = new ROSLIB.Topic({
       ros: rosRef.current,
       name: overlayTopic,
@@ -312,17 +348,11 @@ export default function App() {
     });
 
     overlaySubRef.current.subscribe((msg) => {
-      if (!showOverlayRef.current) {
-        return;
-      }
+      if (!showOverlayRef.current) return;
       const imageData = decodeImage(msg);
-      if (!imageData) {
-        return;
-      }
+      if (!imageData || !overlayCanvasRef.current) return;
+      
       const canvas = overlayCanvasRef.current;
-      if (!canvas) {
-        return;
-      }
       if (canvas.width !== imageData.width || canvas.height !== imageData.height) {
         canvas.width = imageData.width;
         canvas.height = imageData.height;
@@ -331,642 +361,417 @@ export default function App() {
       ctx.putImageData(imageData, 0, 0);
 
       const now = performance.now();
-      const lastStamp = overlayLastRef.current.stampMs;
-      let fps = overlayLastRef.current.fps;
-      if (lastStamp) {
-        const delta = now - lastStamp;
-        if (delta > 0) {
-          fps = 1000 / delta;
-        }
-      }
-      overlayLastRef.current = {
-        stampMs: now,
-        fps,
-        dropped: overlayLastRef.current.dropped,
-      };
-      setOverlayStats({
-        fps,
-        lastFrameMs: now,
-        dropped: overlayLastRef.current.dropped,
-      });
+      const last = overlayLastRef.current.stampMs;
+      const fps = last ? 1000 / (now - last) : 0;
+      overlayLastRef.current = { stampMs: now, fps, dropped: 0 };
+      setOverlayStats(prev => ({ ...prev, fps, lastFrameMs: now }));
     });
 
-    return () => {
-      overlaySubRef.current?.unsubscribe();
-    };
+    return () => overlaySubRef.current?.unsubscribe();
   }, [overlayTopic, rosState]);
 
-  const battery = metrics?.battery || {};
-  const imu = metrics?.imu || {};
-  const torque = metrics?.torque || {};
-  const system = metrics?.system || {};
-  const network = metrics?.network || {};
-  const heartbeat = metrics?.heartbeat || {};
-  const jointNames = metrics?.joint_names || [];
-  const torqueMap = torque?.joints || {};
+  // --- Handlers ---
 
-  const batteryAlert = useMemo(() => {
-    if (!battery || battery.voltage === undefined || battery.voltage === null) {
-      return "unknown";
-    }
-    if (battery.voltage <= battery.warn_voltage) {
-      return "warn";
-    }
-    if (battery.voltage <= battery.match_voltage) {
-      return "match";
-    }
-    return "ok";
-  }, [battery]);
+  const sendStatus = (msg, isError = false) => {
+    setStudioStatus(msg);
+    setStudioError(isError);
+    setTimeout(() => { if(studioStatus === msg) setStudioStatus(""); }, 3000);
+  };
 
   const handleInitPose = () => {
-    if (!initPosePubRef.current) {
-      setStudioStatus("ROS not connected");
-      setStudioError(true);
-      return;
+    if (initPosePubRef.current) {
+      initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
+      sendStatus("Init Pose Sent");
     }
-    initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
-    setStudioStatus("Init pose requested");
-    setStudioError(false);
   };
 
   const handleSoftStop = () => {
-    if (!walkingCommandPubRef.current) {
-      setStudioStatus("ROS not connected");
-      setStudioError(true);
-      return;
+    if (walkingCommandPubRef.current) {
+      walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: "stop" }));
+      sendStatus("Soft Stop Sent");
     }
-    walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: "stop" }));
-    setStudioStatus("Soft stop sent");
-    setStudioError(false);
   };
 
   const handleTorque = (enable) => {
-    if (!torquePubRef.current || jointNames.length === 0) {
-      setStudioStatus("No joint list available");
-      setStudioError(true);
-      return;
-    }
-    const values = jointNames.map(() => (enable ? 1 : 0));
-    torquePubRef.current.publish(
-      new ROSLIB.Message({
+    if (torquePubRef.current && metrics?.joint_names?.length) {
+      const values = metrics.joint_names.map(() => (enable ? 1 : 0));
+      torquePubRef.current.publish(new ROSLIB.Message({
         item_name: "torque_enable",
-        joint_name: jointNames,
-        value: values,
-      })
-    );
-    setStudioStatus(enable ? "Torque ON requested" : "Torque OFF requested");
-    setStudioError(false);
-  };
-
-  const callTrigger = (serviceRef, label) => {
-    if (!serviceRef.current) {
-      setStudioStatus("Service not available");
-      setStudioError(true);
-      return;
+        joint_name: metrics.joint_names,
+        value: values
+      }));
+      sendStatus(enable ? "Torque ON" : "Torque OFF");
     }
-    serviceRef.current.callService(new ROSLIB.ServiceRequest({}), (result) => {
-      if (!result || !result.success) {
-        setStudioStatus(`${label} failed: ${result?.message || "error"}`);
-        setStudioError(true);
-        return;
-      }
-      setStudioStatus(result.message || `${label} OK`);
-      setStudioError(false);
-    });
   };
 
-  const handleSnapshot = () => callTrigger(snapshotServiceRef, "Snapshot");
-  const handleBagStart = () => callTrigger(bagStartServiceRef, "Bag start");
-  const handleBagStop = () => callTrigger(bagStopServiceRef, "Bag stop");
-
-  const publishJoy = useCallback(
-    (payload) => {
-      if (!joyPubRef.current || rosState !== "connected") {
-        return false;
-      }
+  const publishJoy = useCallback((payload) => {
+    if (joyPubRef.current && rosState === "connected") {
       const now = Date.now();
-      joyPubRef.current.publish(
-        new ROSLIB.Message({
-          header: {
-            stamp: {
-              sec: Math.floor(now / 1000),
-              nanosec: (now % 1000) * 1000000,
-            },
-            frame_id: "bascorro_studio",
-          },
-          axes: payload?.axes || [],
-          buttons: payload?.buttons || [],
-        })
-      );
+      joyPubRef.current.publish(new ROSLIB.Message({
+        header: {
+          stamp: { sec: Math.floor(now / 1000), nanosec: (now % 1000) * 1000000 },
+          frame_id: "bascorro_studio"
+        },
+        axes: payload?.axes || [],
+        buttons: payload?.buttons || []
+      }));
       return true;
-    },
-    [rosState]
-  );
-
-  const applyYoloParams = () => {
-    if (!yoloSetServiceRef.current) {
-      setStudioStatus("YOLO param service not available");
-      setStudioError(true);
-      return;
     }
-    const parameters = YOLO_PARAM_KEYS.map((name) => ({
-      name,
-      value: makeParamValue("double", yoloParams[name]),
-    }));
-    yoloSetServiceRef.current.callService(
-      new ROSLIB.ServiceRequest({ parameters }),
-      (result) => {
-        if (!result || !Array.isArray(result.results)) {
-          setStudioStatus("YOLO params update failed");
-          setStudioError(true);
-          return;
-        }
-        setStudioStatus("YOLO thresholds updated");
-        setStudioError(false);
-      }
-    );
-  };
+    return false;
+  }, [rosState]);
 
   const loadWalkingParams = () => {
-    if (!walkingGetServiceRef.current) {
-      setStudioStatus("Walking param service not available");
-      setStudioError(true);
-      return;
-    }
-    walkingGetServiceRef.current.callService(
-      new ROSLIB.ServiceRequest({ get_param: true }),
-      (result) => {
-        if (!result || !result.parameters) {
-          setStudioStatus("Walking params unavailable");
-          setStudioError(true);
-          return;
+    if (walkingGetServiceRef.current) {
+      walkingGetServiceRef.current.callService(new ROSLIB.ServiceRequest({ get_param: true }), (res) => {
+        if (res?.parameters) {
+          setWalkingFull(res.parameters);
+          setWalkingParams({
+            x_move_amplitude: res.parameters.x_move_amplitude ?? 0,
+            y_move_amplitude: res.parameters.y_move_amplitude ?? 0,
+            angle_move_amplitude: res.parameters.angle_move_amplitude ?? 0,
+          });
+          sendStatus("Walking Params Loaded");
         }
-        setWalkingFull(result.parameters);
-        setWalkingParams({
-          x_move_amplitude: result.parameters.x_move_amplitude ?? 0.0,
-          y_move_amplitude: result.parameters.y_move_amplitude ?? 0.0,
-          angle_move_amplitude: result.parameters.angle_move_amplitude ?? 0.0,
-        });
-        setStudioStatus("Walking params loaded");
-        setStudioError(false);
-      }
-    );
+      });
+    }
   };
 
   const applyWalkingParams = () => {
-    if (!walkingParamPubRef.current || !walkingFull) {
-      setStudioStatus("Load walking params first");
-      setStudioError(true);
-      return;
+    if (walkingParamPubRef.current && walkingFull) {
+      const payload = { ...walkingFull, ...walkingParams };
+      // ensure numbers
+      payload.x_move_amplitude = Number(payload.x_move_amplitude);
+      payload.y_move_amplitude = Number(payload.y_move_amplitude);
+      payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
+      walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
+      sendStatus("Walking Params Applied");
     }
-    const payload = { ...walkingFull };
-    payload.x_move_amplitude = Number(walkingParams.x_move_amplitude);
-    payload.y_move_amplitude = Number(walkingParams.y_move_amplitude);
-    payload.angle_move_amplitude = Number(walkingParams.angle_move_amplitude);
-    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
-    setStudioStatus("Walking params sent");
-    setStudioError(false);
   };
 
-  const applyParam = () => {
-    if (!paramNode || !paramName) {
-      setStudioStatus("Parameter name required");
-      setStudioError(true);
-      return;
+  const applyYoloParams = () => {
+    if (yoloSetServiceRef.current) {
+      const parameters = YOLO_PARAM_KEYS.map(name => ({
+        name,
+        value: makeParamValue("double", yoloParams[name])
+      }));
+      yoloSetServiceRef.current.callService(new ROSLIB.ServiceRequest({ parameters }), (res) => {
+        if (res?.results) sendStatus("YOLO Params Applied");
+        else sendStatus("YOLO Update Failed", true);
+      });
     }
-    const service = new ROSLIB.Service({
-      ros: rosRef.current,
-      name: `/${paramNode}/set_parameters`,
-      serviceType: "rcl_interfaces/srv/SetParameters",
-    });
-    const parameters = [
-      {
-        name: paramName,
-        value: makeParamValue(paramType, paramValue),
-      },
-    ];
-    service.callService(
-      new ROSLIB.ServiceRequest({ parameters }),
-      (result) => {
-        if (!result || !Array.isArray(result.results)) {
-          setStudioStatus("Parameter update failed");
-          setStudioError(true);
-          return;
-        }
-        setStudioStatus("Parameter updated");
-        setStudioError(false);
-      }
-    );
   };
 
+  // --- Derived Data ---
+  const battery = metrics?.battery || {};
+  const system = metrics?.system || {};
+  const network = metrics?.network || {};
+  const imu = metrics?.imu || {};
+  const torque = metrics?.torque || {};
   const torqueEntries = useMemo(() => {
-    const entries = Object.entries(torqueMap || {});
-    entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
-    return entries.slice(0, 12);
-  }, [torqueMap]);
+    const e = Object.entries(torque?.joints || {});
+    e.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    return e.slice(0, 8);
+  }, [torque]);
 
-  const overlayLagSec = overlayStats.lastFrameMs
-    ? (performance.now() - overlayStats.lastFrameMs) / 1000
-    : null;
+  // --- Render Views ---
 
-  return (
-    <div className="studio">
-      <header className="studio-header">
-        <div className="studio-title">
-          <p className="studio-kicker">Bascorro Studio</p>
-          <h1>Match-ready control, vision, and telemetry.</h1>
-          <p className="studio-sub">
-            Health, overlays, tuning, and action pages in one cockpit.
-          </p>
-        </div>
-        <div className="studio-rail">
-          <div className={`status-pill ${rosState}`}>ROS: {rosState}</div>
-          <div className={`status-pill ${batteryAlert}`}>
-            Battery: {formatNumber(battery.voltage, 2)}V ·{" "}
-            {formatPercent(battery.percent)}
-          </div>
-          <div className={`status-pill ${studioError ? "error" : "ok"}`}>
-            {studioStatus || "Studio ready"}
-          </div>
-        </div>
-      </header>
-
-      <div className="studio-tabs">
+  const renderSidebar = () => (
+    <nav className="sidebar">
+      <div className="sidebar-brand">
+        <div className="brand-logo">B</div>
+        <span className="brand-name">Bascorro</span>
+      </div>
+      <div className="sidebar-menu">
         <button
-          type="button"
-          className={view === "studio" ? "tab active" : "tab"}
-          onClick={() => setView("studio")}
+          className={activeTab === "dashboard" ? "active" : ""}
+          onClick={() => setActiveTab("dashboard")}
         >
-          Studio
+          <LayoutDashboard size={20} />
+          <span>Dashboard</span>
         </button>
         <button
-          type="button"
-          className={view === "action" ? "tab active" : "tab"}
-          onClick={() => setView("action")}
+          className={activeTab === "vision" ? "active" : ""}
+          onClick={() => setActiveTab("vision")}
         >
-          Action Editor
+          <Video size={20} />
+          <span>Vision</span>
+        </button>
+        <button
+          className={activeTab === "tuning" ? "active" : ""}
+          onClick={() => setActiveTab("tuning")}
+        >
+          <Settings size={20} />
+          <span>Tuning</span>
+        </button>
+        <button
+          className={activeTab === "action" ? "active" : ""}
+          onClick={() => setActiveTab("action")}
+        >
+          <Activity size={20} />
+          <span>Action</span>
+        </button>
+        <button
+          className={activeTab === "logs" ? "active" : ""}
+          onClick={() => setActiveTab("logs")}
+        >
+          <Terminal size={20} />
+          <span>Logs</span>
         </button>
       </div>
-
-      {view === "action" ? (
-        <div className="studio-action-wrap">
-          <ActionEditor />
+      <div className="sidebar-footer">
+        <div className={`connection-status ${rosState}`}>
+          <div className="status-dot"></div>
+          <span>{rosState === "connected" ? "Online" : "Offline"}</span>
         </div>
-      ) : (
-        <main className="studio-grid">
-          <section className="card">
-            <div className="card-header">
-              <h2>Health & Safety</h2>
-              <div className="card-actions">
-                <button className="ghost" type="button" onClick={handleInitPose}>
-                  Panic: Init Pose
-                </button>
-                <button className="ghost" type="button" onClick={handleSoftStop}>
-                  Soft Stop
-                </button>
-                <button className="ghost" type="button" onClick={() => handleTorque(false)}>
-                  Torque Off
-                </button>
-                <button className="primary" type="button" onClick={() => handleTorque(true)}>
-                  Torque On
-                </button>
-              </div>
-            </div>
-            <div className="stat-grid">
-              <div>
-                <h3>Battery</h3>
-                <p className="stat">
-                  {formatNumber(battery.voltage, 2)}V ·{" "}
-                  {formatPercent(battery.percent)}
-                </p>
-                <p className="hint">
-                  Warn {formatNumber(battery.warn_voltage, 1)}V · Match{" "}
-                  {formatNumber(battery.match_voltage, 1)}V
-                </p>
-              </div>
-              <div>
-                <h3>IMU</h3>
-                <p className="stat">
-                  Roll {formatNumber(imu.roll, 1)}° · Pitch{" "}
-                  {formatNumber(imu.pitch, 1)}° · Yaw {formatNumber(imu.yaw, 1)}°
-                </p>
-                <p className="hint">
-                  Fall: {metrics?.fall?.state || "unknown"} · Last{" "}
-                  {metrics?.fall?.last_reason || "n/a"}
-                </p>
-              </div>
-              <div>
-                <h3>Torque load</h3>
-                <p className="stat">
-                  Max {formatNumber(torque.max, 2)} · Avg{" "}
-                  {formatNumber(torque.avg, 2)}
-                </p>
-                <p className="hint">Top joints below.</p>
-              </div>
-              <div>
-                <h3>Servo temp</h3>
-                <p className="stat">No data</p>
-                <p className="hint">Publish temps to enable heat map.</p>
-              </div>
-            </div>
-            <div className="mini-grid">
-              {torqueEntries.length === 0 ? (
-                <p className="hint">Torque data not available.</p>
-              ) : (
-                torqueEntries.map(([joint, value]) => (
-                  <div key={joint} className="mini-card">
-                    <span>{joint}</span>
-                    <strong>{formatNumber(value, 2)}</strong>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
+      </div>
+    </nav>
+  );
 
-          <section className="card vision-card">
-            <div className="card-header">
-              <h2>Vision Overlay</h2>
-              <div className="card-actions">
-                <button
-                  className="ghost"
-                  type="button"
-                  onClick={() => setShowOverlay((prev) => !prev)}
-                >
-                  {showOverlay ? "Pause Overlay" : "Resume Overlay"}
-                </button>
-                <button className="ghost" type="button" onClick={handleSnapshot}>
-                  Snapshot
-                </button>
-              </div>
-            </div>
-            <div className="vision-body">
-              <div className="vision-frame">
-                {showOverlay ? (
-                  <canvas ref={overlayCanvasRef} />
-                ) : (
-                  <div className="vision-placeholder">Overlay paused.</div>
-                )}
-              </div>
-              <div className="vision-meta">
-                <div>
-                  <h3>Stream</h3>
-                  <p className="stat">{overlayTopic}</p>
-                  <label className="field">
-                    Overlay topic
-                    <input
-                      type="text"
-                      value={overlayTopic}
-                      onChange={(event) => setOverlayTopic(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div>
-                  <h3>Performance</h3>
-                  <p className="stat">
-                    {formatNumber(overlayStats.fps, 1)} fps
-                  </p>
-                  <p className="hint">Last frame: {formatAge(overlayLagSec)}</p>
-                </div>
-              </div>
-            </div>
-            <div className="card-footer">
-              <div className="yolo-tuning">
-                <h3>YOLO thresholds</h3>
-                <div className="slider-grid">
-                  {YOLO_PARAM_KEYS.map((key) => (
-                    <label key={key}>
-                      {key.replace(/_/g, " ")}
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={clamp(yoloParams[key], 0, 1)}
-                        onChange={(event) =>
-                          setYoloParams((prev) => ({
-                            ...prev,
-                            [key]: Number(event.target.value),
-                          }))
-                        }
-                      />
-                      <span>{formatNumber(yoloParams[key], 2)}</span>
-                    </label>
-                  ))}
-                </div>
-                <button className="ghost" type="button" onClick={applyYoloParams}>
-                  Apply thresholds
-                </button>
-              </div>
-            </div>
-          </section>
+  const renderDashboard = () => (
+    <div className="view-content dashboard-grid">
+      <div className="dashboard-col-main">
+        <div className="safety-bar">
+          <button className="panic-btn init-pose" onClick={handleInitPose}>
+            <RefreshCw size={18} /> Init Pose
+          </button>
+          <button className="panic-btn soft-stop" onClick={handleSoftStop}>
+            <StopCircle size={18} /> Soft Stop
+          </button>
+          <div className="spacer"></div>
+          <button className="control-btn" onClick={() => handleTorque(false)}>Torque OFF</button>
+          <button className="control-btn primary" onClick={() => handleTorque(true)}>Torque ON</button>
+        </div>
 
-          <section className="card">
-            <div className="card-header">
-              <h2>Teleop & Tuning</h2>
-            </div>
-            <div className="teleop-grid">
-              <div className="teleop-gamepad">
-                <GamepadVisualizer
-                  joy={joyState}
-                  rosConnected={rosState === "connected"}
-                  publishJoy={publishJoy}
-                />
-              </div>
-              <div>
-                <h3>Walking params</h3>
-                <div className="form-grid">
-                  <label>
-                    X amplitude
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={walkingParams.x_move_amplitude}
-                      onChange={(event) =>
-                        setWalkingParams((prev) => ({
-                          ...prev,
-                          x_move_amplitude: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Y amplitude
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={walkingParams.y_move_amplitude}
-                      onChange={(event) =>
-                        setWalkingParams((prev) => ({
-                          ...prev,
-                          y_move_amplitude: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Angle amplitude
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={walkingParams.angle_move_amplitude}
-                      onChange={(event) =>
-                        setWalkingParams((prev) => ({
-                          ...prev,
-                          angle_move_amplitude: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="row-actions">
-                  <button className="ghost" type="button" onClick={loadWalkingParams}>
-                    Load
-                  </button>
-                  <button className="primary" type="button" onClick={applyWalkingParams}>
-                    Apply
-                  </button>
-                </div>
-              </div>
-              <div>
-                <h3>Parameter pad</h3>
-                <div className="form-grid">
-                  <label>
-                    Node
-                    <input
-                      type="text"
-                      value={paramNode}
-                      onChange={(event) => setParamNode(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Param
-                    <input
-                      type="text"
-                      value={paramName}
-                      onChange={(event) => setParamName(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Type
-                    <select
-                      value={paramType}
-                      onChange={(event) => setParamType(event.target.value)}
-                    >
-                      <option value="double">double</option>
-                      <option value="int">int</option>
-                      <option value="bool">bool</option>
-                      <option value="string">string</option>
-                    </select>
-                  </label>
-                  <label>
-                    Value
-                    <input
-                      type="text"
-                      value={paramValue}
-                      onChange={(event) => setParamValue(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <button className="ghost" type="button" onClick={applyParam}>
-                  Apply param
-                </button>
-              </div>
-            </div>
-          </section>
+        <div className="stats-row">
+          <StatCard
+            title="Battery"
+            icon={Battery}
+            value={`${formatNumber(battery.voltage, 2)} V`}
+            subValue={formatPercent(battery.percent)}
+            status={battery.voltage < battery.warn_voltage ? "danger" : "neutral"}
+          />
+          <StatCard
+            title="CPU Load"
+            icon={Cpu}
+            value={formatPercent(system.cpu_percent)}
+            subValue={`Load: ${formatNumber(system.load, 2)}`}
+          />
+          <StatCard
+            title="Memory"
+            icon={HardDrive}
+            value={formatPercent(system.mem_percent)}
+            subValue={`${formatNumber(system.mem_used_mb, 0)} MB Used`}
+          />
+          <StatCard
+            title="Network"
+            icon={Wifi}
+            value={`${formatNumber(network.latency_ms, 0)} ms`}
+            subValue="Latency"
+          />
+        </div>
 
-          <section className="card">
-            <div className="card-header">
-              <h2>System & Network</h2>
-              <div className="card-actions">
-                <button className="ghost" type="button" onClick={handleBagStart}>
-                  Start bag
-                </button>
-                <button className="ghost" type="button" onClick={handleBagStop}>
-                  Stop bag
-                </button>
-              </div>
-            </div>
-            <div className="stat-grid">
-              <div>
-                <h3>CPU</h3>
-                <p className="stat">{formatPercent(system.cpu_percent)}</p>
-                <p className="hint">Load: {formatNumber(system.load, 2)}</p>
-              </div>
-              <div>
-                <h3>Memory</h3>
-                <p className="stat">{formatPercent(system.mem_percent)}</p>
-                <p className="hint">
-                  {formatNumber(system.mem_used_mb, 0)} /{" "}
-                  {formatNumber(system.mem_total_mb, 0)} MB
-                </p>
-              </div>
-              <div>
-                <h3>Disk</h3>
-                <p className="stat">{formatPercent(system.disk_percent)}</p>
-                <p className="hint">
-                  {formatNumber(system.disk_used_gb, 1)} /{" "}
-                  {formatNumber(system.disk_total_gb, 1)} GB
-                </p>
-              </div>
-              <div>
-                <h3>Network</h3>
-                <p className="stat">
-                  {formatNumber(network.latency_ms, 0)} ms
-                </p>
-                <p className="hint">
-                  RX {formatNumber(network.rx_kbps, 0)} kbps · TX{" "}
-                  {formatNumber(network.tx_kbps, 0)} kbps
-                </p>
-              </div>
-            </div>
-            <div className="heartbeat">
-              <h3>ROS heartbeat</h3>
-              {heartbeat.topics ? (
-                <div className="mini-grid">
-                  {Object.entries(heartbeat.topics).map(([topic, age]) => (
+        <div className="card full-width">
+          <SectionHeader title="Joint Torque Load" />
+          <div className="torque-grid">
+            {torqueEntries.length === 0 ? <p className="empty-text">No torque data</p> :
+              torqueEntries.map(([name, val]) => (
+                <div key={name} className="torque-item">
+                  <span className="joint-name">{name}</span>
+                  <div className="torque-bar-bg">
                     <div
-                      key={topic}
-                      className={
-                        heartbeat.stale && heartbeat.stale.includes(topic)
-                          ? "mini-card warn"
-                          : "mini-card"
-                      }
-                    >
-                      <span>{topic}</span>
-                      <strong>{formatAge(age)}</strong>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="hint">Heartbeat data not available.</p>
-              )}
-            </div>
-          </section>
-
-          <section className="card events-card">
-            <div className="card-header">
-              <h2>Event Timeline</h2>
-            </div>
-            <div className="events-list">
-              {events.length === 0 ? (
-                <p className="hint">No events yet.</p>
-              ) : (
-                events.slice().reverse().map((event) => (
-                  <div key={event.id || `${event.ts}-${event.type}`} className="event-row">
-                    <span className="event-time">
-                      {new Date(event.ts * 1000).toLocaleTimeString()}
-                    </span>
-                    <span className={`event-type ${event.type || "info"}`}>
-                      {event.type || "info"}
-                    </span>
-                    <span className="event-msg">{event.message}</span>
+                      className="torque-bar-fill"
+                      style={{ width: `${Math.min(Math.abs(val) * 10, 100)}%` }}
+                    ></div>
                   </div>
-                ))
-              )}
+                  <span className="torque-val">{formatNumber(val, 2)}</span>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-col-side">
+        <div className="card">
+          <SectionHeader title="IMU State" />
+          <div className="imu-readout">
+            <div className="imu-row">
+              <span>Roll</span>
+              <strong>{formatNumber(imu.roll, 1)}°</strong>
             </div>
-          </section>
-        </main>
-      )}
+            <div className="imu-row">
+              <span>Pitch</span>
+              <strong>{formatNumber(imu.pitch, 1)}°</strong>
+            </div>
+            <div className="imu-row">
+              <span>Yaw</span>
+              <strong>{formatNumber(imu.yaw, 1)}°</strong>
+            </div>
+            <div className={`fall-status ${metrics?.fall?.state !== "upright" ? "fallen" : ""}`}>
+              {metrics?.fall?.state || "Unknown"}
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <SectionHeader title="Recent Events" />
+          <div className="mini-events">
+            {events.slice().reverse().slice(0, 5).map((ev, i) => (
+              <div key={i} className="mini-event">
+                <span className="time">{new Date(ev.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                <span className="msg">{ev.message}</span>
+              </div>
+            ))}
+            {events.length === 0 && <p className="empty-text">No events</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderVision = () => (
+    <div className="view-content vision-layout">
+      <div className="vision-stream-container">
+        {showOverlay ? <canvas ref={overlayCanvasRef} className="vision-canvas" /> : <div className="vision-placeholder">Stream Paused</div>}
+        <div className="vision-overlay-stats">
+          {formatNumber(overlayStats.fps, 1)} FPS
+        </div>
+      </div>
+      <div className="vision-sidebar">
+        <div className="card">
+          <SectionHeader title="Controls" />
+          <div className="form-group">
+            <label>Topic</label>
+            <input type="text" value={overlayTopic} onChange={e => setOverlayTopic(e.target.value)} />
+          </div>
+          <div className="btn-group">
+            <button className="control-btn" onClick={() => setShowOverlay(!showOverlay)}>
+              {showOverlay ? "Pause" : "Resume"}
+            </button>
+            <button className="control-btn" onClick={() => snapshotServiceRef.current?.callService({}, () => sendStatus("Snapshot Saved"))}>
+              <Camera size={16} /> Snapshot
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <SectionHeader title="YOLO Thresholds" />
+          {YOLO_PARAM_KEYS.map(key => (
+            <div key={key} className="range-control">
+              <label>{key.replace(/_confidence_threshold|_/g, " ")}</label>
+              <div className="range-row">
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={yoloParams[key]}
+                  onChange={e => setYoloParams({ ...yoloParams, [key]: Number(e.target.value) })}
+                />
+                <span>{yoloParams[key].toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+          <button className="control-btn primary" onClick={applyYoloParams}>Apply Thresholds</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderTuning = () => (
+    <div className="view-content tuning-grid">
+      <div className="card full-height">
+        <SectionHeader title="Teleoperation" />
+        <div className="gamepad-wrapper">
+          <GamepadVisualizer
+            joy={joyState}
+            rosConnected={rosState === "connected"}
+            publishJoy={publishJoy}
+          />
+        </div>
+      </div>
+      <div className="tuning-col">
+        <div className="card">
+          <SectionHeader title="Walking Parameters">
+            <button className="icon-btn" onClick={loadWalkingParams}><RefreshCw size={14}/></button>
+          </SectionHeader>
+          <div className="form-group">
+            <label>X Amplitude</label>
+            <input type="number" step="0.001" value={walkingParams.x_move_amplitude} onChange={e => setWalkingParams({...walkingParams, x_move_amplitude: e.target.value})} />
+          </div>
+          <div className="form-group">
+            <label>Y Amplitude</label>
+            <input type="number" step="0.001" value={walkingParams.y_move_amplitude} onChange={e => setWalkingParams({...walkingParams, y_move_amplitude: e.target.value})} />
+          </div>
+          <div className="form-group">
+            <label>Angle Amplitude</label>
+            <input type="number" step="0.001" value={walkingParams.angle_move_amplitude} onChange={e => setWalkingParams({...walkingParams, angle_move_amplitude: e.target.value})} />
+          </div>
+          <button className="control-btn primary" onClick={applyWalkingParams}>Apply Walking Params</button>
+        </div>
+
+        <div className="card">
+          <SectionHeader title="Manual Parameter" />
+          <div className="form-group">
+            <label>Node</label>
+            <input type="text" value={paramNode} onChange={e => setParamNode(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Param Name</label>
+            <input type="text" value={paramName} onChange={e => setParamName(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Value</label>
+            <input type="text" value={paramValue} onChange={e => setParamValue(e.target.value)} />
+          </div>
+          {/* Simplified type selector for brevity */}
+          <button className="control-btn" onClick={() => {
+             const service = new ROSLIB.Service({ ros: rosRef.current, name: `/${paramNode}/set_parameters`, serviceType: "rcl_interfaces/srv/SetParameters" });
+             service.callService(new ROSLIB.ServiceRequest({ parameters: [{ name: paramName, value: makeParamValue("double", paramValue) }] }), () => sendStatus("Param Sent"));
+          }}>Set (Double)</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderLogs = () => (
+    <div className="view-content">
+      <div className="card full-height">
+        <SectionHeader title="System Logs" />
+        <div className="logs-table-container">
+          <table className="logs-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.slice().reverse().map((ev, i) => (
+                <tr key={i} className={`log-row ${ev.type || "info"}`}>
+                  <td className="log-time">{new Date(ev.ts * 1000).toLocaleTimeString()}</td>
+                  <td className="log-type">{ev.type || "INFO"}</td>
+                  <td className="log-msg">{ev.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="app-container">
+      {renderSidebar()}
+      <main className="main-content">
+        <header className="top-bar">
+          <h1>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h1>
+          <div className="status-toast">{studioStatus}</div>
+        </header>
+        {activeTab === "dashboard" && renderDashboard()}
+        {activeTab === "vision" && renderVision()}
+        {activeTab === "tuning" && renderTuning()}
+        {activeTab === "logs" && renderLogs()}
+        {activeTab === "action" && <div className="view-content"><ActionEditor /></div>}
+      </main>
     </div>
   );
 }
