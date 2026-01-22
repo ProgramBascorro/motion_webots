@@ -59,7 +59,7 @@ def run_action_yaml(action_file: str, robot_file: str, args: list) -> Tuple[int,
 
 class ActionWebNode(Node):
     def __init__(self) -> None:
-        super().__init__("op3_action_web")
+        super().__init__("bascorro_studio_apply")
 
         self.action_file = resolve_action_file()
         self.seed_file = resolve_seed_file()
@@ -72,14 +72,31 @@ class ActionWebNode(Node):
 
         ensure_action_file(self.action_file, self.seed_file, self.get_logger())
 
-        self.result_pub = self.create_publisher(String, "/op3_action_web/result", 10)
+        self.result_pub = self.create_publisher(
+            String, "/bascorro_studio/result", 10
+        )
+        self.legacy_result_pub = self.create_publisher(
+            String, "/op3_action_web/result", 10
+        )
         self.apply_sub = self.create_subscription(
+            String,
+            "/bascorro_studio/apply_yaml",
+            self.handle_apply_yaml,
+            10,
+        )
+        self.request_sub = self.create_subscription(
+            String,
+            "/bascorro_studio/request",
+            self.handle_request,
+            10,
+        )
+        self.create_subscription(
             String,
             "/op3_action_web/apply_yaml",
             self.handle_apply_yaml,
             10,
         )
-        self.request_sub = self.create_subscription(
+        self.create_subscription(
             String,
             "/op3_action_web/request",
             self.handle_request,
@@ -87,7 +104,7 @@ class ActionWebNode(Node):
         )
 
         self._busy = False
-        self.get_logger().info("Action web node ready")
+        self.get_logger().info("Studio action node ready")
         self.get_logger().info(f"Action file: {self.action_file}")
 
     def handle_apply_yaml(self, msg: String) -> None:
@@ -234,6 +251,7 @@ class ActionWebNode(Node):
         msg = String()
         msg.data = json.dumps(payload)
         self.result_pub.publish(msg)
+        self.legacy_result_pub.publish(msg)
 
 
 def main(args=None) -> None:

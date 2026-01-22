@@ -199,7 +199,7 @@ function buildPose(positions, livePose) {
   return pose;
 }
 
-export default function App() {
+export default function ActionEditor() {
   const [yamlText, setYamlText] = useState("");
   const [yamlData, setYamlData] = useState(null);
   const [parseError, setParseError] = useState("");
@@ -546,13 +546,13 @@ export default function App() {
 
     requestRef.current = new ROSLIB.Topic({
       ros,
-      name: "/op3_action_web/request",
+      name: "/bascorro_studio/request",
       messageType: "std_msgs/String",
     });
 
     resultSubRef.current = new ROSLIB.Topic({
       ros,
-      name: "/op3_action_web/result",
+      name: "/bascorro_studio/result",
       messageType: "std_msgs/String",
     });
 
@@ -1496,8 +1496,8 @@ export default function App() {
     <div className="app">
       <header className="hero">
         <div>
-          <p className="kicker">BASCORRO op3 Action Studio</p>
-          <h1>Pose editor with live Webots preview.</h1>
+          <p className="kicker">BASCORRO Studio</p>
+          <h1>Action editor with live Webots preview.</h1>
           <p className="subtle">
             Paste or export YAML, click a step, and the robot mirrors it in 3D.
           </p>

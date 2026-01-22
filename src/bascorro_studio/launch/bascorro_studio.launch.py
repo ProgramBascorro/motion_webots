@@ -13,20 +13,25 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument("assets_port", default_value="8001"),
             DeclareLaunchArgument(
-                "assets_dir", default_value="/tmp/op3_action_web_assets"
+                "assets_dir", default_value="/tmp/bascorro_studio_assets"
             ),
             DeclareLaunchArgument("create_backup", default_value="false"),
             Node(
-                package="op3_action_web",
+                package="bascorro_studio",
                 executable="asset_server",
-                name="op3_action_web_assets",
+                name="bascorro_studio_assets",
                 arguments=["--port", assets_port, "--dir", assets_dir],
             ),
             Node(
-                package="op3_action_web",
+                package="bascorro_studio",
                 executable="apply_node",
-                name="op3_action_web_apply",
+                name="bascorro_studio_apply",
                 parameters=[{"create_backup": create_backup}],
+            ),
+            Node(
+                package="bascorro_studio",
+                executable="studio_agent",
+                name="bascorro_studio_agent",
             ),
         ]
     )

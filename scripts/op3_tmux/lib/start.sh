@@ -47,7 +47,7 @@ start_stack() {
     if [[ "$with_localization" -eq 1 ]]; then echo "${DIM}Pane (localization): $LOCALIZATION_CMD${RST}"; fi
     if [[ "$with_ball_localizer" -eq 1 ]]; then echo "${DIM}Pane (ball_localizer): $BALL_LOCALIZER_CMD${RST}"; fi
     if [[ "$with_action_editor" -eq 1 ]]; then echo "${DIM}Pane (action_editor): $ACTION_EDITOR_CMD${RST}"; fi
-    if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (action_web): $ACTION_WEB_CMD${RST}"; fi
+    if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (studio): $ACTION_WEB_CMD${RST}"; fi
     echo
     echo "${DIM}Delay between webots->manager: ${START_DELAY_SEC}s${RST}"
     return 0

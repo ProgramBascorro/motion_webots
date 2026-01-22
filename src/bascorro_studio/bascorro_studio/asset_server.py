@@ -78,12 +78,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("OP3_ACTION_WEB_ASSETS_PORT", "8001")),
+        default=int(
+            os.environ.get(
+                "OP3_STUDIO_ASSETS_PORT",
+                os.environ.get("OP3_ACTION_WEB_ASSETS_PORT", "8001"),
+            )
+        ),
         help="Port to serve assets (default: 8001)",
     )
     parser.add_argument(
         "--dir",
-        default=os.environ.get("OP3_ACTION_WEB_ASSETS_DIR", "/tmp/op3_action_web_assets"),
+        default=os.environ.get(
+            "OP3_STUDIO_ASSETS_DIR",
+            os.environ.get("OP3_ACTION_WEB_ASSETS_DIR", "/tmp/bascorro_studio_assets"),
+        ),
         help="Directory to place generated assets",
     )
     return parser.parse_args()

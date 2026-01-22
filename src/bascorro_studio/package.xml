@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>op3_action_web</name>
+  <name>bascorro_studio</name>
   <version>0.1.0</version>
-  <description>Web UI bridge for editing OP3 action pages.</description>
+  <description>Studio UI and telemetry bridge for OP3 workflows.</description>
 
   <maintainer email="farhan@todo.todo">farhan</maintainer>
   <license>Apache-2.0</license>
@@ -15,7 +15,10 @@
   <exec_depend>op3_description</exec_depend>
   <exec_depend>op3_manager</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>robotis_controller_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>xacro</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>

@@ -84,32 +84,54 @@ auto_detect_setup() {
   die "Could not auto-detect setup file in $WS/install/. Set OP3_SETUP or use --setup PATH."
 }
 
+prefer_bash_setup() {
+  if [[ "$SETUP" != *.zsh ]]; then
+    return 1
+  fi
+  local alt_bash="${SETUP%.zsh}.bash"
+  local alt_sh="${SETUP%.zsh}.sh"
+  if [[ -f "$alt_bash" ]]; then
+    SETUP="$alt_bash"
+    return 0
+  fi
+  if [[ -f "$alt_sh" ]]; then
+    SETUP="$alt_sh"
+    return 0
+  fi
+  return 1
+}
+
 auto_detect_shell_runner() {
   if [[ -n "$SHELL_RUNNER" ]]; then
     # If the user forces zsh, fail fast with a clearer message.
     if [[ "$SHELL_RUNNER" == zsh* ]] && ! command -v zsh >/dev/null 2>&1; then
+      if prefer_bash_setup; then
+        SHELL_RUNNER="bash -lc"
+        return 0
+      fi
       die "OP3_SHELL_RUNNER is set to zsh but zsh is not installed. Install zsh or set OP3_SHELL_RUNNER='bash -lc'."
     fi
     return 0
   fi
 
   if [[ "$SETUP" == *.zsh ]]; then
-    if command -v zsh >/dev/null 2>&1; then
+    local prefer_zsh=0
+    if [[ "${SHELL:-}" == *zsh ]]; then
+      prefer_zsh=1
+    fi
+    if [[ "$prefer_zsh" -eq 1 ]] && command -v zsh >/dev/null 2>&1; then
       SHELL_RUNNER="zsh -lc"
       return 0
     fi
 
-    # zsh isn't available; fall back to a bash/sh setup script if present.
-    local alt_bash="${SETUP%.zsh}.bash"
-    local alt_sh="${SETUP%.zsh}.sh"
-    if [[ -f "$alt_bash" ]]; then
-      SETUP="$alt_bash"
+    # Prefer bash/sh setup script when not running zsh.
+    if prefer_bash_setup; then
       SHELL_RUNNER="bash -lc"
       return 0
     fi
-    if [[ -f "$alt_sh" ]]; then
-      SETUP="$alt_sh"
-      SHELL_RUNNER="bash -lc"
+
+    if command -v zsh >/dev/null 2>&1; then
+      SHELL_RUNNER="zsh -lc"
       return 0
     fi
 
