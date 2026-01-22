@@ -20,6 +20,12 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --restart <comp>${RST}Restart one component pane
   ${BOLD}./$(basename "$0") --attach${RST}        Attach to running session
   ${BOLD}./$(basename "$0") --status${RST}        Session status
+  ${BOLD}./$(basename "$0") --doctor${RST}        Health check (deps + workspace)
+  ${BOLD}./$(basename "$0") --install-deps${RST}  Install apt + rosdep dependencies
+  ${BOLD}./$(basename "$0") --build${RST}         Build workspace (colcon)
+  ${BOLD}./$(basename "$0") --docker-build${RST}  Build Docker image
+  ${BOLD}./$(basename "$0") --docker-up${RST}     Run docker-compose up
+  ${BOLD}./$(basename "$0") --docker-down${RST}   Stop docker-compose
   ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
   ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
 
@@ -37,6 +43,12 @@ ${BOLD}Options${RST}
   --action-web         Enable action web UI (bridge + apply node + Vite)
   --localization       Enable localization stack (soccer_localization + rviz)
   --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web
+  --doctor              Health check (deps + workspace)
+  --install-deps        Install apt + rosdep dependencies
+  --build               Build workspace (colcon)
+  --docker-build        Build Docker image
+  --docker-up           Run docker-compose up
+  --docker-down         Stop docker-compose
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
   --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
   --dry-run            Print what would run (no changes)
@@ -57,6 +69,8 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_ACTION_WEB_CMD
   OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
+  OP3_DOCKER_TAG, OP3_DOCKER_RUN_ROSDEP, OP3_DOCKER_BUILD_WS
+  OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_UP_FLAGS
 
 ${BOLD}Profiles${RST}
   webots     Webots simulation defaults (current commands, delay, domain)
@@ -85,6 +99,12 @@ op3_tmux_dispatch() {
   WITH_ACTION_WEB=0
   DO_ATTACH=0
   DO_STATUS=0
+  DO_DOCTOR=0
+  DO_INSTALL_DEPS=0
+  DO_BUILD=0
+  DO_DOCKER_BUILD=0
+  DO_DOCKER_UP=0
+  DO_DOCKER_DOWN=0
   DO_EXIT=0
   DO_STOP=0
   DO_USUAL=0
@@ -115,6 +135,12 @@ op3_tmux_dispatch() {
     --save-usual) DO_SAVE_USUAL=1; shift ;;
       --attach) DO_ATTACH=1; shift ;;
       --status) DO_STATUS=1; shift ;;
+      --doctor) DO_DOCTOR=1; shift ;;
+      --install-deps) DO_INSTALL_DEPS=1; shift ;;
+      --build) DO_BUILD=1; shift ;;
+      --docker-build) DO_DOCKER_BUILD=1; shift ;;
+      --docker-up) DO_DOCKER_UP=1; shift ;;
+      --docker-down) DO_DOCKER_DOWN=1; shift ;;
     --exit|-x) DO_EXIT=1; shift ;;
       --stop) DO_STOP=1; shift ;;
       --restart) RESTART_COMPONENT="$2"; shift 2 ;;
@@ -128,6 +154,12 @@ op3_tmux_dispatch() {
 
   if [[ "$DO_EXIT" -eq 1 ]]; then action_exit; exit 0; fi
   if [[ "$DO_STATUS" -eq 1 ]]; then action_status; exit 0; fi
+  if [[ "$DO_DOCTOR" -eq 1 ]]; then action_doctor; exit $?; fi
+  if [[ "$DO_INSTALL_DEPS" -eq 1 ]]; then action_install_deps; exit $?; fi
+  if [[ "$DO_BUILD" -eq 1 ]]; then action_build; exit $?; fi
+  if [[ "$DO_DOCKER_BUILD" -eq 1 ]]; then action_docker_build; exit $?; fi
+  if [[ "$DO_DOCKER_UP" -eq 1 ]]; then action_docker_up; exit $?; fi
+  if [[ "$DO_DOCKER_DOWN" -eq 1 ]]; then action_docker_down; exit $?; fi
   if [[ "$DO_ATTACH" -eq 1 ]]; then action_attach; exit 0; fi
   if [[ "$DO_STOP" -eq 1 ]]; then action_stop; exit 0; fi
   if [[ -n "$RESTART_COMPONENT" ]]; then restart_component "$RESTART_COMPONENT"; exit 0; fi
@@ -139,6 +171,7 @@ op3_tmux_dispatch() {
       attach) action_attach ;;
       status) action_status ;;
       exit) action_exit ;;
+      cancel) exit 2 ;;
       quit) exit 0 ;;
       *) die "Unknown menu action: $MENU_ACTION" ;;
     esac

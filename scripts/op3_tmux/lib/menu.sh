@@ -12,39 +12,43 @@ fallback_menu_selection() {
   echo "${BOLD}Delay:${RST}     ${START_DELAY_SEC}s (webots → manager)"
   echo "${BOLD}Profile:${RST}   $PROFILE"
   echo
-  echo "${BOLD}Choose what to run:${RST}"
-  echo "  1) Base: Webots + Manager"
-  echo "  2) Base + Teleop"
-  echo "  3) Base + Foxglove"
-  echo "  4) Base + Teleop + Foxglove"
-  echo "  5) Base + Tools"
-  echo "  6) Base + RQT Image View"
-  echo "  7) Base + Teleop + Foxglove + Tools + RQT"
-  echo "  8) Base + Vision + Ball Localizer"
-  echo "  9) Base + Action Editor"
-  echo " 10) Base + Action Web"
-  echo " 11) Attach to existing session"
-  echo " 12) Exit (kill session)"
-  echo " 13) Status"
-  echo "  0) Quit"
-  echo
-  read -r -p "Select [0-13]: " choice
+  if ! command -v gum >/dev/null 2>&1; then
+    echo "${RED}ERROR:${RST} gum is not installed." >&2
+    echo "${DIM}Install:${RST} sudo apt install gum" >&2
+    exit 1
+  fi
 
-  case "${choice:-0}" in
-    1) printf "%s\n" webots manager ;;
-    2) printf "%s\n" webots manager teleop ;;
-    3) printf "%s\n" webots manager foxglove ;;
-    4) printf "%s\n" webots manager teleop foxglove ;;
-    5) printf "%s\n" webots manager tools ;;
-    6) printf "%s\n" webots manager rqt_image_view ;;
-    7) printf "%s\n" webots manager teleop foxglove tools rqt_image_view ;;
-    8) printf "%s\n" webots manager yolo_vision ball_localizer ;;
-    9) printf "%s\n" webots manager action_editor ;;
-    10) printf "%s\n" webots manager action_web ;;
-    11) MENU_ACTION="attach" ;;
-    12) MENU_ACTION="exit" ;;
-    13) MENU_ACTION="status" ;;
-    0) MENU_ACTION="quit" ;;
-    *) echo "${YLW}Invalid choice.${RST}"; exit 1 ;;
+  local choice
+  choice="$(gum choose --header "Choose what to run" \
+    "Base: Webots + Manager" \
+    "Base + Teleop" \
+    "Base + Foxglove" \
+    "Base + Teleop + Foxglove" \
+    "Base + Tools" \
+    "Base + RQT Image View" \
+    "Base + Teleop + Foxglove + Tools + RQT" \
+    "Base + Vision + Ball Localizer" \
+    "Base + Action Editor" \
+    "Base + Action Web" \
+    "Attach to existing session" \
+    "Exit (kill session)" \
+    "Status" \
+    "Quit")"
+
+  case "$choice" in
+    "Base: Webots + Manager") printf "%s\n" webots manager ;;
+    "Base + Teleop") printf "%s\n" webots manager teleop ;;
+    "Base + Foxglove") printf "%s\n" webots manager foxglove ;;
+    "Base + Teleop + Foxglove") printf "%s\n" webots manager teleop foxglove ;;
+    "Base + Tools") printf "%s\n" webots manager tools ;;
+    "Base + RQT Image View") printf "%s\n" webots manager rqt_image_view ;;
+    "Base + Teleop + Foxglove + Tools + RQT") printf "%s\n" webots manager teleop foxglove tools rqt_image_view ;;
+    "Base + Vision + Ball Localizer") printf "%s\n" webots manager yolo_vision ball_localizer ;;
+    "Base + Action Editor") printf "%s\n" webots manager action_editor ;;
+    "Base + Action Web") printf "%s\n" webots manager action_web ;;
+    "Attach to existing session") MENU_ACTION="attach" ;;
+    "Exit (kill session)") MENU_ACTION="exit" ;;
+    "Status") MENU_ACTION="status" ;;
+    "Quit"|*) MENU_ACTION="quit" ;;
   esac
 }

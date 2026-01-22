@@ -17,6 +17,69 @@ action_status() {
   fi
 }
 
+action_doctor() {
+  doctor_check
+}
+
+action_install_deps() {
+  local apt_cmd="apt-get"
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    apt_cmd="sudo apt-get"
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    die "apt-get not found; this command supports Debian/Ubuntu only."
+  fi
+
+  local base_pkgs=(
+    build-essential
+    cmake
+    git
+    python3-colcon-common-extensions
+    python3-rosdep
+  )
+  local ros_pkgs=(
+    ros-humble-rosbridge-server
+    ros-humble-octomap-ros
+    ros-humble-octomap-server
+    ros-humble-octomap-msgs
+    ros-humble-joy
+    ros-humble-foxglove-bridge
+    ros-humble-rqt-image-view
+  )
+
+  echo "${GRN}Installing base packages...${RST}"
+  $apt_cmd update
+  $apt_cmd install -y --no-install-recommends "${base_pkgs[@]}" "${ros_pkgs[@]}"
+
+  if command -v rosdep >/dev/null 2>&1; then
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+      sudo rosdep init 2>/dev/null || true
+    else
+      rosdep init 2>/dev/null || true
+    fi
+    rosdep update
+    if [[ -d "$WS/src" ]]; then
+      (cd "$WS" && rosdep install --from-paths src --ignore-src -r -y)
+    else
+      echo "${YLW}Warning:${RST} $WS/src not found; skip rosdep install."
+    fi
+  else
+    echo "${YLW}Warning:${RST} rosdep not found after install."
+  fi
+
+  echo "${GRN}Done:${RST} dependencies installed."
+}
+
+action_build() {
+  auto_detect_shell_runner
+  if [[ ! -d "$WS" ]]; then
+    die "Workspace not found: $WS"
+  fi
+  local cmd="cd '$WS'; source /opt/ros/humble/setup.bash; colcon build --merge-install --symlink-install"
+  run_in_shell "$cmd"
+}
+
 action_attach() {
   if session_exists; then
     tmux attach -t "$SESSION"
@@ -50,6 +113,72 @@ action_stop() {
 
   tmux kill-session -t "$SESSION"
   echo "${GRN}Sent stop + zero, then killed session.${RST}"
+}
+
+docker_base_cmd() {
+  if ! command -v docker >/dev/null 2>&1; then
+    die "docker not found. Install Docker first."
+  fi
+  if groups "$USER" 2>/dev/null | grep -q "\bdocker\b"; then
+    echo "docker"
+    return 0
+  fi
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    echo "docker"
+    return 0
+  fi
+  echo "sudo docker"
+}
+
+docker_compose_cmd() {
+  local docker_cmd
+  docker_cmd="$(docker_base_cmd)"
+  if $docker_cmd compose version >/dev/null 2>&1; then
+    echo "$docker_cmd compose"
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      echo "docker-compose"
+    else
+      echo "sudo docker-compose"
+    fi
+    return 0
+  fi
+  die "docker compose not found. Install docker or docker-compose."
+}
+
+action_docker_build() {
+  local docker_cmd
+  docker_cmd="$(docker_base_cmd)"
+  [[ -d "$WS" ]] || die "Workspace not found: $WS"
+
+  local tag="${OP3_DOCKER_TAG:-op3_ros2}"
+  local run_rosdep="${OP3_DOCKER_RUN_ROSDEP:-1}"
+  local build_ws="${OP3_DOCKER_BUILD_WS:-0}"
+  local build_flags="${OP3_DOCKER_BUILD_FLAGS:-}"
+
+  (cd "$WS" && $docker_cmd build \
+    -t "$tag" \
+    --build-arg RUN_ROSDEP="$run_rosdep" \
+    --build-arg BUILD_WS="$build_ws" \
+    $build_flags \
+    .)
+}
+
+action_docker_up() {
+  local compose_cmd
+  compose_cmd="$(docker_compose_cmd)"
+  [[ -d "$WS" ]] || die "Workspace not found: $WS"
+  local up_flags="${OP3_DOCKER_UP_FLAGS:-}"
+  (cd "$WS" && $compose_cmd up $up_flags)
+}
+
+action_docker_down() {
+  local compose_cmd
+  compose_cmd="$(docker_compose_cmd)"
+  [[ -d "$WS" ]] || die "Workspace not found: $WS"
+  (cd "$WS" && $compose_cmd down)
 }
 
 restart_component() {

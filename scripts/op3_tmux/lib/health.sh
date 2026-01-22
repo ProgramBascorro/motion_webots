@@ -1,5 +1,45 @@
 has_tmux() { command -v tmux >/dev/null 2>&1; }
 has_ros2() { command -v ros2 >/dev/null 2>&1; }
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+webots_available() {
+  if [[ -n "${WEBOTS_HOME:-}" ]]; then
+    [[ -d "$WEBOTS_HOME" ]] && return 0
+    [[ -x "$WEBOTS_HOME" ]] && return 0
+  fi
+  command -v webots >/dev/null 2>&1 && return 0
+  command -v webots-bin >/dev/null 2>&1 && return 0
+  return 1
+}
+
+detect_setup_optional() {
+  if [[ -n "${SETUP:-}" ]]; then
+    [[ -f "$SETUP" ]] && return 0
+    return 1
+  fi
+
+  local cand1="$WS/install/setup.zsh"
+  local cand2="$WS/install/setup.bash"
+  local cand3="$WS/install/setup.sh"
+  local cand4="$WS/install/local_setup.zsh"
+  local cand5="$WS/install/local_setup.bash"
+
+  for c in "$cand1" "$cand2" "$cand3" "$cand4" "$cand5"; do
+    if [[ -f "$c" ]]; then
+      SETUP="$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+check_ros_pkg() {
+  local pkg="$1"
+  if [[ -z "${SETUP:-}" ]]; then
+    return 1
+  fi
+  $SHELL_RUNNER "source '$SETUP'; ros2 pkg prefix $pkg >/dev/null 2>&1"
+}
 
 ensure_webots_bin() {
   if [[ -n "${WEBOTS_HOME:-}" ]]; then
@@ -64,4 +104,96 @@ health_check() {
     echo "${DIM}Then:${RST} source install/setup.bash | source install/setup.zsh" >&2
     exit 1
   fi
+}
+
+doctor_check() {
+  local ok=1
+
+  if has_tmux; then
+    echo "${GRN}OK:${RST} tmux"
+  else
+    echo "${YLW}WARN:${RST} tmux not found"
+    ok=0
+  fi
+
+  if has_ros2; then
+    echo "${GRN}OK:${RST} ros2"
+  else
+    echo "${YLW}WARN:${RST} ros2 not found in PATH"
+    ok=0
+  fi
+
+  if has_cmd colcon; then
+    echo "${GRN}OK:${RST} colcon"
+  else
+    echo "${YLW}WARN:${RST} colcon not found (install python3-colcon-common-extensions)"
+    ok=0
+  fi
+
+  if has_cmd rosdep; then
+    echo "${GRN}OK:${RST} rosdep"
+  else
+    echo "${YLW}WARN:${RST} rosdep not found (install python3-rosdep)"
+    ok=0
+  fi
+
+  if has_cmd gum; then
+    echo "${GRN}OK:${RST} gum"
+  else
+    echo "${YLW}WARN:${RST} gum not found (install gum for menus)"
+    ok=0
+  fi
+
+  if has_cmd docker; then
+    echo "${GRN}OK:${RST} docker"
+  else
+    echo "${YLW}WARN:${RST} docker not found (install Docker for container workflows)"
+  fi
+
+  if webots_available; then
+    echo "${GRN}OK:${RST} Webots"
+  else
+    echo "${YLW}WARN:${RST} Webots not found (install or set WEBOTS_HOME)"
+    ok=0
+  fi
+
+  if detect_setup_optional; then
+    auto_detect_shell_runner
+    echo "${GRN}OK:${RST} setup: $SETUP"
+    if $SHELL_RUNNER "source '$SETUP'; ros2 pkg list | grep -q '^op3_joy_teleop$'"; then
+      echo "${GRN}OK:${RST} workspace install (op3_joy_teleop)"
+    else
+      echo "${YLW}WARN:${RST} workspace not built (missing op3_joy_teleop)"
+      ok=0
+    fi
+
+    local ros_pkgs=(
+      rosbridge_server
+      octomap_ros
+      octomap_msgs
+      octomap_server
+      webots_ros2_driver
+      foxglove_bridge
+      joy
+    )
+    for pkg in "${ros_pkgs[@]}"; do
+      if check_ros_pkg "$pkg"; then
+        echo "${GRN}OK:${RST} ros2 pkg $pkg"
+      else
+        echo "${YLW}WARN:${RST} ros2 pkg $pkg missing"
+        ok=0
+      fi
+    done
+  else
+    echo "${YLW}WARN:${RST} setup not found in $WS/install (build first)"
+    ok=0
+  fi
+
+  if [[ "$ok" -eq 1 ]]; then
+    echo "${GRN}Doctor:${RST} all checks passed."
+    return 0
+  fi
+
+  echo "${YLW}Doctor:${RST} issues found. Run --install-deps or build."
+  return 1
 }

@@ -3,311 +3,221 @@ project(humanoid_localization)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Find dependencies
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# ----------------------------
+# Dependencies (ROS2)
+# ----------------------------
 find_package(ament_cmake REQUIRED)
+
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(octomap REQUIRED)
-find_package(octomap_msgs REQUIRED)
-find_package(octomap_ros REQUIRED) # Pastikan sudah diinstal: sudo apt install ros-humble-octomap-ros
-find_package(Eigen3 REQUIRED)
 find_package(rcl_interfaces REQUIRED)
-find_package(tf2_ros REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+
 find_package(tf2 REQUIRED)
-find_package(orocos_kdl_vendor REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(tf2_kdl REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+
+find_package(orocos_kdl_vendor REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(message_filters REQUIRED)
+
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
-find_package(visualization_msgs REQUIRED)
-find_package(message_filters REQUIRED)
-message(STATUS "message_filters include dirs: ${message_filters_INCLUDE_DIRS}")
-find_package(std_srvs REQUIRED)
-find_package(sensor_msgs REQUIRED)
 
-set(DYNAMICEDT3D_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include)
+find_package(octomap REQUIRED)
+find_package(octomap_msgs REQUIRED)
+find_package(octomap_ros REQUIRED)
 
-# Try to find SBPL
-find_package(SBPL)
-
-if(SBPL_FOUND)
-  add_definitions(-DUSE_SBPL)
-  message(STATUS "SBPL found, building with SBPL functionality")
-  # SBPL include dirs ditambahkan via target_include_directories nanti
-else()
-  message(WARNING "SBPL not found, building without SBPL functionality")
-  set(SBPL_LIBRARIES "")
-  set(SBPL_INCLUDE_DIRS "") # Set variabel kosong jika tidak ditemukan
-endif()
-
-# Find OpenMP
 find_package(OpenMP REQUIRED)
-if(OpenMP_CXX_FOUND)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  # OpenMP include dirs ditambahkan via target_include_directories nanti
-  # OpenMP libraries ditambahkan via target_link_libraries nanti
+
+# ----------------------------
+# Optional SBPL
+# ----------------------------
+find_package(SBPL QUIET)
+if(SBPL_FOUND)
+  add_compile_definitions(USE_SBPL)
+  message(STATUS "SBPL found: building with SBPL functionality")
+else()
+  message(WARNING "SBPL not found: building without SBPL functionality")
 endif()
 
-# --- Hapus atau komentari blok include_directories global ---
-# include_directories(
-#  include
-#  ${SBPL_INCLUDE_DIRS}
-#  ... (dan seterusnya) ...
-# )
+set(PKG_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# --- Add Libraries ---
+# ----------------------------
+# Libraries
+# ----------------------------
 add_library(transform_utils src/transform_utils.cpp)
+target_include_directories(transform_utils PUBLIC
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(transform_utils
+  tf2 tf2_ros tf2_kdl tf2_eigen tf2_geometry_msgs
+)
+
 add_library(mapmodel src/MapModel.cpp)
+target_include_directories(mapmodel PUBLIC
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(mapmodel
+  rclcpp sensor_msgs tf2 Eigen3 octomap octomap_msgs pcl_conversions
+)
+
 add_library(motionmodel src/MotionModel.cpp)
+target_include_directories(motionmodel PUBLIC
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(motionmodel
+  tf2 tf2_ros tf2_kdl orocos_kdl_vendor sensor_msgs pcl_ros pcl_conversions
+)
+
 add_library(observationmodel src/ObservationModel.cpp)
+target_include_directories(observationmodel PUBLIC
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(observationmodel
+  rclcpp tf2 tf2_ros pcl_ros octomap octomap_msgs
+)
+
+# RaycastingModel uses octomap_ros/conversions.hpp
 add_library(raycastingmodel src/RaycastingModel.cpp)
-add_library(endpointmodel src/EndpointModel.cpp)
+target_include_directories(raycastingmodel PUBLIC
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(raycastingmodel
+  rclcpp tf2 tf2_ros octomap octomap_msgs octomap_ros
+)
+# PLAIN signature only:
+target_link_libraries(raycastingmodel
+  observationmodel
+  transform_utils
+  OpenMP::OpenMP_CXX
+)
+
 add_library(dynamicedt3d
   src/dynamicEDT3D/dynamicEDT3D.cpp
   src/dynamicEDT3D/dynamicEDTOctomap.cpp
 )
-# Library utama, tambahkan semua file sumbernya
-add_library(humanoidlocalization SHARED # Gunakan SHARED jika ini library utama
-  src/HumanoidLocalization.cpp
-  # Tambahkan file .cpp lain jika ada yang bagian dari library ini
-)
-
-# --- Target Include Directories ---
-# Tambahkan include path untuk setiap library jika diperlukan
-target_include_directories(transform_utils PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> # Include lokal
-  $<INSTALL_INTERFACE:include>
-  ${tf2_eigen_INCLUDE_DIRS} # Contoh: Jika transform_utils.cpp butuh Eigen
-  ${tf2_kdl_INCLUDE_DIRS}   # Contoh: Jika transform_utils.cpp butuh KDL
-)
-
-target_include_directories(mapmodel PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${octomap_INCLUDE_DIRS}
-  ${octomap_msgs_INCLUDE_DIRS}
-  ${rclcpp_INCLUDE_DIRS}
-  ${tf2_INCLUDE_DIRS}
-  ${Eigen3_INCLUDE_DIRS}
-  ${sensor_msgs_INCLUDE_DIRS}
-  ${pcl_conversions_INCLUDE_DIRS}
-)
-
-target_include_directories(motionmodel PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${tf2_INCLUDE_DIRS}
-  ${tf2_ros_INCLUDE_DIRS}
-  ${tf2_kdl_INCLUDE_DIRS}
-  ${orocos_kdl_INCLUDE_DIRS}
-  ${sensor_msgs_INCLUDE_DIRS}
-  ${pcl_conversions_INCLUDE_DIRS}
-  ${pcl_ros_INCLUDE_DIRS}
-)
-
-target_include_directories(observationmodel PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${octomap_INCLUDE_DIRS}
-  ${octomap_msgs_INCLUDE_DIRS}
-  ${rclcpp_INCLUDE_DIRS}
-  ${tf2_INCLUDE_DIRS}
-  ${tf2_ros_INCLUDE_DIRS}
-  ${pcl_ros_INCLUDE_DIRS}
-)
-
-target_include_directories(raycastingmodel PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${octomap_INCLUDE_DIRS}
-  ${OpenMP_CXX_INCLUDE_DIRS} # Jika OpenMP punya include dirs
-)
-
 target_include_directories(dynamicedt3d PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> # Untuk header dynamicedt3d
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:include>
-  ${octomap_INCLUDE_DIRS}
 )
+ament_target_dependencies(dynamicedt3d octomap)
 
+add_library(endpointmodel src/EndpointModel.cpp)
 target_include_directories(endpointmodel PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:include>
-  ${octomap_INCLUDE_DIRS}
-  ${visualization_msgs_INCLUDE_DIRS}
-  ${pcl_ros_INCLUDE_DIRS}
-  ${octomap_msgs_INCLUDE_DIRS}
+)
+ament_target_dependencies(endpointmodel
+  visualization_msgs pcl_ros octomap octomap_msgs
+)
+# PLAIN signature only:
+target_link_libraries(endpointmodel
+  dynamicedt3d
+  transform_utils
 )
 
-# Include directories untuk library utama humanoidlocalization
+add_library(humanoidlocalization SHARED
+  src/HumanoidLocalization.cpp
+)
 target_include_directories(humanoidlocalization PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:include>
-  ${SBPL_INCLUDE_DIRS} # Dari find_package(SBPL)
-  ${rclcpp_INCLUDE_DIRS}
-  ${geometry_msgs_INCLUDE_DIRS}
-  ${nav_msgs_INCLUDE_DIRS}
-  ${octomap_INCLUDE_DIRS}
-  ${octomap_msgs_INCLUDE_DIRS}
-  ${octomap_ros_INCLUDE_DIRS}
-  ${Eigen3_INCLUDE_DIRS}
-  ${rcl_interfaces_INCLUDE_DIRS}
-  ${tf2_INCLUDE_DIRS}
-  ${tf2_ros_INCLUDE_DIRS}
-  ${pcl_ros_INCLUDE_DIRS}
-  ${pcl_conversions_INCLUDE_DIRS}
-  ${DYNAMICEDT3D_INCLUDE_DIRS} # Dari set() di atas
-  ${visualization_msgs_INCLUDE_DIRS}
-  ${std_srvs_INCLUDE_DIRS}
-  ${tf2_geometry_msgs_INCLUDE_DIRS}
-  ${message_filters_INCLUDE_DIRS} # <-- Penting
-  ${OpenMP_CXX_INCLUDE_DIRS} # Dari find_package(OpenMP)
-  ${orocos_kdl_INCLUDE_DIRS} # Ditambahkan jika diperlukan oleh header
-  ${tf2_kdl_INCLUDE_DIRS}    # Ditambahkan jika diperlukan oleh header
-  ${tf2_eigen_INCLUDE_DIRS}   # Ditambahkan jika diperlukan oleh header
-  ${sensor_msgs_INCLUDE_DIRS} # Ditambahkan jika diperlukan oleh header
 )
-
-# --- Target Link Libraries ---
-# Link library kecil ke dependensi eksternalnya
-target_link_libraries(transform_utils PUBLIC
-  ${tf2_eigen_LIBRARIES}
-  ${tf2_kdl_LIBRARIES}
+ament_target_dependencies(humanoidlocalization
+  rclcpp geometry_msgs nav_msgs rcl_interfaces sensor_msgs std_srvs visualization_msgs
+  tf2 tf2_ros tf2_kdl tf2_eigen tf2_geometry_msgs
+  message_filters Eigen3
+  pcl_ros pcl_conversions
+  octomap octomap_msgs octomap_ros
 )
-
-target_link_libraries(mapmodel PUBLIC
-  ${octomap_LIBRARIES}
-  ${octomap_msgs_LIBRARIES}
-  ${rclcpp_LIBRARIES}
-  ${tf2_LIBRARIES}
-)
-
-target_link_libraries(motionmodel PUBLIC
-  ${tf2_LIBRARIES}
-  ${tf2_ros_LIBRARIES}
-  ${tf2_kdl_LIBRARIES}
-  ${orocos_kdl_LIBRARIES}
-  ${sensor_msgs_LIBRARIES}
-  ${pcl_conversions_LIBRARIES}
-  ${pcl_ros_LIBRARIES}
-)
-
-target_link_libraries(observationmodel PUBLIC
-  ${octomap_LIBRARIES}
-  ${rclcpp_LIBRARIES}
-  ${tf2_LIBRARIES}
-  ${tf2_ros_LIBRARIES}
-  ${pcl_ros_LIBRARIES}
-)
-
-target_link_libraries(raycastingmodel PUBLIC
-  observationmodel # Link ke library internal
-  transform_utils  # Link ke library internal
-  ${OpenMP_CXX_LIBRARIES}
-  ${octomap_LIBRARIES}
-)
-
-target_link_libraries(dynamicedt3d PUBLIC
-  ${octomap_LIBRARIES}
-)
-
-target_link_libraries(endpointmodel PUBLIC
-  dynamicedt3d     # Link ke library internal
-  transform_utils  # Link ke library internal
-  ${octomap_LIBRARIES}
-  ${visualization_msgs_LIBRARIES}
-)
-
-# Link library utama humanoidlocalization
-target_link_libraries(humanoidlocalization PUBLIC # Gunakan PUBLIC agar node yang link ke sini dapat librarynya
-  # Library internal
+# PLAIN signature only:
+target_link_libraries(humanoidlocalization
   mapmodel
   motionmodel
   raycastingmodel
   endpointmodel
   dynamicedt3d
-  transform_utils # Ditambahkan jika belum ada
-
-  # Library eksternal
-  ${octomap_LIBRARIES}
-  $<$<BOOL:${SBPL_FOUND}>:${SBPL_LIBRARIES}> # Kondisional link SBPL
-  ${rclcpp_LIBRARIES}
-  ${geometry_msgs_LIBRARIES}
-  ${nav_msgs_LIBRARIES}
-  ${octomap_msgs_LIBRARIES}
-  ${octomap_ros_LIBRARIES} # Ditambahkan
-  ${rcl_interfaces_LIBRARIES}
-  ${tf2_LIBRARIES}
-  ${tf2_ros_LIBRARIES}
-  ${tf2_kdl_LIBRARIES}
-  ${pcl_ros_LIBRARIES}
-  ${pcl_conversions_LIBRARIES} # Ditambahkan
-  ${std_srvs_LIBRARIES}
-  ${sensor_msgs_LIBRARIES}
-  ${OpenMP_CXX_LIBRARIES}
-  ${tf2_geometry_msgs_LIBRARIES}
-  ${tf2_eigen_LIBRARIES}
-  ${message_filters_LIBRARIES} # <-- Penting
-  ${visualization_msgs_LIBRARIES} # Ditambahkan
-  ${orocos_kdl_LIBRARIES} # Ditambahkan
+  transform_utils
+  OpenMP::OpenMP_CXX
 )
 
-# --- Executable ---
+if(SBPL_FOUND)
+  target_include_directories(humanoidlocalization PUBLIC ${SBPL_INCLUDE_DIRS})
+  target_link_libraries(humanoidlocalization ${SBPL_LIBRARIES})
+endif()
+
+# ----------------------------
+# Executable
+# ----------------------------
 add_executable(localization_node src/localization_node.cpp)
-
-# Include directories untuk executable (hanya yang dibutuhkan langsung oleh node)
 target_include_directories(localization_node PRIVATE
-   # Tidak perlu include path dari dependensi humanoidlocalization karena sudah PUBLIC
-   # Tambahkan include path jika localization_node.cpp include header lain secara langsung
-   ${rclcpp_INCLUDE_DIRS} # Contoh
+  $<BUILD_INTERFACE:${PKG_INCLUDE_DIR}>
 )
+ament_target_dependencies(localization_node rclcpp)
+# PLAIN signature only:
+target_link_libraries(localization_node humanoidlocalization)
 
-# Link executable ke library utama dan dependensi runtime lainnya
-target_link_libraries(localization_node PRIVATE # PRIVATE karena ini executable
-  humanoidlocalization # Link ke library utama kita
-  # Library lain yang mungkin dibutuhkan HANYA oleh node (jarang terjadi jika sudah di humanoidlocalization)
-  # ${rclcpp_LIBRARIES} # Tidak perlu diulang jika humanoidlocalization sudah PUBLIC link
-)
-
-# --- Install Targets ---
-# Install libraries
+# ----------------------------
+# Install
+# ----------------------------
 install(TARGETS
-  endpointmodel
+  transform_utils
   mapmodel
   motionmodel
   observationmodel
   raycastingmodel
-  humanoidlocalization
-  transform_utils
   dynamicedt3d
+  endpointmodel
+  humanoidlocalization
+  localization_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin # Jika ada executable di sini
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install executable
-install(TARGETS
-  localization_node
-  DESTINATION lib/${PROJECT_NAME} # Tempat umum untuk node di ROS 2
-)
-
-# Install include directories (agar paket lain bisa menggunakan header)
 install(DIRECTORY include/
   DESTINATION include
-  # FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" # Lebih eksplisit
 )
 
-# Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
-# Install config files
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
-# --- Ament Package ---
-# Pastikan semua dependensi ada di package.xml
+# ----------------------------
+# Export
+# ----------------------------
+ament_export_include_directories(include)
+ament_export_libraries(humanoidlocalization)
+ament_export_dependencies(
+  rclcpp geometry_msgs nav_msgs rcl_interfaces sensor_msgs std_srvs visualization_msgs
+  tf2 tf2_ros tf2_kdl tf2_eigen tf2_geometry_msgs
+  message_filters Eigen3
+  pcl_ros pcl_conversions
+  octomap octomap_msgs octomap_ros
+)
+
 ament_package()

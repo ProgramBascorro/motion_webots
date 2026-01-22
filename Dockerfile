@@ -28,6 +28,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-tf2-eigen \
     ros-humble-webots-ros2-driver \
     ros-humble-interactive-markers \
+    ros-humble-rosbridge-server \
+    ros-humble-web-video-server \
+    ros-humble-usb-cam \
+    ros-humble-joint-state-publisher \
+    ros-humble-joint-state-publisher-gui \
+    ros-humble-rviz2 \
+    ros-humble-angles \
+    ros-humble-octomap-ros \
+    ros-humble-octomap-server \
+    ros-humble-octomap-msgs \
+    ros-humble-joy \
+    ros-humble-foxglove-bridge \
+    ros-humble-rqt-image-view \
+    python3-scipy \
+    libncurses-dev \
     qtbase5-dev qttools5-dev \
     xvfb wget locales \
  && rm -rf /var/lib/apt/lists/*
@@ -48,7 +63,7 @@ COPY --from=webots_downloader /tmp/webots /usr/local/webots
 # Webots env
 ENV WEBOTS_HOME=/usr/local/webots
 ENV PATH=/usr/local/webots:${PATH}
-ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
 ENV QTWEBENGINE_DISABLE_SANDBOX=1
 ENV USER=root
 
@@ -66,9 +81,19 @@ COPY src/ src/
 
 RUN bash -lc "source /opt/ros/humble/setup.bash"
 
-# && \
-#     rosdep install --from-paths src --ignore-src -r -y && \
-#     colcon build --symlink-install"
+ARG RUN_ROSDEP=1
+ARG BUILD_WS=0
+ARG ROSDEP_SKIP_KEYS="ament_python map_server python3-filterpy uvc_camera orocos_kdl opencv4 ros_madplay_player Eigen3 opencv eigen3 ros_mpg321_player cmake_modules"
+
+RUN if [ "$RUN_ROSDEP" = "1" ]; then \
+      apt-get update && \
+      bash -lc "source /opt/ros/humble/setup.bash && rosdep install --from-paths src --ignore-src -r -y --skip-keys \"$ROSDEP_SKIP_KEYS\"" && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+
+RUN if [ "$BUILD_WS" = "1" ]; then \
+      bash -lc "source /opt/ros/humble/setup.bash && colcon build --symlink-install"; \
+    fi
 
 # 6) Entrypoint
 COPY docker-entrypoint.sh /docker-entrypoint.sh

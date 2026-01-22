@@ -1,6 +1,7 @@
 # -------------------- Defaults --------------------
 SESSION="${OP3_SESSION:-op3}"
-WS="${OP3_WS:-/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba}"
+WS_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+WS="${OP3_WS:-$WS_DEFAULT}"
 SETUP="${OP3_SETUP:-}"                        # if empty, auto-detect in WS
 OP3_ENV_SCRIPT="${OP3_ENV_SCRIPT:-$WS/scripts/op3_env.sh}"
 

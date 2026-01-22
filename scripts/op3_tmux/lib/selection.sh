@@ -42,21 +42,25 @@ select_with_gum() {
 
 
   if [[ -n "$selected_csv" ]]; then
-    gum choose --no-limit --selected "$selected_csv" --header "Use <space> to toggle, <enter> to start" "${COMPONENTS[@]}" || true
+    gum choose --no-limit --selected "$selected_csv" --header "Use <space> to toggle, <enter> to start" "${COMPONENTS[@]}"
   else
-    gum choose --no-limit --header "Use <space>  to toggle, <enter> to start" "${COMPONENTS[@]}" || true
+    gum choose --no-limit --header "Use <space>  to toggle, <enter> to start" "${COMPONENTS[@]}"
   fi
+  if [[ "$?" -ne 0 ]]; then
+    MENU_ACTION="cancel"
+    return 1
+  fi
+  return 0
 }
 
 interactive_selection() {
-  banner >&2
-  if command -v gum >/dev/null 2>&1; then
-    select_with_gum
-    return 0
+  # banner >&2
+  if ! command -v gum >/dev/null 2>&1; then
+    echo "${RED}ERROR:${RST} gum is not installed." >&2
+    echo "${DIM}Install:${RST} sudo apt install gum" >&2
+    exit 1
   fi
-
-  echo "${YLW}gum is not installed.${RST} Install: sudo apt install gum"
-  fallback_menu_selection
+  select_with_gum
 }
 
 validate_selection() {
