@@ -99,6 +99,17 @@ function decodeImage(msg) {
     }
     return new ImageData(pixels, width, height);
   }
+  if (encoding === "bgra8") {
+    for (let i = 0; i < width * height; i += 1) {
+      const offset = i * 4;
+      const out = i * 4;
+      pixels[out] = raw[offset + 2];     // R
+      pixels[out + 1] = raw[offset + 1]; // G
+      pixels[out + 2] = raw[offset];     // B
+      pixels[out + 3] = raw[offset + 3]; // A
+    }
+    return new ImageData(pixels, width, height);
+  }
   if (encoding === "mono8") {
     for (let i = 0; i < width * height; i += 1) {
       const val = raw[i];
@@ -488,7 +499,7 @@ export default function App() {
     <nav className="w-64 bg-sidebar flex flex-col p-6 text-gray-400 flex-shrink-0">
       <div className="flex items-center gap-3 mb-8 px-2">
         <img src="/log.png" alt="Bascorro Logo" className="w-8 h-8 object-contain" />
-        <span className="font-display font-bold text-lg text-white">Bascorro</span>
+        <span className="font-display font-bold text-lg text-white tracking-tight">Bascorro</span>
       </div>
       <div className="flex flex-col gap-2 flex-1">
         <button
@@ -649,21 +660,39 @@ export default function App() {
     <div className="grid grid-cols-[1fr_320px] gap-6 h-full p-8 overflow-hidden">
       <div className="bg-black rounded-2xl overflow-hidden relative flex items-center justify-center border border-gray-800 shadow-lg">
         {showOverlay ? <canvas ref={overlayCanvasRef} className="max-w-full max-h-full object-contain" /> : <div className="text-gray-500 text-sm font-mono">Stream Paused</div>}
-        <div className="absolute top-4 right-4 bg-black/70 text-green-400 px-3 py-1 rounded-full text-xs font-mono backdrop-blur-sm border border-white/10">
+        <div className="absolute top-4 right-4 bg-black/70 text-green-400 px-3 py-1 rounded-full text-xs font-mono backdrop-blur-sm border border-white/10 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
           {formatNumber(overlayStats.fps, 1)} FPS
         </div>
       </div>
       <div className="flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-          <SectionHeader title="Camera Control" />
+          <SectionHeader title="Stream Control" />
           <div className="flex flex-col gap-4">
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Topic</label>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Preset Topics</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => setOverlayTopic("/vision/yolo/debug")} 
+                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/vision/yolo/debug" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                >
+                  YOLO Debug
+                </button>
+                <button 
+                  onClick={() => setOverlayTopic("/robotis_op3/camera/image_raw")} 
+                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/robotis_op3/camera/image_raw" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                >
+                  Pure Camera
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Custom Topic</label>
               <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={overlayTopic} onChange={e => setOverlayTopic(e.target.value)} />
             </div>
             <div className="flex gap-2">
               <button className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-bold transition-colors" onClick={() => setShowOverlay(!showOverlay)}>
-                {showOverlay ? "Pause" : "Resume"}
+                {showOverlay ? "Stop Stream" : "Start Stream"}
               </button>
               <button className="flex-1 py-2 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2" onClick={() => snapshotServiceRef.current?.callService({}, () => sendStatus("Snapshot Saved"))}>
                 <Camera size={14} /> Snap
