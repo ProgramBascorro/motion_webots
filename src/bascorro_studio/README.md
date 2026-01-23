@@ -1,74 +1,125 @@
-# bascorro_studio
+# Bascorro Studio
 
-Studio UI and telemetry bridge for OP3 workflows (health, vision, tuning, and action pages).
+**Bascorro Studio** is the mission control dashboard for the Bascorro OP3 humanoid robot. It provides a modern, responsive web interface for telemetry, vision processing, parameter tuning, and complex motion editing.
 
-## Quick start (dev)
+Built with **React**, **Tailwind CSS**, and **ROS 2 Humble**, it serves as the primary interface for operating and debugging the robot during development and competition.
 
-1) Build and source the workspace:
+![Bascorro Studio](https://raw.githubusercontent.com/ProgramBascorro/motion_webots/main/docs/public/Banner.png)
 
-```
+## ✨ Features
+
+### 1. Mission Dashboard
+The central hub for robot health and safety.
+- **Real-time Telemetry**: Monitor Battery voltage, CPU load, Memory usage, and Network latency.
+- **Safety Controls**: Prominent **Emergency Stop** and **Init Pose** panic buttons.
+- **Joint Load Analysis**: Live bar charts visualization of torque load on all 20 servos to prevent overheating.
+- **IMU Status**: Real-time roll/pitch/yaw orientation and fall state detection.
+
+### 2. Vision Center
+Dedicated interface for the `soccer_vision` system.
+- **Live Stream**: Low-latency video feed from the robot's camera.
+- **YOLO Tuning**: Adjust confidence thresholds for Ball, Goalpost, and Robot detection on the fly.
+- **Snapshots**: Capture frames for dataset collection.
+
+### 3. Tuning & Teleop
+Tools for configuring locomotion and testing input.
+- **Virtual Gamepad**: Visual feedback for physical controller inputs (ROS `/joy`).
+- **Walking Parameters**: Dynamic tuning of X/Y amplitude, turn angle, and period.
+- **Manual Parameters**: Direct access to set any ROS 2 node parameter.
+
+### 4. Action Studio
+A powerful motion editor for creating and refining robot behaviors.
+- **3D Preview**: WebGL-based visualization of the robot (URDF) mirroring the editor state.
+- **Step-by-Step Editing**: Precise control over joint positions, pause times, and execution time.
+- **Scratch Runner**: Test single steps or sequences instantly without saving.
+- **YAML Management**: Import/Export actions compatible with `op3_action_module`.
+- **Undo/Redo**: Full history support for safe editing.
+
+### 5. System Logs
+Searchable timeline of system events, errors, and warnings for post-mortem analysis.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Build the Workspace
+Ensure you have the full ROS 2 Humble workspace set up.
+
+```bash
 colcon build --packages-select bascorro_studio
 source install/setup.bash
 ```
 
-2) Install rosbridge (required for browser ROS connection):
+### 2. Install Dependencies (First Run Only)
+The web interface requires Node.js and pnpm.
 
-```
-sudo apt install ros-humble-rosbridge-server
+```bash
+cd src/bascorro_studio/web
+pnpm install
+cd ../../..
 ```
 
-3) Start the stack (tmux):
+### 3. Launch Studio
+Use the provided script to start the ROS bridge, backend agent, and web server.
 
-```
+```bash
 ./script.sh --studio
 ```
 
 This launches:
-- rosbridge websocket
-- studio apply node (action pages)
-- studio asset server (URDF + meshes)
-- studio agent (metrics, events, bags, snapshots)
-- bridge_webots for live preview
-- Vite dev server
+- `rosbridge_server` (WebSocket <-> ROS 2)
+- `studio_agent` (System metrics & backend logic)
+- `asset_server` (Serves robot meshes/URDF)
+- `vite` (Web UI)
 
-Open the URL printed by Vite (default: http://localhost:5173).
+Open **http://localhost:5173** in your browser.
 
-## Env overrides
+---
 
-- `OP3_STUDIO_PORT` (default: 5173)
-- `OP3_STUDIO_ASSETS_PORT` (default: 8001)
-- `OP3_STUDIO_ASSETS_DIR` (default: /tmp/bascorro_studio_assets)
-- `OP3_STUDIO_WEB_DIR` (default: <ws>/src/bascorro_studio/web)
-- `OP3_STUDIO_LOG_DIR` (default: /tmp/bascorro_studio_logs)
-- `OP3_STUDIO_SKIP_ROSBRIDGE` (set to 1 to skip rosbridge)
-- `OP3_STUDIO_SKIP_BRIDGE` (set to 1 to skip bridge_webots)
-- `OP3_ROSBRIDGE_URL` (default: ws://localhost:9090)
+## 🛠 Configuration
 
-Legacy `OP3_ACTION_WEB_*` vars are still supported.
+### Environment Variables
+You can override default settings in your shell or `.bashrc`:
 
-## Topics
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OP3_STUDIO_PORT` | `5173` | Web UI port |
+| `OP3_ROSBRIDGE_URL` | `ws://localhost:9090` | ROS Bridge WebSocket URL |
+| `OP3_STUDIO_ASSETS_PORT` | `8001` | Port for serving 3D assets |
+| `OP3_STUDIO_SKIP_ROSBRIDGE` | `0` | Set `1` to manage rosbridge externally |
 
-- `/bascorro_studio/metrics` (std_msgs/String JSON)
-- `/bascorro_studio/events` (std_msgs/String JSON)
-- `/bascorro_studio/request` (std_msgs/String JSON)
-- `/bascorro_studio/result` (std_msgs/String JSON)
+### Web Development
+For frontend-only development with hot reload:
 
-## Services
-
-- `/bascorro_studio/snapshot` (std_srvs/Trigger)
-- `/bascorro_studio/bag_start` (std_srvs/Trigger)
-- `/bascorro_studio/bag_stop` (std_srvs/Trigger)
-
-## Action requests
-
-Example apply payload:
-
-```
-{"action": "apply", "yaml": "<yaml text>"}
+```bash
+cd src/bascorro_studio/web
+pnpm run dev
 ```
 
-Export:
+---
 
-```
-{"action": "export", "pages": "used"}
-```
+## 📡 ROS API
+
+The studio interacts with the robot via standard ROS 2 topics and services.
+
+### Published Topics
+- `/robotis/base/ini_pose` (`std_msgs/String`) - Reset robot pose
+- `/robotis/walking/command` (`std_msgs/String`) - Walking control
+- `/robotis/walking/set_params` (`op3_walking_module_msgs/WalkingParam`) - Tuning
+- `/robotis/action/page_num` (`std_msgs/Int32`) - Execute action page
+
+### Subscribed Topics
+- `/bascorro_studio/metrics` - Aggregated system telemetry
+- `/bascorro_studio/events` - System event log
+- `/robotis/present_joint_states` - Real-time joint feedback
+- `/vision/yolo/debug` - Camera stream
+
+---
+
+## 🎨 Design System
+
+Bascorro Studio follows the **UNDIP Robotics Design System**:
+- **Primary Color**: UNDIP Blue (`#002060`)
+- **Accent Color**: RoboCup Yellow (`#F4B400`)
+- **Icons**: Lucide React
+- **Styling**: Tailwind CSS

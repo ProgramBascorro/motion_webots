@@ -129,23 +129,32 @@ function makeParamValue(type, rawValue) {
 
 // --- Components ---
 
-const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) => (
-  <div className={`stat-card ${status}`}>
-    <div className="stat-header">
-      <span className="stat-title">{title}</span>
-      {Icon && <Icon size={16} className="stat-icon" />}
+const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) => {
+  const statusStyles = {
+    neutral: "border-gray-200 bg-white",
+    danger: "border-red-200 bg-red-50",
+    warning: "border-yellow-200 bg-yellow-50",
+    success: "border-green-200 bg-green-50",
+  };
+
+  return (
+    <div className={`p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md ${statusStyles[status]}`}>
+      <div className="flex justify-between items-center mb-2 text-gray-500">
+        <span className="text-sm font-medium">{title}</span>
+        {Icon && <Icon size={18} />}
+      </div>
+      <div>
+        <span className="block text-2xl font-bold font-display text-gray-900">{value}</span>
+        {subValue && <span className="text-xs text-gray-500 font-mono">{subValue}</span>}
+      </div>
     </div>
-    <div className="stat-body">
-      <span className="stat-value">{value}</span>
-      {subValue && <span className="stat-sub">{subValue}</span>}
-    </div>
-  </div>
-);
+  );
+};
 
 const SectionHeader = ({ title, children }) => (
-  <div className="section-header">
-    <h2>{title}</h2>
-    <div className="section-actions">{children}</div>
+  <div className="flex justify-between items-center mb-4">
+    <h2 className="text-lg font-bold font-display text-gray-800">{title}</h2>
+    <div className="flex gap-2">{children}</div>
   </div>
 );
 
@@ -476,73 +485,77 @@ export default function App() {
   // --- Render Views ---
 
   const renderSidebar = () => (
-    <nav className="sidebar">
-      <div className="sidebar-brand">
-        <div className="brand-logo">B</div>
-        <span className="brand-name">Bascorro</span>
+    <nav className="w-64 bg-sidebar flex flex-col p-6 text-gray-400 flex-shrink-0">
+      <div className="flex items-center gap-3 mb-8 px-2">
+        <img src="/log.png" alt="Bascorro Logo" className="w-8 h-8 object-contain" />
+        <span className="font-display font-bold text-lg text-white">Bascorro</span>
       </div>
-      <div className="sidebar-menu">
+      <div className="flex flex-col gap-2 flex-1">
         <button
-          className={activeTab === "dashboard" ? "active" : ""}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "dashboard" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("dashboard")}
         >
-          <LayoutDashboard size={20} />
+          <LayoutDashboard size={20} className={activeTab === "dashboard" ? "text-accent-yellow" : ""} />
           <span>Dashboard</span>
         </button>
         <button
-          className={activeTab === "vision" ? "active" : ""}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "vision" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("vision")}
         >
-          <Video size={20} />
+          <Video size={20} className={activeTab === "vision" ? "text-accent-yellow" : ""} />
           <span>Vision</span>
         </button>
         <button
-          className={activeTab === "tuning" ? "active" : ""}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tuning" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("tuning")}
         >
-          <Settings size={20} />
+          <Settings size={20} className={activeTab === "tuning" ? "text-accent-yellow" : ""} />
           <span>Tuning</span>
         </button>
         <button
-          className={activeTab === "action" ? "active" : ""}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("action")}
         >
-          <Activity size={20} />
+          <Activity size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
           <span>Action</span>
         </button>
         <button
-          className={activeTab === "logs" ? "active" : ""}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "logs" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("logs")}
         >
-          <Terminal size={20} />
+          <Terminal size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
           <span>Logs</span>
         </button>
       </div>
-      <div className="sidebar-footer">
-        <div className={`connection-status ${rosState}`}>
-          <div className="status-dot"></div>
-          <span>{rosState === "connected" ? "Online" : "Offline"}</span>
+      <div className="pt-6 border-t border-white/10">
+        <div className={`flex items-center gap-2 px-2 text-sm font-medium ${rosState === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
+          <div className={`w-2 h-2 rounded-full ${rosState === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`}></div>
+          <span>{rosState === "connected" ? "System Online" : "Disconnected"}</span>
         </div>
       </div>
     </nav>
   );
 
   const renderDashboard = () => (
-    <div className="view-content dashboard-grid">
-      <div className="dashboard-col-main">
-        <div className="safety-bar">
-          <button className="panic-btn init-pose" onClick={handleInitPose}>
+    <div className="grid grid-cols-[3fr_1fr] gap-6 h-full p-8 overflow-y-auto">
+      <div className="flex flex-col gap-6">
+        {/* Safety & Quick Actions */}
+        <div className="flex gap-4 items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+          <button className="flex items-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleInitPose}>
             <RefreshCw size={18} /> Init Pose
           </button>
-          <button className="panic-btn soft-stop" onClick={handleSoftStop}>
+          <button className="flex items-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleSoftStop}>
             <StopCircle size={18} /> Soft Stop
           </button>
-          <div className="spacer"></div>
-          <button className="control-btn" onClick={() => handleTorque(false)}>Torque OFF</button>
-          <button className="control-btn primary" onClick={() => handleTorque(true)}>Torque ON</button>
+          <div className="flex-1"></div>
+          <div className="flex gap-2">
+            <button className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50" onClick={() => handleTorque(false)}>Torque OFF</button>
+            <button className="px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all" onClick={() => handleTorque(true)}>Torque ON</button>
+          </div>
         </div>
 
-        <div className="stats-row">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-4 gap-6">
           <StatCard
             title="Battery"
             icon={Battery}
@@ -570,20 +583,21 @@ export default function App() {
           />
         </div>
 
-        <div className="card full-width">
+        {/* Torque Graph */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="Joint Torque Load" />
-          <div className="torque-grid">
-            {torqueEntries.length === 0 ? <p className="empty-text">No torque data</p> :
+          <div className="grid grid-cols-4 gap-4 mt-4">
+            {torqueEntries.length === 0 ? <p className="text-gray-400 text-sm col-span-4 text-center py-8">No torque data available</p> :
               torqueEntries.map(([name, val]) => (
-                <div key={name} className="torque-item">
-                  <span className="joint-name">{name}</span>
-                  <div className="torque-bar-bg">
+                <div key={name} className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-gray-500 font-mono uppercase">{name}</span>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className="torque-bar-fill"
+                      className={`h-full rounded-full transition-all duration-300 ${Math.abs(val) > 80 ? 'bg-red-500' : 'bg-undip-blue'}`}
                       style={{ width: `${Math.min(Math.abs(val) * 10, 100)}%` }}
                     ></div>
                   </div>
-                  <span className="torque-val">{formatNumber(val, 2)}</span>
+                  <span className="text-xs font-bold text-gray-700 text-right">{formatNumber(val, 2)}</span>
                 </div>
               ))
             }
@@ -591,38 +605,40 @@ export default function App() {
         </div>
       </div>
 
-      <div className="dashboard-col-side">
-        <div className="card">
-          <SectionHeader title="IMU State" />
-          <div className="imu-readout">
-            <div className="imu-row">
-              <span>Roll</span>
-              <strong>{formatNumber(imu.roll, 1)}°</strong>
+      <div className="flex flex-col gap-6">
+        {/* IMU Card */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="IMU Orientation" />
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500">Roll</span>
+              <strong className="font-mono text-gray-900">{formatNumber(imu.roll, 1)}°</strong>
             </div>
-            <div className="imu-row">
-              <span>Pitch</span>
-              <strong>{formatNumber(imu.pitch, 1)}°</strong>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500">Pitch</span>
+              <strong className="font-mono text-gray-900">{formatNumber(imu.pitch, 1)}°</strong>
             </div>
-            <div className="imu-row">
-              <span>Yaw</span>
-              <strong>{formatNumber(imu.yaw, 1)}°</strong>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500">Yaw</span>
+              <strong className="font-mono text-gray-900">{formatNumber(imu.yaw, 1)}°</strong>
             </div>
-            <div className={`fall-status ${metrics?.fall?.state !== "upright" ? "fallen" : ""}`}>
-              {metrics?.fall?.state || "Unknown"}
+            <div className={`mt-4 text-center p-2 rounded-lg text-xs font-bold uppercase tracking-wider ${metrics?.fall?.state !== "upright" ? "bg-red-100 text-red-600" : "bg-green-50 text-green-600"}`}>
+              State: {metrics?.fall?.state || "Unknown"}
             </div>
           </div>
         </div>
 
-        <div className="card">
-          <SectionHeader title="Recent Events" />
-          <div className="mini-events">
-            {events.slice().reverse().slice(0, 5).map((ev, i) => (
-              <div key={i} className="mini-event">
-                <span className="time">{new Date(ev.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span>
-                <span className="msg">{ev.message}</span>
+        {/* Logs Preview */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex-1">
+          <SectionHeader title="System Events" />
+          <div className="flex flex-col gap-3 mt-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+            {events.slice().reverse().slice(0, 10).map((ev, i) => (
+              <div key={i} className="flex gap-3 text-xs pb-3 border-b border-gray-50 last:border-0">
+                <span className="font-mono text-gray-400 whitespace-nowrap">{new Date(ev.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                <span className="text-gray-700">{ev.message}</span>
               </div>
             ))}
-            {events.length === 0 && <p className="empty-text">No events</p>}
+            {events.length === 0 && <p className="text-gray-400 text-sm text-center py-8">No events logged</p>}
           </div>
         </div>
       </div>
@@ -630,55 +646,60 @@ export default function App() {
   );
 
   const renderVision = () => (
-    <div className="view-content vision-layout">
-      <div className="vision-stream-container">
-        {showOverlay ? <canvas ref={overlayCanvasRef} className="vision-canvas" /> : <div className="vision-placeholder">Stream Paused</div>}
-        <div className="vision-overlay-stats">
+    <div className="grid grid-cols-[1fr_320px] gap-6 h-full p-8 overflow-hidden">
+      <div className="bg-black rounded-2xl overflow-hidden relative flex items-center justify-center border border-gray-800 shadow-lg">
+        {showOverlay ? <canvas ref={overlayCanvasRef} className="max-w-full max-h-full object-contain" /> : <div className="text-gray-500 text-sm font-mono">Stream Paused</div>}
+        <div className="absolute top-4 right-4 bg-black/70 text-green-400 px-3 py-1 rounded-full text-xs font-mono backdrop-blur-sm border border-white/10">
           {formatNumber(overlayStats.fps, 1)} FPS
         </div>
       </div>
-      <div className="vision-sidebar">
-        <div className="card">
-          <SectionHeader title="Controls" />
-          <div className="form-group">
-            <label>Topic</label>
-            <input type="text" value={overlayTopic} onChange={e => setOverlayTopic(e.target.value)} />
-          </div>
-          <div className="btn-group">
-            <button className="control-btn" onClick={() => setShowOverlay(!showOverlay)}>
-              {showOverlay ? "Pause" : "Resume"}
-            </button>
-            <button className="control-btn" onClick={() => snapshotServiceRef.current?.callService({}, () => sendStatus("Snapshot Saved"))}>
-              <Camera size={16} /> Snapshot
-            </button>
+      <div className="flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Camera Control" />
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Topic</label>
+              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={overlayTopic} onChange={e => setOverlayTopic(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <button className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-bold transition-colors" onClick={() => setShowOverlay(!showOverlay)}>
+                {showOverlay ? "Pause" : "Resume"}
+              </button>
+              <button className="flex-1 py-2 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2" onClick={() => snapshotServiceRef.current?.callService({}, () => sendStatus("Snapshot Saved"))}>
+                <Camera size={14} /> Snap
+              </button>
+            </div>
           </div>
         </div>
-        <div className="card">
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="YOLO Thresholds" />
-          {YOLO_PARAM_KEYS.map(key => (
-            <div key={key} className="range-control">
-              <label>{key.replace(/_confidence_threshold|_/g, " ")}</label>
-              <div className="range-row">
+          <div className="flex flex-col gap-6 mt-2">
+            {YOLO_PARAM_KEYS.map(key => (
+              <div key={key}>
+                <div className="flex justify-between mb-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">{key.replace(/_confidence_threshold|_/g, " ")}</label>
+                  <span className="text-xs font-mono font-bold text-undip-blue">{yoloParams[key].toFixed(2)}</span>
+                </div>
                 <input
                   type="range" min="0" max="1" step="0.05"
+                  className="w-full accent-undip-blue h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer"
                   value={yoloParams[key]}
                   onChange={e => setYoloParams({ ...yoloParams, [key]: Number(e.target.value) })}
                 />
-                <span>{yoloParams[key].toFixed(2)}</span>
               </div>
-            </div>
-          ))}
-          <button className="control-btn primary" onClick={applyYoloParams}>Apply Thresholds</button>
+            ))}
+            <button className="w-full py-3 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyYoloParams}>Apply Thresholds</button>
+          </div>
         </div>
       </div>
     </div>
   );
 
   const renderTuning = () => (
-    <div className="view-content tuning-grid">
-      <div className="card full-height">
+    <div className="grid grid-cols-[1fr_340px] gap-6 h-full p-8 overflow-hidden">
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col h-full">
         <SectionHeader title="Teleoperation" />
-        <div className="gamepad-wrapper">
+        <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl border border-gray-100">
           <GamepadVisualizer
             joy={joyState}
             rosConnected={rosState === "connected"}
@@ -686,69 +707,82 @@ export default function App() {
           />
         </div>
       </div>
-      <div className="tuning-col">
-        <div className="card">
-          <SectionHeader title="Walking Parameters">
-            <button className="icon-btn" onClick={loadWalkingParams}><RefreshCw size={14}/></button>
-          </SectionHeader>
-          <div className="form-group">
-            <label>X Amplitude</label>
-            <input type="number" step="0.001" value={walkingParams.x_move_amplitude} onChange={e => setWalkingParams({...walkingParams, x_move_amplitude: e.target.value})} />
+      <div className="flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold font-display text-gray-800">Walking Params</h2>
+            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors" onClick={loadWalkingParams}><RefreshCw size={14}/></button>
           </div>
-          <div className="form-group">
-            <label>Y Amplitude</label>
-            <input type="number" step="0.001" value={walkingParams.y_move_amplitude} onChange={e => setWalkingParams({...walkingParams, y_move_amplitude: e.target.value})} />
+          <div className="flex flex-col gap-4">
+            {['x_move_amplitude', 'y_move_amplitude', 'angle_move_amplitude'].map(param => (
+              <div key={param}>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{param.replace(/_/g, ' ')}</label>
+                <input 
+                  type="number" 
+                  step="0.001" 
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
+                  value={walkingParams[param]} 
+                  onChange={e => setWalkingParams({...walkingParams, [param]: e.target.value})} 
+                />
+              </div>
+            ))}
+            <button className="w-full py-3 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors shadow-sm mt-2" onClick={applyWalkingParams}>Apply Params</button>
           </div>
-          <div className="form-group">
-            <label>Angle Amplitude</label>
-            <input type="number" step="0.001" value={walkingParams.angle_move_amplitude} onChange={e => setWalkingParams({...walkingParams, angle_move_amplitude: e.target.value})} />
-          </div>
-          <button className="control-btn primary" onClick={applyWalkingParams}>Apply Walking Params</button>
         </div>
 
-        <div className="card">
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="Manual Parameter" />
-          <div className="form-group">
-            <label>Node</label>
-            <input type="text" value={paramNode} onChange={e => setParamNode(e.target.value)} />
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Node Name</label>
+              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramNode} onChange={e => setParamNode(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Param Name</label>
+              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramName} onChange={e => setParamName(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Value</label>
+              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramValue} onChange={e => setParamValue(e.target.value)} />
+            </div>
+            <button className="w-full py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors mt-2" onClick={() => {
+               const service = new ROSLIB.Service({ ros: rosRef.current, name: `/${paramNode}/set_parameters`, serviceType: "rcl_interfaces/srv/SetParameters" });
+               service.callService(new ROSLIB.ServiceRequest({ parameters: [{ name: paramName, value: makeParamValue("double", paramValue) }] }), () => sendStatus("Param Sent"));
+            }}>Set Value</button>
           </div>
-          <div className="form-group">
-            <label>Param Name</label>
-            <input type="text" value={paramName} onChange={e => setParamName(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label>Value</label>
-            <input type="text" value={paramValue} onChange={e => setParamValue(e.target.value)} />
-          </div>
-          {/* Simplified type selector for brevity */}
-          <button className="control-btn" onClick={() => {
-             const service = new ROSLIB.Service({ ros: rosRef.current, name: `/${paramNode}/set_parameters`, serviceType: "rcl_interfaces/srv/SetParameters" });
-             service.callService(new ROSLIB.ServiceRequest({ parameters: [{ name: paramName, value: makeParamValue("double", paramValue) }] }), () => sendStatus("Param Sent"));
-          }}>Set (Double)</button>
         </div>
       </div>
     </div>
   );
 
   const renderLogs = () => (
-    <div className="view-content">
-      <div className="card full-height">
-        <SectionHeader title="System Logs" />
-        <div className="logs-table-container">
-          <table className="logs-table">
-            <thead>
+    <div className="h-full p-8 overflow-hidden flex flex-col">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex-1 flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          <h2 className="text-lg font-bold font-display text-gray-800">System Logs</h2>
+          <div className="flex gap-2">
+             <span className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium text-gray-600">{events.length} Events</span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-0">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                <th>Time</th>
-                <th>Type</th>
-                <th>Message</th>
+                <th className="py-3 px-6 text-xs font-bold text-gray-500 uppercase tracking-wider w-32 border-b border-gray-200">Time</th>
+                <th className="py-3 px-6 text-xs font-bold text-gray-500 uppercase tracking-wider w-24 border-b border-gray-200">Type</th>
+                <th className="py-3 px-6 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Message</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {events.slice().reverse().map((ev, i) => (
-                <tr key={i} className={`log-row ${ev.type || "info"}`}>
-                  <td className="log-time">{new Date(ev.ts * 1000).toLocaleTimeString()}</td>
-                  <td className="log-type">{ev.type || "INFO"}</td>
-                  <td className="log-msg">{ev.message}</td>
+                <tr key={i} className="hover:bg-gray-50 transition-colors group">
+                  <td className="py-3 px-6 text-xs font-mono text-gray-500">{new Date(ev.ts * 1000).toLocaleTimeString()}</td>
+                  <td className="py-3 px-6">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${ev.type === 'error' ? 'bg-red-100 text-red-600' : ev.type === 'warn' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-600'}`}>
+                      {ev.type || "INFO"}
+                    </span>
+                  </td>
+                  <td className="py-3 px-6 text-sm text-gray-700 font-mono">{ev.message}</td>
                 </tr>
               ))}
             </tbody>
@@ -759,18 +793,28 @@ export default function App() {
   );
 
   return (
-    <div className="app-container">
+    <div className="flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden">
       {renderSidebar()}
-      <main className="main-content">
-        <header className="top-bar">
-          <h1>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h1>
-          <div className="status-toast">{studioStatus}</div>
+      <main className="flex-1 flex flex-col min-w-0 bg-[#f8fafc]">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-8 flex-shrink-0 z-20">
+          <h1 className="text-xl font-bold font-display text-gray-900 capitalize tracking-tight">{activeTab}</h1>
+          <div className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${studioError ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"} ${!studioStatus && "opacity-0"}`}>
+            {studioStatus || "Ready"}
+          </div>
         </header>
-        {activeTab === "dashboard" && renderDashboard()}
-        {activeTab === "vision" && renderVision()}
-        {activeTab === "tuning" && renderTuning()}
-        {activeTab === "logs" && renderLogs()}
-        {activeTab === "action" && <div className="view-content"><ActionEditor /></div>}
+        <div className="flex-1 overflow-hidden relative">
+          {activeTab === "dashboard" && renderDashboard()}
+          {activeTab === "vision" && renderVision()}
+          {activeTab === "tuning" && renderTuning()}
+          {activeTab === "logs" && renderLogs()}
+          {activeTab === "action" && (
+            <div className="absolute inset-0 p-4">
+               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">
+                 <ActionEditor />
+               </div>
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );
