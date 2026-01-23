@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
+import ChartPage from "./ChartPage.jsx";
 
 const DEFAULT_ROSBRIDGE =
   import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
@@ -510,6 +511,13 @@ export default function App() {
           <span>Dashboard</span>
         </button>
         <button
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "charts" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+          onClick={() => setActiveTab("charts")}
+        >
+          <Activity size={20} className={activeTab === "charts" ? "text-accent-yellow" : ""} />
+          <span>Charts</span>
+        </button>
+        <button
           className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "vision" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
           onClick={() => setActiveTab("vision")}
         >
@@ -833,6 +841,7 @@ export default function App() {
         </header>
         <div className="flex-1 overflow-hidden relative">
           {activeTab === "dashboard" && renderDashboard()}
+          {activeTab === "charts" && <ChartPage currentMetrics={metrics} />}
           {activeTab === "vision" && renderVision()}
           {activeTab === "tuning" && renderTuning()}
           {activeTab === "logs" && renderLogs()}
