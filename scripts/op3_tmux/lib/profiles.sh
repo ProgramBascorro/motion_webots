@@ -9,6 +9,7 @@ apply_profile() {
       YOLO_VISION_CMD="ros2 launch op3_yolo_vision yolo.launch.py"
       LOCALIZATION_CMD="ros2 launch soccer_localization localization.launch.py use_rviz:=false"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml with_manager:=false"
       START_DELAY_SEC="4.0"
       ROS_DOMAIN_ID_DEFAULT="0"
       ;;
@@ -20,6 +21,7 @@ apply_profile() {
       YOLO_VISION_CMD="ros2 launch op3_yolo_vision yolo.launch.py"
       LOCALIZATION_CMD="ros2 launch soccer_localization localization.launch.py use_rviz:=false"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml with_manager:=false"
       START_DELAY_SEC="1.0"
       ROS_DOMAIN_ID_DEFAULT="1"
       ;;
@@ -41,6 +43,10 @@ apply_profile() {
   BALL_LOCALIZER_CMD="${OP3_BALL_LOCALIZER_CMD:-$BALL_LOCALIZER_CMD}"
   ACTION_EDITOR_CMD="${OP3_ACTION_EDITOR_CMD:-$ACTION_EDITOR_CMD}"
   ACTION_WEB_CMD="${OP3_ACTION_WEB_CMD:-$ACTION_WEB_CMD}"
+  DEMO_CMD="${OP3_DEMO_CMD:-$DEMO_CMD}"
+  DEMO_MODE="${OP3_DEMO_MODE:-$DEMO_MODE}"
+  DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-$DEMO_WAIT_STEP_SEC}"
+  DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-$DEMO_WAIT_STEPS}"
   START_DELAY_SEC="${OP3_START_DELAY_SEC:-$START_DELAY_SEC}"
   ROS_DOMAIN_ID_DEFAULT="${ROS_DOMAIN_ID_DEFAULT_ENV:-$ROS_DOMAIN_ID_DEFAULT}"
 }

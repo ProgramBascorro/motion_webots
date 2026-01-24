@@ -4,6 +4,7 @@ project(op3_manager)
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(robotis_controller_msgs REQUIRED)
 find_package(op3_action_module_msgs REQUIRED)
 find_package(op3_walking_module_msgs REQUIRED)
@@ -70,6 +71,7 @@ add_executable(${PROJECT_NAME} src/op3_manager.cpp)
 ament_target_dependencies(${PROJECT_NAME}
   ament_index_cpp 
   rclcpp
+  std_srvs
   robotis_controller_msgs
   op3_action_module_msgs
   op3_walking_module_msgs

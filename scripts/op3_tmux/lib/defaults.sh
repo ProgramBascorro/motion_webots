@@ -7,6 +7,20 @@ OP3_ENV_SCRIPT="${OP3_ENV_SCRIPT:-$WS/scripts/op3_env.sh}"
 
 PROFILE="${OP3_PROFILE:-webots}"
 
+# Best-effort detection of the user's login shell (useful when this launcher is executed by bash).
+if [[ -z "${OP3_PARENT_SHELL:-}" && -n "${SHELL:-}" ]]; then
+  OP3_PARENT_SHELL="${SHELL##*/}"
+fi
+
+# Load persisted preferences (shell runner, etc).
+OP3_CONFIG_DIR="${OP3_CONFIG_DIR:-${HOME:-}/.config/op3-stack}"
+OP3_PREFS_FILE="${OP3_PREFS_FILE:-$OP3_CONFIG_DIR/prefs.sh}"
+if [[ -n "${HOME:-}" && -f "$OP3_PREFS_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$OP3_PREFS_FILE"
+fi
+SETUP="${OP3_SETUP:-$SETUP}"
+
 # Your requested defaults:
 WEBOTS_CMD="${OP3_WEBOTS_CMD:-ros2 launch op3_webots_ros2 robot_launch.py}"
 MANAGER_CMD="${OP3_MANAGER_CMD:-ros2 launch op3_manager op3_simulation.launch.py}"
@@ -29,6 +43,12 @@ ACTION_EDITOR_CMD="${OP3_ACTION_EDITOR_CMD:-bridge_log='${ACTION_EDITOR_LOG}'; b
 
 # Action web
 ACTION_WEB_CMD="${OP3_ACTION_WEB_CMD:-${OP3_STUDIO_CMD:-$WS/scripts/bascorro_studio.sh}}"
+
+# Demo
+DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo.launch.xml with_manager:=false}"
+DEMO_MODE="${OP3_DEMO_MODE:-}"
+DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-0.5}"
+DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-40}"
 
 ROS_DOMAIN_ID_DEFAULT_ENV="${ROS_DOMAIN_ID_DEFAULT:-}"
 ROS_DOMAIN_ID_DEFAULT="${ROS_DOMAIN_ID_DEFAULT_ENV:-0}"

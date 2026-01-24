@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+
+# Allow running via `zsh scripts/op3_tmux/main.sh` (or any non-bash shell) by re-executing under bash.
+if [ -z "${BASH_VERSION-}" ]; then
+  if [ -n "${ZSH_VERSION-}" ]; then
+    case "${ZSH_EVAL_CONTEXT-}" in
+      *:file)
+        echo "ERROR: Source this from bash (via ./script.sh), or execute it directly under bash." >&2
+        return 1
+        ;;
+    esac
+  fi
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  fi
+  echo "ERROR: bash is required to run this script." >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 OP3_TMUX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

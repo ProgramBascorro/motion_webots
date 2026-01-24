@@ -19,7 +19,17 @@
 /* ROS2 API Header */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
+
+/* Standard Library Header */
+#include <chrono>
+#include <iomanip>
+#include <map>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 
 /* ROBOTIS Controller Header */
 #include "robotis_controller/robotis_controller.h"
@@ -59,6 +69,67 @@ std::string g_device_name;
 
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_init_pose_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_demo_command_pub;
+std::mutex g_health_mutex;
+
+std::string escapeJsonString(const std::string& value)
+{
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (char ch : value)
+  {
+    switch (ch)
+    {
+    case '\\':
+    case '"':
+      escaped.push_back('\\');
+      escaped.push_back(ch);
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      escaped += "\\r";
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      escaped.push_back(ch);
+      break;
+    }
+  }
+  return escaped;
+}
+
+std::string buildJsonArray(const std::vector<std::string>& items)
+{
+  std::ostringstream stream;
+  stream << "[";
+  for (size_t i = 0; i < items.size(); ++i)
+  {
+    if (i > 0)
+      stream << ",";
+    stream << "\"" << escapeJsonString(items[i]) << "\"";
+  }
+  stream << "]";
+  return stream.str();
+}
+
+std::string buildJsonObject(const std::map<std::string, std::string>& items)
+{
+  std::ostringstream stream;
+  stream << "{";
+  size_t index = 0;
+  for (const auto& entry : items)
+  {
+    if (index > 0)
+      stream << ",";
+    stream << "\"" << escapeJsonString(entry.first) << "\":\"" << escapeJsonString(entry.second) << "\"";
+    ++index;
+  }
+  stream << "}";
+  return stream.str();
+}
 
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 {
@@ -267,6 +338,74 @@ int main(int argc, char **argv)
 
   g_init_pose_pub->publish(init_msg);
   RCLCPP_INFO(node->get_logger(), "Go to init pose");
+
+  auto health_service = node->create_service<std_srvs::srv::Trigger>(
+      "/robotis/health_check",
+      [](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+        (void) request;
+        std::lock_guard<std::mutex> lock(g_health_mutex);
+
+        if (g_is_simulation)
+        {
+          response->success = true;
+          response->message = "{\"ok\":[],\"failed\":[],\"errors\":{},\"total\":0,\"duration_ms\":0,"
+                              "\"skipped\":true,\"reason\":\"simulation\"}";
+          return;
+        }
+
+        RobotisController *controller = RobotisController::getInstance();
+        if (controller == nullptr || controller->robot_ == nullptr)
+        {
+          response->success = false;
+          response->message = "RobotisController not initialized";
+          return;
+        }
+
+        bool was_running = controller->isTimerRunning();
+        if (was_running)
+          controller->stopTimer();
+
+        auto start_time = std::chrono::steady_clock::now();
+        std::vector<std::string> ok;
+        std::vector<std::string> failed;
+        std::map<std::string, std::string> errors;
+
+        for (const auto& it : controller->robot_->dxls_)
+        {
+          const std::string& joint_name = it.first;
+          Dynamixel *dxl = it.second;
+          int result = controller->ping(joint_name);
+          if (result == COMM_SUCCESS)
+          {
+            ok.push_back(joint_name);
+          }
+          else
+          {
+            failed.push_back(joint_name);
+            dynamixel::PacketHandler *handler = dynamixel::PacketHandler::getPacketHandler(dxl->protocol_version_);
+            errors[joint_name] = handler->getTxRxResult(result);
+          }
+        }
+
+        if (was_running)
+          controller->startTimer();
+
+        auto end_time = std::chrono::steady_clock::now();
+        double duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        std::ostringstream payload;
+        payload << "{\"ok\":" << buildJsonArray(ok)
+                << ",\"failed\":" << buildJsonArray(failed)
+                << ",\"errors\":" << buildJsonObject(errors)
+                << ",\"total\":" << (ok.size() + failed.size())
+                << ",\"duration_ms\":" << std::fixed << std::setprecision(1) << duration_ms
+                << "}";
+
+        response->success = true;
+        response->message = payload.str();
+      });
+  (void) health_service;
 
   rclcpp::spin(node);
 

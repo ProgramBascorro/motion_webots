@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 <launch>
+  <arg name="with_manager" default="true"/>
   <!-- robotis op3 manager -->
-  <include file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
+  <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
 
   <!-- Camera and Ball detector -->
   <include file="$(find-pkg-share op3_ball_detector)/launch/ball_detector_from_usb_cam.launch.py"/> 

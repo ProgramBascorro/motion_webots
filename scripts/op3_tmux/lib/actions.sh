@@ -76,7 +76,11 @@ action_build() {
   if [[ ! -d "$WS" ]]; then
     die "Workspace not found: $WS"
   fi
-  local cmd="cd '$WS'; source /opt/ros/humble/setup.bash; colcon build --merge-install --symlink-install"
+  local ros_setup="/opt/ros/humble/setup.bash"
+  if [[ "$SHELL_RUNNER" == zsh* ]] && [[ -f "/opt/ros/humble/setup.zsh" ]]; then
+    ros_setup="/opt/ros/humble/setup.zsh"
+  fi
+  local cmd="cd '$WS'; source '$ros_setup'; colcon build --merge-install --symlink-install"
   run_in_shell "$cmd"
 }
 
@@ -185,7 +189,9 @@ restart_component() {
   local comp="$1"
 
   session_exists || die "Session '$SESSION' is not running."
-  health_check
+  local require_webots=0
+  [[ "$comp" == "webots" ]] && require_webots=1
+  health_check "$require_webots"
 
   local pane=""
   local target=""
@@ -202,6 +208,7 @@ restart_component() {
     ball_localizer) pane="$(tmux_env_get @op3_pane_ball_localizer)" ;;
     action_editor) pane="$(tmux_env_get @op3_pane_action_editor)" ;;
     action_web) pane="$(tmux_env_get @op3_pane_action_web)" ;;
+    demo) pane="$(tmux_env_get @op3_pane_demo)" ;;
     *) die "Unknown component for --restart: $comp" ;;
   esac
 
@@ -228,6 +235,7 @@ restart_component() {
     ball_localizer) wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")" ;;
     action_editor) wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")" ;;
     action_web) wrapped="$(wrap_cmd "$ACTION_WEB_CMD")" ;;
+    demo) wrapped="$(wrap_cmd "$DEMO_CMD")" ;;
   esac
 
   tmux_send "$target" "$wrapped"

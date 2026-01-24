@@ -1,9 +1,12 @@
-COMPONENTS=(webots manager teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
-COMPONENTS=(webots manager teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
 
 usual_file_path() {
-  echo "${HOME}/.config/op3-stack/usual.txt"
+  echo "${OP3_CONFIG_DIR:-${HOME}/.config/op3-stack}/usual.txt"
+}
+
+last_file_path() {
+  echo "${OP3_CONFIG_DIR:-${HOME}/.config/op3-stack}/last.txt"
 }
 
 load_usual_selection() {
@@ -16,11 +19,28 @@ load_usual_selection() {
   fi
 }
 
+load_last_selection() {
+  local file
+  file="$(last_file_path)"
+  if [[ -f "$file" ]]; then
+    grep -v '^[[:space:]]*$' "$file"
+  else
+    return 1
+  fi
+}
+
 save_usual_selection() {
   local file
   file="$(usual_file_path)"
-  mkdir -p "$(dirname "$file")"
-  printf "%s\n" "$@" > "$file"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  printf "%s\n" "$@" > "$file" 2>/dev/null || true
+}
+
+save_last_selection() {
+  local file
+  file="$(last_file_path)"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  printf "%s\n" "$@" > "$file" 2>/dev/null || true
 }
 
 join_by_comma() {
@@ -30,16 +50,18 @@ join_by_comma() {
 
 select_with_gum() {
   local selected_csv=""
-  if [[ -f "$(usual_file_path)" ]]; then
+  if [[ -f "$(last_file_path)" ]]; then
+    mapfile -t _last < <(load_last_selection)
+    if [[ ${#_last[@]} -gt 0 ]]; then
+      selected_csv="$(join_by_comma "${_last[@]}")"
+    fi
+  elif [[ -f "$(usual_file_path)" ]]; then
     mapfile -t _usual < <(load_usual_selection)
     if [[ ${#_usual[@]} -gt 0 ]]; then
       selected_csv="$(join_by_comma "${_usual[@]}")"
     fi
-  else
-    selected_csv="webots,manager"
   fi
-
-
+  [[ -z "$selected_csv" ]] && selected_csv="webots,manager"
 
   if [[ -n "$selected_csv" ]]; then
     gum choose --no-limit --selected "$selected_csv" --header "Use <space> to toggle, <enter> to start" "${COMPONENTS[@]}"
@@ -94,12 +116,14 @@ apply_selection_flags() {
   WITH_BALL_LOCALIZER=0
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
+  WITH_DEMO=0
 
   local item
   for item in "$@"; do
     case "$item" in
       webots) WITH_WEBOTS=1 ;;
       manager) WITH_MANAGER=1 ;;
+      demo) WITH_DEMO=1 ;;
       teleop) WITH_TELEOP=1 ;;
       foxglove) WITH_FOXGLOVE=1 ;;
       tools) WITH_TOOLS=1 ;;
@@ -122,6 +146,7 @@ resolve_selection() {
 
   if [[ "$use_explicit" -eq 1 ]]; then
     selected+=(webots manager)
+    [[ "$WITH_DEMO" -eq 1 ]] && selected+=(demo)
     [[ "$WITH_TELEOP" -eq 1 ]] && selected+=(teleop)
     [[ "$WITH_FOXGLOVE" -eq 1 ]] && selected+=(foxglove)
     [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
@@ -146,7 +171,24 @@ resolve_selection() {
     fi
   fi
 
+  local has_demo=0
+  local has_manager=0
+  for item in "${selected[@]}"; do
+    case "$item" in
+      demo) has_demo=1 ;;
+      manager) has_manager=1 ;;
+    esac
+  done
+  if [[ "$has_demo" -eq 1 && "$has_manager" -eq 0 ]]; then
+    selected+=(manager)
+  fi
+
   validate_selection "${selected[@]}"
+
+  # Always remember the last selection (used to preselect next time).
+  if [[ "${OP3_SAVE_LAST_SELECTION:-1}" == "1" && "${DRY_RUN:-0}" -ne 1 ]]; then
+    save_last_selection "${selected[@]}"
+  fi
 
   if [[ "$save_usual" -eq 1 ]]; then
     save_usual_selection "${selected[@]}"

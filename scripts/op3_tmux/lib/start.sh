@@ -10,15 +10,17 @@ start_stack() {
   local with_ball_localizer="$9"
   local with_action_editor="${10}"
   local with_action_web="${11}"
-  local dry_run="${12}"
+  local with_demo="${12}"
+  local dry_run="${13}"
 
-  health_check
+  health_check "$with_webots"
   if [[ "$with_manager" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 ]]; then
     ensure_action_file
   fi
 
   local webots_wrapped manager_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
   local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped
+  local demo_wrapped demo_cmd
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
   teleop_wrapped="$(wrap_cmd "$TELEOP_CMD")"
@@ -30,6 +32,13 @@ start_stack() {
   ball_localizer_wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")"
   action_editor_wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")"
   action_web_wrapped="$(wrap_cmd "$ACTION_WEB_CMD")"
+  demo_cmd="$DEMO_CMD"
+  if [[ "$with_demo" -eq 1 && -n "${DEMO_MODE:-}" ]]; then
+    local demo_wait_steps="${DEMO_WAIT_STEPS:-40}"
+    local demo_wait_step_sec="${DEMO_WAIT_STEP_SEC:-0.5}"
+    demo_cmd="${DEMO_CMD} & demo_pid=\$!; for i in \$(seq 1 ${demo_wait_steps}); do if ros2 node list 2>/dev/null | grep -q '^/demo_node$'; then break; fi; sleep ${demo_wait_step_sec}; done; if ros2 node list 2>/dev/null | grep -q '^/demo_node$'; then ros2 topic pub -1 /robotis/mode_command std_msgs/msg/String \\\"{data: ${DEMO_MODE}}\\\"; else echo '[demo] demo_node not found; skipping mode command'; fi; wait \$demo_pid"
+  fi
+  demo_wrapped="$(wrap_cmd "$demo_cmd")"
 
   if [[ "$dry_run" -eq 1 ]]; then
     banner
@@ -48,6 +57,7 @@ start_stack() {
     if [[ "$with_ball_localizer" -eq 1 ]]; then echo "${DIM}Pane (ball_localizer): $BALL_LOCALIZER_CMD${RST}"; fi
     if [[ "$with_action_editor" -eq 1 ]]; then echo "${DIM}Pane (action_editor): $ACTION_EDITOR_CMD${RST}"; fi
     if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (studio): $ACTION_WEB_CMD${RST}"; fi
+    if [[ "$with_demo" -eq 1 ]]; then echo "${DIM}Pane (demo): $demo_cmd${RST}"; fi
     echo
     echo "${DIM}Delay between webots->manager: ${START_DELAY_SEC}s${RST}"
     return 0
@@ -74,6 +84,7 @@ start_stack() {
   [[ "$with_ball_localizer" -eq 1 ]] && components+=(ball_localizer)
   [[ "$with_action_editor" -eq 1 ]] && components+=(action_editor)
   [[ "$with_action_web" -eq 1 ]] && components+=(action_web)
+  [[ "$with_demo" -eq 1 ]] && components+=(demo)
 
   local count=${#components[@]}
   if [[ "$count" -lt 1 ]]; then
@@ -97,55 +108,58 @@ start_stack() {
   local comp
   for comp in "${components[@]}"; do
     pane="${pane_indices[$idx]}"
-    tmux send-keys -t "$SESSION":main.$pane "$SHELL_RUNNER" C-m
     case "$comp" in
       webots)
-        tmux send-keys -t "$SESSION":main.$pane "$webots_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$webots_wrapped"
         tmux_env_set "@op3_pane_webots" "$pane"
         ;;
       manager)
         if [[ "$with_webots" -eq 1 ]]; then
-          tmux send-keys -t "$SESSION":main.$pane "sleep $START_DELAY_SEC; $manager_wrapped" C-m
+          tmux_send "$SESSION":main.$pane "sleep $START_DELAY_SEC; $manager_wrapped"
         else
-          tmux send-keys -t "$SESSION":main.$pane "$manager_wrapped" C-m
+          tmux_send "$SESSION":main.$pane "$manager_wrapped"
         fi
         tmux_env_set "@op3_pane_manager" "$pane"
         ;;
       teleop)
-        tmux send-keys -t "$SESSION":main.$pane "$teleop_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$teleop_wrapped"
         tmux_env_set "@op3_pane_teleop" "$pane"
         ;;
       foxglove)
-        tmux send-keys -t "$SESSION":main.$pane "$fox_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$fox_wrapped"
         tmux_env_set "@op3_pane_foxglove" "$pane"
         ;;
       tools)
-        tmux send-keys -t "$SESSION":main.$pane "$tools_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$tools_wrapped"
         tmux_env_set "@op3_pane_tools" "$pane"
         ;;
       rqt_image_view)
-        tmux send-keys -t "$SESSION":main.$pane "$rqt_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$rqt_wrapped"
         tmux_env_set "@op3_pane_rqt" "$pane"
         ;;
       yolo_vision)
-        tmux send-keys -t "$SESSION":main.$pane "$yolo_vision_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$yolo_vision_wrapped"
         tmux_env_set "@op3_pane_yolo_vision" "$pane"
         ;;
       localization)
-        tmux send-keys -t "$SESSION":main.$pane "$localization_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$localization_wrapped"
         tmux_env_set "@op3_pane_localization" "$pane"
         ;;
       ball_localizer)
-        tmux send-keys -t "$SESSION":main.$pane "$ball_localizer_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$ball_localizer_wrapped"
         tmux_env_set "@op3_pane_ball_localizer" "$pane"
         ;;
       action_editor)
-        tmux send-keys -t "$SESSION":main.$pane "$action_editor_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$action_editor_wrapped"
         tmux_env_set "@op3_pane_action_editor" "$pane"
         ;;
       action_web)
-        tmux send-keys -t "$SESSION":main.$pane "$action_web_wrapped" C-m
+        tmux_send "$SESSION":main.$pane "$action_web_wrapped"
         tmux_env_set "@op3_pane_action_web" "$pane"
+        ;;
+      demo)
+        tmux_send "$SESSION":main.$pane "$demo_wrapped"
+        tmux_env_set "@op3_pane_demo" "$pane"
         ;;
     esac
     idx=$((idx + 1))
@@ -160,6 +174,7 @@ start_stack() {
   tmux_env_set "@op3_with_ball_localizer" "$with_ball_localizer"
   tmux_env_set "@op3_with_action_editor" "$with_action_editor"
   tmux_env_set "@op3_with_action_web" "$with_action_web"
+  tmux_env_set "@op3_with_demo" "$with_demo"
   tmux_env_set "@op3_profile" "$PROFILE"
   tmux_env_set "@op3_layout" "$count"
 

@@ -1,4 +1,28 @@
 #!/usr/bin/env bash
+
+# Allow running via `zsh scripts/bascorro_studio.sh` by re-executing under bash.
+# This script is not meant to be sourced.
+if [ -n "${BASH_VERSION-}" ]; then
+  if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    echo "ERROR: Do not source this script. Run it: scripts/bascorro_studio.sh" >&2
+    return 1
+  fi
+elif [ -n "${ZSH_VERSION-}" ]; then
+  case "${ZSH_EVAL_CONTEXT-}" in
+    *:file)
+      echo "ERROR: Do not source this script. Run it: scripts/bascorro_studio.sh" >&2
+      return 1
+      ;;
+  esac
+fi
+if [ -z "${BASH_VERSION-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  fi
+  echo "ERROR: bash is required to run this script." >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,4 +94,4 @@ export VITE_ASSETS_URL="$ASSETS_URL"
 export VITE_ROSBRIDGE_URL="$ROSBRIDGE_URL"
 
 echo "[studio] Vite dev server on port $WEB_PORT"
-exec pnpm dev --host 0.0.0.0 --port "$WEB_PORT"
+pnpm dev --host 0.0.0.0 --port "$WEB_PORT"

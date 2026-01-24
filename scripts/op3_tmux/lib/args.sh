@@ -11,6 +11,10 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --ball${RST}          Start: webots + manager + yolo_vision + ball_localizer
   ${BOLD}./$(basename "$0") --ball-localizer${RST}Start: webots + manager + ball_localizer
   ${BOLD}./$(basename "$0") --action-editor${RST} Start: webots + manager + action_editor
+  ${BOLD}./$(basename "$0") --demo${RST}          Start: webots + manager + demo
+  ${BOLD}./$(basename "$0") --demo-soccer${RST}   Start: webots + manager + demo (soccer)
+  ${BOLD}./$(basename "$0") --demo-vision${RST}   Start: webots + manager + demo (vision)
+  ${BOLD}./$(basename "$0") --demo-action${RST}   Start: webots + manager + demo (action)
   ${BOLD}./$(basename "$0") --studio${RST}        Start: webots + manager + bascorro studio
   ${BOLD}./$(basename "$0") --action-web${RST}    Alias for --studio
   ${BOLD}./$(basename "$0") --localization${RST}  Start: webots + manager + localization (+ rviz)
@@ -41,10 +45,14 @@ ${BOLD}Options${RST}
   --ball               Enable vision + ball_localizer
   --ball-localizer     Enable ball_localizer
   --action-editor      Enable action editor (bridge + editor)
+  --demo               Enable demo stack (op3_demo)
+  --demo-soccer        Enable demo stack and switch to soccer mode
+  --demo-vision        Enable demo stack and switch to vision mode
+  --demo-action        Enable demo stack and switch to action mode
   --studio             Enable bascorro studio UI (bridge + apply node + Vite)
   --action-web         Alias for --studio
   --localization       Enable localization stack (soccer_localization + rviz)
-  --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web
+  --restart <comp>      comp: webots|manager|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web|demo
   --doctor              Health check (deps + workspace)
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
@@ -60,6 +68,7 @@ ${BOLD}Defaults (env override)${RST}
   MANAGER: ${MANAGER_CMD}
   ACTION_EDITOR: ${ACTION_EDITOR_CMD}
   STUDIO: ${ACTION_WEB_CMD}
+  DEMO: ${DEMO_CMD}
   ACTION_FILE: ${ACTION_FILE_PATH}
   ACTION_EDITOR_LOG: ${ACTION_EDITOR_LOG}
 
@@ -67,12 +76,16 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_WS, OP3_SETUP, OP3_SESSION, OP3_START_DELAY_SEC
   OP3_WEBOTS_CMD, OP3_MANAGER_CMD, OP3_TELEOP_CMD, OP3_FOXGLOVE_CMD
   OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD, OP3_BALL_LOCALIZER_CMD
-  OP3_ACTION_EDITOR_CMD, OP3_ACTION_FILE, OP3_ACTION_FILE_SEED, OP3_ACTION_EDITOR_LOG
+  OP3_ACTION_EDITOR_CMD, OP3_ACTION_FILE, OP3_ACTION_FILE_SEED, OP3_ACTION_EDITOR_LOG, OP3_DEMO_CMD
+  OP3_DEMO_MODE, OP3_DEMO_WAIT_STEP_SEC, OP3_DEMO_WAIT_STEPS
   OP3_STUDIO_CMD, OP3_ACTION_WEB_CMD
   OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
+  OP3_PREFER_ZSH (set 1 to prefer zsh + setup.zsh)
+  OP3_PREFS_FILE (default: ~/.config/op3-stack/prefs.sh)
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
   OP3_DOCKER_TAG, OP3_DOCKER_RUN_ROSDEP, OP3_DOCKER_BUILD_WS
   OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_UP_FLAGS
+  OP3_SAVE_LAST_SELECTION (default: 1; writes ~/.config/op3-stack/last.txt)
 
 ${BOLD}Profiles${RST}
   webots     Webots simulation defaults (current commands, delay, domain)
@@ -99,6 +112,8 @@ op3_tmux_dispatch() {
   WITH_BALL_LOCALIZER=0
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
+  WITH_DEMO=0
+  DEMO_MODE=""
   DO_ATTACH=0
   DO_STATUS=0
   DO_DOCTOR=0
@@ -130,6 +145,10 @@ op3_tmux_dispatch() {
       --ball) WITH_YOLO_VISION=1; WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --ball-localizer) WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --action-editor) WITH_ACTION_EDITOR=1; START_EXPLICIT=1; shift ;;
+      --demo) WITH_DEMO=1; START_EXPLICIT=1; shift ;;
+      --demo-soccer) WITH_DEMO=1; DEMO_MODE="soccer"; START_EXPLICIT=1; shift ;;
+      --demo-vision) WITH_DEMO=1; DEMO_MODE="vision"; START_EXPLICIT=1; shift ;;
+      --demo-action) WITH_DEMO=1; DEMO_MODE="action"; START_EXPLICIT=1; shift ;;
       --studio|--action-web) WITH_ACTION_WEB=1; START_EXPLICIT=1; shift ;;
       --localization) WITH_LOCALIZATION=1; START_EXPLICIT=1; shift ;;
       --tools) WITH_TOOLS=1; START_EXPLICIT=1; shift ;;
@@ -180,5 +199,5 @@ op3_tmux_dispatch() {
     exit 0
   fi
 
-  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$DRY_RUN"
+  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$WITH_DEMO" "$DRY_RUN"
 }

@@ -139,6 +139,16 @@ function makeParamValue(type, rawValue) {
   return { type: PARAM_TYPES.double, double_value: Number(value) };
 }
 
+function parseHealthMessage(message) {
+  if (!message) return null;
+  try {
+    return JSON.parse(message);
+  } catch (err) {
+    console.error("Failed to parse health response", err);
+    return { raw: message };
+  }
+}
+
 // --- Components ---
 
 const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) => {
@@ -180,6 +190,13 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [studioStatus, setStudioStatus] = useState("");
   const [studioError, setStudioError] = useState(false);
+  const [healthResult, setHealthResult] = useState(null);
+  const [healthError, setHealthError] = useState("");
+  const [healthRunning, setHealthRunning] = useState(false);
+  const [healthCheckedAt, setHealthCheckedAt] = useState(null);
+  const [demoMode, setDemoMode] = useState("");
+  const [demoCommand, setDemoCommand] = useState("");
+  const [demoCommandAt, setDemoCommandAt] = useState(null);
   
   // Vision
   const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
@@ -228,6 +245,9 @@ export default function App() {
   const snapshotServiceRef = useRef(null);
   const bagStartServiceRef = useRef(null);
   const bagStopServiceRef = useRef(null);
+  const healthCheckServiceRef = useRef(null);
+  const demoModePubRef = useRef(null);
+  const demoCommandPubRef = useRef(null);
 
   // --- Effects ---
 
@@ -332,6 +352,21 @@ export default function App() {
       name: "/bascorro_studio/bag_stop",
       serviceType: "std_srvs/srv/Trigger",
     });
+    healthCheckServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/robotis/health_check",
+      serviceType: "std_srvs/srv/Trigger",
+    });
+    demoModePubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/mode_command",
+      messageType: "std_msgs/String",
+    });
+    demoCommandPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/demo_command",
+      messageType: "std_msgs/String",
+    });
 
     // Load initial params
     if (yoloGetServiceRef.current) {
@@ -425,6 +460,62 @@ export default function App() {
     }
   };
 
+  const pushDemoStatus = (label, mode = "") => {
+    setDemoCommand(label);
+    setDemoCommandAt(Date.now());
+    if (mode) setDemoMode(mode);
+  };
+
+  const handleDemoMode = (mode) => {
+    if (!demoModePubRef.current || rosState !== "connected") {
+      sendStatus("Demo mode unavailable", true);
+      return;
+    }
+    demoModePubRef.current.publish(new ROSLIB.Message({ data: mode }));
+    pushDemoStatus(`mode ${mode}`, mode);
+    sendStatus(`Demo mode: ${mode}`);
+  };
+
+  const handleDemoCommand = (command) => {
+    if (!demoCommandPubRef.current || rosState !== "connected") {
+      sendStatus("Demo command unavailable", true);
+      return;
+    }
+    demoCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
+    pushDemoStatus(`command ${command}`);
+    sendStatus(`Demo ${command}`);
+  };
+
+  const handleHealthCheck = () => {
+    if (!healthCheckServiceRef.current) {
+      sendStatus("Health check unavailable", true);
+      return;
+    }
+    setHealthRunning(true);
+    setHealthError("");
+    healthCheckServiceRef.current.callService(
+      new ROSLIB.ServiceRequest({}),
+      (res) => {
+        setHealthRunning(false);
+        if (res?.success) {
+          setHealthResult(parseHealthMessage(res.message));
+          setHealthCheckedAt(Date.now());
+          sendStatus("Health check complete");
+        } else {
+          const message = res?.message || "Health check failed";
+          setHealthError(message);
+          sendStatus(message, true);
+        }
+      },
+      (err) => {
+        setHealthRunning(false);
+        const message = err?.message || "Health check failed";
+        setHealthError(message);
+        sendStatus(message, true);
+      }
+    );
+  };
+
   const publishJoy = useCallback((payload) => {
     if (joyPubRef.current && rosState === "connected") {
       const now = Date.now();
@@ -488,6 +579,13 @@ export default function App() {
   const network = metrics?.network || {};
   const imu = metrics?.imu || {};
   const torque = metrics?.torque || {};
+  const healthOk = healthResult?.ok || [];
+  const healthFailed = healthResult?.failed || [];
+  const healthErrors = healthResult?.errors || {};
+  const healthTotal = healthResult?.total ?? (healthOk.length + healthFailed.length);
+  const healthDuration = healthResult?.duration_ms;
+  const healthSkipped = healthResult?.skipped;
+  const healthRaw = healthResult?.raw;
   const torqueEntries = useMemo(() => {
     const e = Object.entries(torque?.joints || {});
     e.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
@@ -645,6 +743,98 @@ export default function App() {
               State: {metrics?.fall?.state || "Unknown"}
             </div>
           </div>
+        </div>
+
+        {/* Demo Control */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Demo Control" />
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-4 gap-2">
+              {["ready", "soccer", "vision", "action"].map((mode) => (
+                <button
+                  key={mode}
+                  className={`py-2 rounded-lg text-[10px] font-bold uppercase transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${demoMode === mode ? "bg-undip-blue text-white border-undip-blue" : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"}`}
+                  onClick={() => handleDemoMode(mode)}
+                  disabled={rosState !== "connected"}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="py-2 rounded-lg text-xs font-bold bg-green-50 text-green-700 border border-green-100 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => handleDemoCommand("start")}
+                disabled={rosState !== "connected"}
+              >
+                Start
+              </button>
+              <button
+                className="py-2 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => handleDemoCommand("stop")}
+                disabled={rosState !== "connected"}
+              >
+                Stop
+              </button>
+            </div>
+            <div className="text-xs text-gray-500 font-mono">
+              {demoCommandAt ? `${new Date(demoCommandAt).toLocaleTimeString()} | ${demoCommand}` : "No demo command sent"}
+            </div>
+            <div className="text-[11px] text-gray-400">
+              Start/Stop affects soccer and action demos.
+            </div>
+          </div>
+        </div>
+
+        {/* Joint Health */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Joint Health">
+            <button
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleHealthCheck}
+              disabled={healthRunning || rosState !== "connected"}
+            >
+              <AlertCircle size={14} />
+              {healthRunning ? "Checking..." : "Run Check"}
+            </button>
+          </SectionHeader>
+          {healthCheckedAt && (
+            <div className="text-xs text-gray-400 font-mono mb-3">
+              Last check: {new Date(healthCheckedAt).toLocaleTimeString()}
+            </div>
+          )}
+          {healthError && (
+            <div className="mb-3 text-xs text-red-600 font-mono">{healthError}</div>
+          )}
+          {!healthResult && !healthError && (
+            <div className="text-sm text-gray-400">No health check yet</div>
+          )}
+          {healthResult && !healthError && (
+            <div className="flex flex-col gap-3">
+              <div className={`px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${healthSkipped ? "bg-gray-100 text-gray-500" : healthFailed.length > 0 ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"}`}>
+                {healthSkipped ? "Skipped (simulation)" : healthFailed.length > 0 ? `${healthFailed.length} joints failed` : "All joints responded"}
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 font-mono">
+                <span>{healthTotal} joints</span>
+                <span>{healthDuration !== undefined ? `${formatNumber(healthDuration, 1)} ms` : "-"}</span>
+              </div>
+              {healthFailed.length > 0 ? (
+                <div className="max-h-[180px] overflow-y-auto pr-2 custom-scrollbar space-y-2">
+                  {healthFailed.map((name) => (
+                    <div key={name} className="flex justify-between text-xs">
+                      <span className="font-mono text-gray-700">{name}</span>
+                      <span className="text-red-600">{healthErrors[name] || "No response"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">No failures reported.</div>
+              )}
+              {healthRaw && (
+                <div className="text-xs text-gray-400 font-mono break-words">{healthRaw}</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Logs Preview */}
