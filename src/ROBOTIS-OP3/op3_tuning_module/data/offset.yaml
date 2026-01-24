@@ -1,21 +1,21 @@
 offset:
   head_pan: 0
-  head_tilt: 0
-  l_ank_pitch: 0
-  l_ank_roll: 0.0
-  l_el: 0
-  l_hip_pitch: 0
-  l_hip_roll: 0
-  l_hip_yaw: 0
-  l_knee: 0
-  l_sho_pitch: 0
-  l_sho_roll: 0
-  r_ank_pitch: 0
-  r_ank_roll: 0
-  r_el: 0
-  r_hip_pitch: 0
-  r_hip_roll: 0
-  r_hip_yaw: 0
+  head_tilt: 0.01995149215925748
+  l_ank_pitch: -0.02147573100585938
+  l_ank_roll: -0.01533980786132813
+  l_el: -2.425223622875977
+  l_hip_pitch: -0.118116520532227
+  l_hip_roll: -0.04448544279785156
+  l_hip_yaw: -0.001533980786132826
+  l_knee: 0.03069460332193276
+  l_sho_pitch: -0.5414952175048824
+  l_sho_roll: 0.1197089529555449
+  r_ank_pitch: 0.04450717481680463
+  r_ank_roll: 0.01841676199316074
+  r_el: 2.391109598778702
+  r_hip_pitch: 0.09668800046409425
+  r_hip_roll: 0.1411951752808992
+  r_hip_yaw: -0.004601942358398438
   r_knee: 0
-  r_sho_pitch: 0
-  r_sho_roll: 0
+  r_sho_pitch: 0.4588843196629209
+  r_sho_roll: -0

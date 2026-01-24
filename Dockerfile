@@ -13,12 +13,12 @@ RUN wget -q https://github.com/cyberbotics/webots/releases/download/${WEBOTS_VER
  && tar xjf webots-*.tar.bz2 \
  && rm webots-*.tar.bz2
 
-# ---- stage 2: ROS Humble base + Webots runtime deps + your workspace
+# ---- stage 2: ROS Humble base + Webots runtime deps + your workspace (no build)
 FROM ros:humble-ros-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# 1) Build + ROS dev deps (yours)
+# 1) System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git \
     libeigen3-dev libyaml-cpp-dev libboost-all-dev libopencv-dev \
@@ -45,8 +45,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libncurses-dev \
     qtbase5-dev qttools5-dev \
     xvfb wget locales \
+    curl gnupg \
+    tmux \
  && rm -rf /var/lib/apt/lists/*
 
+# ---- Charm repo (gum) ----
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list && \
+    apt-get update && apt-get install -y --no-install-recommends gum && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- pnpm ----
+# Installs pnpm to /root/.local/share/pnpm and sets up PATH for future shells.
+RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
+
+# Use Node LTS via pnpm (downloads Node into PNPM_HOME)
+RUN ${PNPM_HOME}/pnpm env use --global lts
 
 # 2) Install Webots runtime deps using Cyberbotics script
 RUN apt-get update && apt-get install -y --no-install-recommends wget \
@@ -72,28 +89,28 @@ RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# 4) rosdep init/update (safe)
-RUN rosdep init || true && rosdep update
+# 4) rosdep init/update (optional; safe)
+RUN rosdep init 2>/dev/null || true && rosdep update
 
-# 5) Copy your workspace + install deps + build
+# 5) Workspace + helper scripts (NO rosdep install, NO colcon build)
 WORKDIR /ros2_ws
-COPY src/ src/
+RUN mkdir -p /ros2_ws/src
 
-RUN bash -lc "source /opt/ros/humble/setup.bash"
+# Copy workspace source
+COPY src/ /ros2_ws/src/
 
-ARG RUN_ROSDEP=1
-ARG BUILD_WS=0
-ARG ROSDEP_SKIP_KEYS="ament_python map_server python3-filterpy uvc_camera orocos_kdl opencv4 ros_madplay_player Eigen3 opencv eigen3 ros_mpg321_player cmake_modules"
+# Copy helper script(s)
+COPY ./script.sh /ros2_ws/script.sh
+COPY ./scripts/ /ros2_ws/scripts/
 
-RUN if [ "$RUN_ROSDEP" = "1" ]; then \
-      apt-get update && \
-      bash -lc "source /opt/ros/humble/setup.bash && rosdep install --from-paths src --ignore-src -r -y --skip-keys \"$ROSDEP_SKIP_KEYS\"" && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
+# Make scripts executable (best-effort)
+RUN chmod +x /ros2_ws/script.sh 2>/dev/null || true && \
+    find /ros2_ws/scripts -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
-RUN if [ "$BUILD_WS" = "1" ]; then \
-      bash -lc "source /opt/ros/humble/setup.bash && colcon build --symlink-install"; \
-    fi
+# Make interactive shells auto-source ROS + pnpm
+RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
+    echo "export PNPM_HOME=/root/.local/share/pnpm" >> /etc/bash.bashrc && \
+    echo "export PATH=\$PNPM_HOME:\$PATH" >> /etc/bash.bashrc
 
 # 6) Entrypoint
 COPY docker-entrypoint.sh /docker-entrypoint.sh
