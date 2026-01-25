@@ -35,7 +35,8 @@ DEF BALL Ball {
   translation 0 0 0.03
   rotation 1 0 0 1.5707963267948966
 }
-RobotisOp3 {
+
+DEF OP3 RobotisOp3 {
   translation -0.36 0 0.3
   rotation 0 1 0 0.09
   controller "<extern>"
@@ -43,7 +44,6 @@ RobotisOp3 {
   cameraWidth 1280
   cameraHeight 720
   bodySlot [
-    InertialUnit {
-    }
+    InertialUnit { }
   ]
 }

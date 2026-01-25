@@ -9,7 +9,6 @@ class WebotsBridge(Node):
     def __init__(self):
         super().__init__('webots_bridge')
         
-        # Joint state dari Webots
         self.joint_state_sub = self.create_subscription(
             JointState,
             '/robotis_op3/joint_states',
@@ -17,7 +16,6 @@ class WebotsBridge(Node):
             10
         )
         
-        # Joint mapping list
         self.joint_names = [
             'r_sho_pitch', 'l_sho_pitch', 'r_sho_roll', 'l_sho_roll',
             'r_el', 'l_el', 'r_hip_yaw', 'l_hip_yaw',
@@ -26,7 +24,6 @@ class WebotsBridge(Node):
             'r_ank_roll', 'l_ank_roll', 'head_pan', 'head_tilt'
         ]
         
-        # Buat publishers untuk 2 namespace: /robotis dan /robotis_op3
         self.joint_publishers = {}
         for joint_name in self.joint_names:
             topic1 = f'/robotis_op3/{joint_name}_position/command'
@@ -37,7 +34,6 @@ class WebotsBridge(Node):
                 self.create_publisher(Float64, topic2, 10),
             ]
 
-        # Subscribe action command (string)
         self.action_command_sub = self.create_subscription(
             String,
             '/webots/action_command',
@@ -45,7 +41,6 @@ class WebotsBridge(Node):
             10
         )
         
-        # Subscribe joint positions dari Action Editor
         self.joint_positions_sub = self.create_subscription(
             Float64MultiArray,
             '/webots/joint_positions',
@@ -53,14 +48,12 @@ class WebotsBridge(Node):
             10
         )
         
-        # Publish joint state ke Action Editor
         self.joint_state_pub = self.create_publisher(
             JointState,
             '/joint_states',
             10
         )
         
-        # Debug
         self.debug_pub = self.create_publisher(String, '/webots_bridge/debug', 10)
         
         self.current_joint_states = JointState()

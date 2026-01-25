@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>gt_localization</name>
+  <version>0.0.1</version>
+  <description>Ground truth localization node</description>
+
+  <maintainer email="mesmer@gmail.com">mesmer</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <exec_depend>python3</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

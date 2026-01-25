@@ -5,16 +5,17 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
 endif()
 
-# find dependencies
+# ================== FIND DEPENDENCIES ==================
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)        
+find_package(tf2_ros REQUIRED)         
 find_package(webots_ros2_driver REQUIRED)
 
 find_package(PkgConfig REQUIRED)
-
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
 find_path(YAML_CPP_INCLUDE_DIR
@@ -30,30 +31,37 @@ find_library(YAML_CPP_LIBRARY
 link_directories(${YAML_CPP_LIBRARY_DIRS})
 
 if(NOT ${YAML_CPP_VERSION} VERSION_LESS "0.5")
-add_definitions(-DHAVE_NEW_YAMLCPP)
-endif(NOT ${YAML_CPP_VERSION} VERSION_LESS "0.5")
+  add_definitions(-DHAVE_NEW_YAMLCPP)
+endif()
 
-
+# ================== INCLUDE DIRECTORIES ==================
 include_directories(
   include
   ${rclcpp_INCLUDE_DIRS}
   ${YAML_CPP_INCLUDE_DIRS}
 )
 
-
+# ================== BUILD EXTERN CONTROLLER ==================
 add_executable(op3_extern_controller 
   src/op3_extern_controller.cpp 
   src/extern_controller_main.cpp
 )
 
-target_link_libraries(op3_extern_controller ${YAML_CPP_LIBRARIES})
+target_link_libraries(op3_extern_controller
+  ${YAML_CPP_LIBRARIES}
+)
 
 ament_target_dependencies(op3_extern_controller
   ament_index_cpp
   rclcpp
+  sensor_msgs
+  geometry_msgs
+  nav_msgs          
+  tf2_ros           
   webots_ros2_driver
 )
 
+# ================== INSTALL ==================
 install(TARGETS
   op3_extern_controller
   DESTINATION lib/${PROJECT_NAME}
@@ -70,6 +78,11 @@ install(DIRECTORY
   protos
   worlds
   DESTINATION share/${PROJECT_NAME}/
+)
+
+install(PROGRAMS
+  controllers/gt_supervisor/gt_supervisor.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()
