@@ -29,6 +29,7 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --install-deps${RST}  Install apt + rosdep dependencies
   ${BOLD}./$(basename "$0") --build${RST}         Build workspace (colcon)
   ${BOLD}./$(basename "$0") --docker-build${RST}  Build Docker image
+  ${BOLD}./$(basename "$0") --docker-run${RST}    Run container (docker run)
   ${BOLD}./$(basename "$0") --docker-up${RST}     Run docker-compose up
   ${BOLD}./$(basename "$0") --docker-down${RST}   Stop docker-compose
   ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
@@ -57,6 +58,7 @@ ${BOLD}Options${RST}
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
   --docker-build        Build Docker image
+  --docker-run          Run container (docker run)
   --docker-up           Run docker-compose up
   --docker-down         Stop docker-compose
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
@@ -83,8 +85,8 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_PREFER_ZSH (set 1 to prefer zsh + setup.zsh)
   OP3_PREFS_FILE (default: ~/.config/op3-stack/prefs.sh)
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
-  OP3_DOCKER_TAG, OP3_DOCKER_RUN_ROSDEP, OP3_DOCKER_BUILD_WS
-  OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_UP_FLAGS
+  OP3_DOCKER_TAG, OP3_DOCKER_WITH_WEBOTS, OP3_DOCKER_WEBOTS_VERSION, OP3_DOCKER_WEBOTS_PACKAGE_PREFIX
+  OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_RUN_FLAGS, OP3_DOCKER_UP_FLAGS
   OP3_SAVE_LAST_SELECTION (default: 1; writes ~/.config/op3-stack/last.txt)
 
 ${BOLD}Profiles${RST}
@@ -120,6 +122,7 @@ op3_tmux_dispatch() {
   DO_INSTALL_DEPS=0
   DO_BUILD=0
   DO_DOCKER_BUILD=0
+  DO_DOCKER_RUN=0
   DO_DOCKER_UP=0
   DO_DOCKER_DOWN=0
   DO_EXIT=0
@@ -160,6 +163,7 @@ op3_tmux_dispatch() {
       --install-deps) DO_INSTALL_DEPS=1; shift ;;
       --build) DO_BUILD=1; shift ;;
       --docker-build) DO_DOCKER_BUILD=1; shift ;;
+      --docker-run) DO_DOCKER_RUN=1; shift ;;
       --docker-up) DO_DOCKER_UP=1; shift ;;
       --docker-down) DO_DOCKER_DOWN=1; shift ;;
     --exit|-x) DO_EXIT=1; shift ;;
@@ -179,6 +183,7 @@ op3_tmux_dispatch() {
   if [[ "$DO_INSTALL_DEPS" -eq 1 ]]; then action_install_deps; exit $?; fi
   if [[ "$DO_BUILD" -eq 1 ]]; then action_build; exit $?; fi
   if [[ "$DO_DOCKER_BUILD" -eq 1 ]]; then action_docker_build; exit $?; fi
+  if [[ "$DO_DOCKER_RUN" -eq 1 ]]; then action_docker_run; exit $?; fi
   if [[ "$DO_DOCKER_UP" -eq 1 ]]; then action_docker_up; exit $?; fi
   if [[ "$DO_DOCKER_DOWN" -eq 1 ]]; then action_docker_down; exit $?; fi
   if [[ "$DO_ATTACH" -eq 1 ]]; then action_attach; exit 0; fi

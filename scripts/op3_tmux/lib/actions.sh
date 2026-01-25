@@ -157,17 +157,70 @@ action_docker_build() {
   docker_cmd="$(docker_base_cmd)"
   [[ -d "$WS" ]] || die "Workspace not found: $WS"
 
-  local tag="${OP3_DOCKER_TAG:-op3_ros2}"
-  local run_rosdep="${OP3_DOCKER_RUN_ROSDEP:-1}"
-  local build_ws="${OP3_DOCKER_BUILD_WS:-0}"
+  local tag="${OP3_DOCKER_TAG:-op3-webots-ros2:humble}"
+  local with_webots="${OP3_DOCKER_WITH_WEBOTS:-1}"
+  local webots_version="${OP3_DOCKER_WEBOTS_VERSION:-R2025a}"
+  local webots_pkg_prefix="${OP3_DOCKER_WEBOTS_PACKAGE_PREFIX:-}"
   local build_flags="${OP3_DOCKER_BUILD_FLAGS:-}"
 
   (cd "$WS" && $docker_cmd build \
     -t "$tag" \
-    --build-arg RUN_ROSDEP="$run_rosdep" \
-    --build-arg BUILD_WS="$build_ws" \
+    --build-arg WITH_WEBOTS="$with_webots" \
+    --build-arg WEBOTS_VERSION="$webots_version" \
+    --build-arg WEBOTS_PACKAGE_PREFIX="$webots_pkg_prefix" \
     $build_flags \
     .)
+}
+
+action_docker_run() {
+  local docker_cmd
+  docker_cmd="$(docker_base_cmd)"
+  [[ -d "$WS" ]] || die "Workspace not found: $WS"
+
+  local tag="${OP3_DOCKER_TAG:-op3-webots-ros2:humble}"
+  local run_flags="${OP3_DOCKER_RUN_FLAGS:-}"
+  local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
+
+  local -a docker_cmd_parts
+  read -r -a docker_cmd_parts <<< "$docker_cmd"
+
+  local -a cmd
+  cmd=(
+    "${docker_cmd_parts[@]}" run -it --rm
+    --net=host --ipc=host
+    --privileged
+    --ulimit rtprio=99
+    --ulimit memlock=-1
+    --cap-add SYS_NICE
+    --cap-add SYS_RESOURCE
+  )
+
+  [[ -e /dev/ttyUSB0 ]] && cmd+=(--device=/dev/ttyUSB0)
+  [[ -e /dev/input ]] && cmd+=(--device=/dev/input)
+  [[ -e /dev/uinput ]] && cmd+=(--device=/dev/uinput)
+
+  local input_gid=""
+  local dialout_gid=""
+  input_gid="$(getent group input 2>/dev/null | cut -d: -f3 || true)"
+  dialout_gid="$(getent group dialout 2>/dev/null | cut -d: -f3 || true)"
+  [[ -n "$input_gid" ]] && cmd+=(--group-add "$input_gid")
+  [[ -n "$dialout_gid" ]] && cmd+=(--group-add "$dialout_gid")
+
+  if [[ -n "${DISPLAY:-}" ]]; then
+    cmd+=(-e "DISPLAY=${DISPLAY}")
+    [[ -S /tmp/.X11-unix/X0 ]] && cmd+=(-v /tmp/.X11-unix:/tmp/.X11-unix:rw)
+    [[ -f "$xauth" ]] && cmd+=(-e XAUTHORITY=/tmp/.Xauthority -v "$xauth":/tmp/.Xauthority:rw)
+  fi
+
+  cmd+=(-v "$WS":/ros2_ws -w /ros2_ws)
+
+  if [[ -n "$run_flags" ]]; then
+    read -r -a extra_flags <<< "$run_flags"
+    cmd+=("${extra_flags[@]}")
+  fi
+
+  cmd+=("$tag" bash)
+  "${cmd[@]}"
 }
 
 action_docker_up() {

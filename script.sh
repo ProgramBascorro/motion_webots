@@ -49,6 +49,7 @@ readonly M_DOCTOR="doctor"
 readonly M_INSTALL_DEPS="install_deps"
 readonly M_DOCKER_BUILD="docker_build"
 readonly M_DOCKER_RUN="docker_run"
+readonly M_DOCKER_COMPOSE_UP="docker_compose_up"
 readonly M_DOCKER_STOP="docker_stop"
 readonly M_EXIT_TMUX="exit_tmux"
 readonly M_QUIT="quit"
@@ -61,6 +62,7 @@ readonly MENU_ENUMS=(
   "$M_INSTALL_DEPS"
   "$M_DOCKER_BUILD"
   "$M_DOCKER_RUN"
+  "$M_DOCKER_COMPOSE_UP"
   "$M_DOCKER_STOP"
   "$M_EXIT_TMUX"
   "$M_QUIT"
@@ -74,8 +76,9 @@ menu_label() {
     "$M_DOCTOR")        echo "Health check" ;;
     "$M_INSTALL_DEPS")  echo "Install deps" ;;
     "$M_DOCKER_BUILD")  echo "Docker build" ;;
-    "$M_DOCKER_RUN")    echo "Docker run" ;;
-    "$M_DOCKER_STOP")   echo "Docker stop" ;;
+    "$M_DOCKER_RUN")    echo "Docker run (container)" ;;
+    "$M_DOCKER_COMPOSE_UP") echo "Docker compose up" ;;
+    "$M_DOCKER_STOP")   echo "Docker compose down" ;;
     "$M_EXIT_TMUX")     echo "Exit tmux session" ;;
     "$M_QUIT")          echo "Quit" ;;
     *)                  echo "Unknown" ;;
@@ -91,6 +94,7 @@ menu_emoji() {
     "$M_INSTALL_DEPS")  echo "📦" ;;
     "$M_DOCKER_BUILD")  echo "🏗️" ;;
     "$M_DOCKER_RUN")    echo "🐳" ;;
+    "$M_DOCKER_COMPOSE_UP") echo "🐳" ;;
     "$M_DOCKER_STOP")   echo "🛑" ;;
     "$M_EXIT_TMUX")     echo "🧹" ;;
     "$M_QUIT")          echo "👋" ;;
@@ -123,8 +127,9 @@ choice_to_enum() {
     "Health check")      echo "$M_DOCTOR" ;;
     "Install deps")      echo "$M_INSTALL_DEPS" ;;
     "Docker build")      echo "$M_DOCKER_BUILD" ;;
-    "Docker run")        echo "$M_DOCKER_RUN" ;;
-    "Docker stop")       echo "$M_DOCKER_STOP" ;;
+    "Docker run (container)") echo "$M_DOCKER_RUN" ;;
+    "Docker compose up") echo "$M_DOCKER_COMPOSE_UP" ;;
+    "Docker compose down") echo "$M_DOCKER_STOP" ;;
     "Exit tmux session") echo "$M_EXIT_TMUX" ;;
     "Quit")              echo "$M_QUIT" ;;
     *)                   echo "$M_QUIT" ;;
@@ -207,6 +212,12 @@ while true; do
       ;;
 
     "$M_DOCKER_RUN")
+      run_flags=""
+      gum confirm "Run in detached mode?" && run_flags="-d"
+      OP3_DOCKER_RUN_FLAGS="$run_flags" op3_tmux_main --docker-run
+      ;;
+
+    "$M_DOCKER_COMPOSE_UP")
       up_flags=""
       gum confirm "Run in detached mode?" && up_flags="-d"
       gum confirm "Build before run?" && up_flags="--build $up_flags"
