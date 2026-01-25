@@ -1,22 +1,31 @@
-# ---- stage 1: download Webots tarball (keeps final image cleaner)
+# ---- stage 1: download Webots tarball (optional)
 FROM ubuntu:22.04 AS webots_downloader
 ARG DEBIAN_FRONTEND=noninteractive
 ARG WEBOTS_VERSION=R2025a
 ARG WEBOTS_PACKAGE_PREFIX=
+ARG WITH_WEBOTS=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget bzip2 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-RUN wget -q https://github.com/cyberbotics/webots/releases/download/${WEBOTS_VERSION}/webots-${WEBOTS_VERSION}-x86-64${WEBOTS_PACKAGE_PREFIX}.tar.bz2 \
- && tar xjf webots-*.tar.bz2 \
- && rm webots-*.tar.bz2
 
-# ---- stage 2: ROS Humble base + Webots runtime deps + your workspace (no build)
+RUN if [ "$WITH_WEBOTS" = "1" ]; then \
+      wget -q https://github.com/cyberbotics/webots/releases/download/${WEBOTS_VERSION}/webots-${WEBOTS_VERSION}-x86-64${WEBOTS_PACKAGE_PREFIX}.tar.bz2 && \
+      tar xjf webots-*.tar.bz2 && \
+      rm webots-*.tar.bz2 ; \
+    else \
+      echo "WITH_WEBOTS=0 -> skipping Webots download"; \
+      mkdir -p /tmp/webots; \
+    fi
+
+
+# ---- stage 2: ROS Humble base + (optional) Webots + your workspace
 FROM ros:humble-ros-base
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG WITH_WEBOTS=1
 
 # 1) System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -50,69 +59,68 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # ---- Charm repo (gum) ----
-RUN mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list && \
-    apt-get update && apt-get install -y --no-install-recommends gum && \
-    rm -rf /var/lib/apt/lists/*
+# RUN mkdir -p /etc/apt/keyrings && \
+#    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg && \
+#    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list && \
+#    apt-get update && apt-get install -y --no-install-recommends gum && \
+#    rm -rf /var/lib/apt/lists/*
 
 # ---- pnpm ----
-# Installs pnpm to /root/.local/share/pnpm and sets up PATH for future shells.
-RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
-ENV PNPM_HOME=/root/.local/share/pnpm
-ENV PATH=${PNPM_HOME}:${PATH}
+# RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+# ENV PNPM_HOME=/root/.local/share/pnpm
+# ENV PATH=${PNPM_HOME}:${PATH}
+# RUN ${PNPM_HOME}/pnpm env use --global lts
 
-# Use Node LTS via pnpm (downloads Node into PNPM_HOME)
-RUN ${PNPM_HOME}/pnpm env use --global lts
+# 2) Install Webots runtime deps (optional)
+RUN if [ "$WITH_WEBOTS" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends wget && \
+      wget -q https://raw.githubusercontent.com/cyberbotics/webots/master/scripts/install/linux_runtime_dependencies.sh && \
+      chmod +x linux_runtime_dependencies.sh && \
+      ./linux_runtime_dependencies.sh && \
+      rm -f linux_runtime_dependencies.sh && \
+      rm -rf /var/lib/apt/lists/* ; \
+    else \
+      echo "WITH_WEBOTS=0 -> skipping Webots runtime dependencies"; \
+    fi
 
-# 2) Install Webots runtime deps using Cyberbotics script
-RUN apt-get update && apt-get install -y --no-install-recommends wget \
- && wget -q https://raw.githubusercontent.com/cyberbotics/webots/master/scripts/install/linux_runtime_dependencies.sh \
- && chmod +x linux_runtime_dependencies.sh \
- && ./linux_runtime_dependencies.sh \
- && rm -f linux_runtime_dependencies.sh \
- && rm -rf /var/lib/apt/lists/*
+# 3) Install Webots itself (optional)
+# NOTE: can't put COPY behind an if, so we copy to a temp location and move conditionally.
+WORKDIR /tmp
+COPY --from=webots_downloader /tmp/webots /tmp/webots
 
-# 3) Install Webots itself
-WORKDIR /usr/local
-COPY --from=webots_downloader /tmp/webots /usr/local/webots
+RUN if [ "$WITH_WEBOTS" = "1" ]; then \
+      mkdir -p /usr/local && mv /tmp/webots /usr/local/webots ; \
+    else \
+      echo "WITH_WEBOTS=0 -> removing staged Webots files" && rm -rf /tmp/webots ; \
+    fi
 
-# Webots env
+# Webots env (set only if enabled; otherwise keep clean)
 ENV WEBOTS_HOME=/usr/local/webots
 ENV PATH=/usr/local/webots:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
 ENV QTWEBENGINE_DISABLE_SANDBOX=1
 ENV USER=root
 
-# Locale (optional but nice)
+# Locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# 4) rosdep init/update (optional; safe)
 RUN rosdep init 2>/dev/null || true && rosdep update
 
-# 5) Workspace + helper scripts (NO rosdep install, NO colcon build)
 WORKDIR /ros2_ws
 RUN mkdir -p /ros2_ws/src
-
-# Copy workspace source
 COPY src/ /ros2_ws/src/
 
-# Copy helper script(s)
 COPY ./script.sh /ros2_ws/script.sh
 COPY ./scripts/ /ros2_ws/scripts/
-
-# Make scripts executable (best-effort)
 RUN chmod +x /ros2_ws/script.sh 2>/dev/null || true && \
     find /ros2_ws/scripts -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
-# Make interactive shells auto-source ROS + pnpm
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
     echo "export PNPM_HOME=/root/.local/share/pnpm" >> /etc/bash.bashrc && \
     echo "export PATH=\$PNPM_HOME:\$PATH" >> /etc/bash.bashrc
 
-# 6) Entrypoint
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
