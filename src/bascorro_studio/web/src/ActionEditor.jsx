@@ -54,6 +54,7 @@ const RAW_CENTER = 2048;
 const RAW_RANGE = 2048;
 const HISTORY_LIMIT = 60;
 const PRESET_STORAGE_KEY = "op3PosePresets";
+const JOINT_SOURCE_TIMEOUT_MS = 1500;
 
 const DEFAULT_ASSETS = import.meta.env.VITE_ASSETS_URL || "http://localhost:8001";
 const DEFAULT_ROSBRIDGE = import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
@@ -81,6 +82,33 @@ function normalizeRaw(value) {
   return null;
 }
 function formatJointLabel(name) { return JOINT_LABELS[name] || name; }
+
+function lookupRawPosition(positions, name, idMap) {
+  if (!positions) return undefined;
+  if (Array.isArray(positions)) {
+    const id = idMap[name];
+    return id ? positions[id] : undefined;
+  }
+  if (typeof positions === "object") {
+    if (Object.prototype.hasOwnProperty.call(positions, name)) return positions[name];
+    const id = idMap[name];
+    if (id) {
+      const idKey = `id_${id}`;
+      if (Object.prototype.hasOwnProperty.call(positions, idKey)) return positions[idKey];
+    }
+  }
+  return undefined;
+}
+
+function setRawPosition(positions, name, idMap, value) {
+  if (!positions) return;
+  const id = idMap[name];
+  if (Array.isArray(positions)) {
+    if (id !== undefined) positions[id] = value;
+    return;
+  }
+  if (typeof positions === "object") positions[name] = value;
+}
 
 const SectionHeader = ({ title, children }) => (
   <div className="flex justify-between items-center mb-4">
@@ -132,33 +160,6 @@ export default function ActionEditor() {
     const sk = selectedStepIndex ?? "n";
     return `${pk}:${sk}:${name}`;
   };
-
-function lookupRawPosition(positions, name, idMap) {
-  if (!positions) return undefined;
-  if (Array.isArray(positions)) {
-    const id = idMap[name];
-    return id ? positions[id] : undefined;
-  }
-  if (typeof positions === "object") {
-    if (Object.prototype.hasOwnProperty.call(positions, name)) return positions[name];
-    const id = idMap[name];
-    if (id) {
-      const idKey = `id_${id}`;
-      if (Object.prototype.hasOwnProperty.call(positions, idKey)) return positions[idKey];
-    }
-  }
-  return undefined;
-}
-
-function setRawPosition(positions, name, idMap, value) {
-  if (!positions) return;
-  const id = idMap[name];
-  if (Array.isArray(positions)) {
-    if (id !== undefined) positions[id] = value;
-    return;
-  }
-  if (typeof positions === "object") positions[name] = value;
-}
   const [showAllJoints, setShowAllJoints] = useState(false);
   const [upright, setUpright] = useState(true);
   const [layFlat, setLayFlat] = useState(false);
@@ -205,7 +206,9 @@ function setRawPosition(positions, name, idMap, value) {
   const enableModulePubRef = useRef(null);
   const requestRef = useRef(null);
   const resultSubRef = useRef(null);
-  const jointSubRef = useRef(null);
+  const jointHardwareSubRef = useRef(null);
+  const jointSimSubRef = useRef(null);
+  const lastJointSourceRef = useRef({ hardware: 0, sim: 0 });
   const livePoseRef = useRef({});
   const pendingRunRef = useRef(null);
   const historyRef = useRef({});
@@ -378,16 +381,30 @@ function setRawPosition(positions, name, idMap, value) {
       } catch (e) { setStatus("Error parsing result"); setStatusError(true); }
     });
 
-    jointSubRef.current = new ROSLIB.Topic({ ros, name: "/robotis_op3/joint_states", messageType: "sensor_msgs/JointState" });
-    jointSubRef.current.subscribe(msg => {
+    const applyJointState = (msg) => {
       const next = { ...livePoseRef.current };
       msg.name.forEach((name, idx) => { if (JOINT_ID[name]) next[name] = msg.position[idx]; });
       livePoseRef.current = next;
       setLivePose(next);
+    };
+
+    jointHardwareSubRef.current = new ROSLIB.Topic({ ros, name: "/robotis/present_joint_states", messageType: "sensor_msgs/JointState" });
+    jointHardwareSubRef.current.subscribe(msg => {
+      lastJointSourceRef.current.hardware = Date.now();
+      applyJointState(msg);
+    });
+
+    jointSimSubRef.current = new ROSLIB.Topic({ ros, name: "/robotis_op3/joint_states", messageType: "sensor_msgs/JointState" });
+    jointSimSubRef.current.subscribe(msg => {
+      const now = Date.now();
+      if (now - lastJointSourceRef.current.hardware <= JOINT_SOURCE_TIMEOUT_MS) return;
+      lastJointSourceRef.current.sim = now;
+      applyJointState(msg);
     });
 
     return () => {
-      jointSubRef.current?.unsubscribe();
+      jointHardwareSubRef.current?.unsubscribe();
+      jointSimSubRef.current?.unsubscribe();
       resultSubRef.current?.unsubscribe();
       ros.close();
     };
@@ -581,6 +598,10 @@ function setRawPosition(positions, name, idMap, value) {
   }, [activeStep, editorDisabled, historyTick]); // Dependencies important for closure capture
 
   // --- Joint Logic ---
+  const handleJointDraftChange = (name, value) => {
+    setJointDrafts(prev => ({ ...prev, [jointDraftKey(name)]: value }));
+  };
+
   const commitJointDraft = (name, value) => {
     if(value === "" || value === null) { setJointDrafts(p => { const n={...p}; delete n[jointDraftKey(name)]; return n; }); return; }
     const num = Number(value);
@@ -610,9 +631,10 @@ function setRawPosition(positions, name, idMap, value) {
       setStatus("Scratch page must be 1-255"); setStatusError(true); return null;
     }
     const header = activePage.header || {};
+    const schedule = header.schedule === 10 || header.schedule === "time" ? 10 : 0;
     const scratchHeader = {
       repeat: Number(header.repeat) || 1,
-      schedule: header.schedule === 10 ? 10 : 0,
+      schedule,
       speed: Number(header.speed) || 0,
       accel: Number(header.accel) || 0,
       next: 0, exit: 0
@@ -640,9 +662,10 @@ function setRawPosition(positions, name, idMap, value) {
     }
 
     const header = activePage.header || {};
+    const schedule = header.schedule === 10 || header.schedule === "time" ? 10 : 0;
     const scratchHeader = {
       repeat: Number(header.repeat) || 1,
-      schedule: header.schedule === 10 ? 10 : 0,
+      schedule,
       speed: Number(header.speed) || 0,
       accel: Number(header.accel) || 0,
       next: 0, exit: 0
@@ -669,6 +692,18 @@ function setRawPosition(positions, name, idMap, value) {
   const handleRunRange = () => {
     const scratch = buildRangeScratchYaml();
     queueScratchRun(scratch, "Running Sequence...");
+  };
+
+  const handleRunPage = () => {
+    const pageIndex = activePage?.index ?? selectedPageIndex;
+    if (pageIndex === null || pageIndex === undefined || !actionPagePubRef.current) return;
+    const run = () => actionPagePubRef.current?.publish(new ROSLIB.Message({ data: pageIndex }));
+    if (autoEnableAction) {
+      enableModulePubRef.current?.publish(new ROSLIB.Message({ data: "action_module" }));
+      setTimeout(run, 300);
+    } else {
+      run();
+    }
   };
 
   const handleStopPage = () => {
@@ -713,6 +748,7 @@ function setRawPosition(positions, name, idMap, value) {
 
   // --- Render Helpers ---
   const activeHeader = activePage?.header || {};
+  const scheduleMode = activeHeader.schedule === 10 || activeHeader.schedule === "time" ? "time" : "speed";
   const activeStepLabel = activeStep ? (activeStep.index ?? selectedStepIndex) : "";
 
   return (
@@ -823,7 +859,7 @@ function setRawPosition(positions, name, idMap, value) {
               </label>
               <div className="h-4 w-px bg-gray-300 mx-1"></div>
               <button onClick={() => enableModulePubRef.current?.publish(new ROSLIB.Message({data:"action_module"}))} className="p-1.5 text-gray-500 hover:text-undip-blue hover:bg-blue-50 rounded" title="Enable Module"><RefreshCw size={16}/></button>
-              <button onClick={() => actionPagePubRef.current?.publish(new ROSLIB.Message({data: activePage?.index}))} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Run Page"><Play size={16}/></button>
+              <button onClick={handleRunPage} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Run Page"><Play size={16}/></button>
               <button onClick={() => actionPagePubRef.current?.publish(new ROSLIB.Message({data: -1}))} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Stop"><Square size={16}/></button>
             </div>
           </div>
@@ -838,7 +874,7 @@ function setRawPosition(positions, name, idMap, value) {
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Schedule</label>
-                <select value={activePage.header?.schedule === 10 ? "time" : "speed"} onChange={e => updateActivePage(p => { p.header = p.header||{}; p.header.schedule = e.target.value; })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none">
+                <select value={scheduleMode} onChange={e => updateActivePage(p => { p.header = p.header||{}; p.header.schedule = e.target.value === "time" ? 10 : 0; })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none">
                   <option value="speed">Speed</option>
                   <option value="time">Time</option>
                 </select>
