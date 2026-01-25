@@ -202,12 +202,18 @@ while true; do
       ;;
 
     "$M_DOCKER_BUILD")
-      tag="$(gum input --value "${OP3_DOCKER_TAG:-op3_ros2}" --prompt "Image tag: ")"
-      build_ws=0
-      run_rosdep=1
-      gum confirm "Build workspace inside image?" && build_ws=1
-      gum confirm "Run rosdep during build?" && run_rosdep=1 || run_rosdep=0
-      OP3_DOCKER_TAG="$tag" OP3_DOCKER_BUILD_WS="$build_ws" OP3_DOCKER_RUN_ROSDEP="$run_rosdep" \
+      tag="$(gum input --value "${OP3_DOCKER_TAG:-op3-webots-ros2:humble}" --prompt "Image tag: ")"
+      with_webots=1
+      webots_version="${OP3_DOCKER_WEBOTS_VERSION:-R2025a}"
+      webots_prefix="${OP3_DOCKER_WEBOTS_PACKAGE_PREFIX:-}"
+      gum confirm "Include Webots?" && with_webots=1 || with_webots=0
+      if [[ "$with_webots" -eq 1 ]]; then
+        webots_version="$(gum input --value "$webots_version" --prompt "Webots version: ")"
+        webots_prefix="$(gum input --value "$webots_prefix" --prompt "Webots package prefix (optional): ")"
+      fi
+      OP3_DOCKER_TAG="$tag" OP3_DOCKER_WITH_WEBOTS="$with_webots" \
+        OP3_DOCKER_WEBOTS_VERSION="$webots_version" \
+        OP3_DOCKER_WEBOTS_PACKAGE_PREFIX="$webots_prefix" \
         op3_tmux_main --docker-build
       ;;
 
