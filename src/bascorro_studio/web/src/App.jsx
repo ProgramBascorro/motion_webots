@@ -1035,13 +1035,11 @@ export default function App() {
           {activeTab === "vision" && renderVision()}
           {activeTab === "tuning" && renderTuning()}
           {activeTab === "logs" && renderLogs()}
-          {activeTab === "action" && (
-            <div className="absolute inset-0 p-4">
-               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">
-                 <ActionEditor />
-               </div>
-            </div>
-          )}
+          <div className={`absolute inset-0 p-4 ${activeTab === "action" ? "" : "hidden"}`}>
+             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">
+               <ActionEditor isActive={activeTab === "action"} />
+             </div>
+          </div>
         </div>
       </main>
     </div>

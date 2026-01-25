@@ -53,6 +53,40 @@ source install/setup.bash
 ### 2. Install Dependencies (First Run Only)
 The web interface requires Node.js and pnpm.
 
+Install pnpm:
+
+Using PowerShell (Windows):
+
+```powershell
+Invoke-WebRequest https://get.pnpm.io/install.ps1 -UseBasicParsing | Invoke-Expression
+```
+
+On Windows, Microsoft Defender can significantly slow down installation of packages. You can add pnpm to Microsoft Defender's list of excluded folders in a PowerShell window with administrator rights by executing:
+
+```powershell
+Add-MpPreference -ExclusionPath $(pnpm store path)
+```
+
+On POSIX systems:
+
+```bash
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+
+If you don't have curl installed, you would like to use wget:
+
+```bash
+wget -qO- https://get.pnpm.io/install.sh | sh -
+```
+
+Then install Node LTS via pnpm:
+
+```bash
+pnpm env use --global lts
+```
+
+Finally, install the web dependencies:
+
 ```bash
 cd src/bascorro_studio/web
 pnpm install

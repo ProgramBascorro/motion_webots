@@ -2,6 +2,26 @@ has_tmux() { command -v tmux >/dev/null 2>&1; }
 has_ros2() { command -v ros2 >/dev/null 2>&1; }
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+ensure_tmux_installed() {
+  if has_tmux; then
+    return 0
+  fi
+  echo "${YLW}tmux is not installed.${RST}" >&2
+  cat <<'EOF' >&2
+Install with:
+  sudo apt install tmux
+EOF
+  if [[ -t 0 && -t 1 ]]; then
+    read -r -p "Install tmux now? [y/N] " reply
+    case "$reply" in
+      y|Y|yes|YES)
+        sudo apt install tmux
+        ;;
+    esac
+  fi
+  has_tmux || die "tmux is not installed. Please install it and retry."
+}
+
 prefer_zsh_shell() {
   [[ "${OP3_PREFER_ZSH:-0}" == "1" ]] && return 0
   [[ "${OP3_PARENT_SHELL:-}" == "zsh" ]] && return 0
@@ -238,7 +258,7 @@ auto_detect_shell_runner() {
 
 health_check() {
   local require_webots="${1:-1}"
-  has_tmux || die "tmux is not installed. Install: sudo apt install tmux"
+  ensure_tmux_installed
   has_ros2 || die "ros2 is not installed or not in PATH."
 
   auto_detect_setup

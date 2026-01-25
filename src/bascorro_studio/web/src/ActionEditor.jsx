@@ -148,7 +148,7 @@ function buildPose(positions, livePose) {
 
 // --- Component ---
 
-export default function ActionEditor() {
+export default function ActionEditor({ isActive = true }) {
   const [yamlText, setYamlText] = useState("");
   const [yamlData, setYamlData] = useState(null);
   const [parseError, setParseError] = useState("");
@@ -175,6 +175,10 @@ export default function ActionEditor() {
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [recordLastDelta, setRecordLastDelta] = useState(null);
   const [recordLastTicks, setRecordLastTicks] = useState(null);
+  const [jointGridColumns, setJointGridColumns] = useState(() => {
+    const raw = localStorage.getItem("op3JointGridColumns");
+    return raw === "2" ? 2 : 1;
+  });
   const [autoEnableAction, setAutoEnableAction] = useState(true);
   const [showYaml, setShowYaml] = useState(true);
   const [scratchPageIndex, setScratchPageIndex] = useState(250);
@@ -287,6 +291,7 @@ export default function ActionEditor() {
   useEffect(() => { localStorage.setItem("op3RosUrl", rosUrl); }, [rosUrl, autoEnableAction]);
   useEffect(() => { localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(posePresets)); }, [posePresets]);
   useEffect(() => { localStorage.setItem("op3SendStepToWebots", sendStepToWebots ? "1" : "0"); }, [sendStepToWebots]);
+  useEffect(() => { localStorage.setItem("op3JointGridColumns", String(jointGridColumns)); }, [jointGridColumns]);
   
   useEffect(() => {
     if (!yamlText.trim()) { setYamlData(null); setParseError(""); return; }
@@ -412,7 +417,7 @@ export default function ActionEditor() {
 
   // --- Three.js ---
   useEffect(() => {
-    if (!viewerEnabled || !viewerRef.current) return;
+    if (!viewerEnabled || !viewerRef.current || !isActive) return;
     const container = viewerRef.current;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#f8fafc"); // Slate-50
@@ -478,7 +483,7 @@ export default function ActionEditor() {
       renderer.dispose();
       if(container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
-  }, [assetsUrl, viewerEnabled]);
+  }, [assetsUrl, viewerEnabled, isActive]);
 
   useEffect(() => { if(robotRef.current) applyRobotOrientation(robotRef.current, upright, layFlat); }, [upright, layFlat]);
   useEffect(() => { if(robotRef.current) applyRobotMirror(robotRef.current, mirrorView); }, [mirrorView]);
@@ -910,6 +915,13 @@ export default function ActionEditor() {
                 <input type="checkbox" checked={sendStepToWebots} onChange={e => setSendStepToWebots(e.target.checked)} className="accent-undip-blue"/>
                 Auto-Send
               </label>
+              <button
+                onClick={() => setJointGridColumns(jointGridColumns === 2 ? 1 : 2)}
+                className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                title="Toggle joint layout"
+              >
+                {jointGridColumns === 2 ? "2 Row" : "1 Row"}
+              </button>
             </div>
           </div>
 
@@ -935,7 +947,7 @@ export default function ActionEditor() {
 
               {/* Joint Grid */}
               <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                <div className={`grid gap-3 ${jointGridColumns === 2 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
                   {jointNames.map(name => {
                     const raw = lookupRawPosition(activeStep.positions||{}, name, jointIdMap);
                     const norm = normalizeRaw(raw);
@@ -945,30 +957,30 @@ export default function ActionEditor() {
                     const draft = jointDrafts[key] ?? (norm===null ? "" : deg.toFixed(1));
                     
                     return (
-                      <div key={name} className={`flex items-center gap-3 p-2 rounded-lg border transition-all ${isOff ? 'bg-red-50 border-red-100 opacity-70' : 'bg-white border-gray-100 hover:border-gray-300'}`}>
-                        <div className="w-24 flex flex-col">
-                          <span className="text-[10px] font-mono text-gray-400">{name}</span>
+                      <div key={name} className={`grid grid-cols-12 items-center gap-2 p-2 rounded-lg border transition-all ${isOff ? 'bg-red-50 border-red-100 opacity-70' : 'bg-white border-gray-100 hover:border-gray-300'}`}>
+                        <div className="col-span-12 sm:col-span-4 min-w-0 flex flex-col">
+                          <span className="text-[10px] font-mono text-gray-400 truncate">{name}</span>
                           <span className="text-xs font-bold text-gray-700 truncate" title={formatJointLabel(name)}>{formatJointLabel(name)}</span>
                         </div>
-                        <input 
-                          type="range" min="-180" max="180" step="0.5" 
-                          value={Number.isFinite(Number(draft)) ? Number(draft) : deg} 
+                        <input
+                          type="range" min="-180" max="180" step="0.5"
+                          value={Number.isFinite(Number(draft)) ? Number(draft) : deg}
                           onChange={e => commitJointDraft(name, e.target.value)}
                           disabled={editorDisabled || isOff}
-                          className="flex-1 accent-undip-blue h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer"
+                          className="col-span-12 sm:col-span-5 w-full min-w-0 accent-undip-blue h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer"
                         />
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           value={draft}
                           onChange={e => handleJointDraftChange(name, e.target.value)}
                           onBlur={e => commitJointDraft(name, e.target.value)}
                           onKeyDown={e => e.key === "Enter" && commitJointDraft(name, e.target.value)}
                           disabled={editorDisabled || isOff}
-                          className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-mono text-right focus:outline-none focus:border-undip-blue"
+                          className="col-span-6 sm:col-span-2 w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-mono text-right focus:outline-none focus:border-undip-blue"
                         />
-                        <button 
+                        <button
                           onClick={() => handleJointToggleOff(name, raw)}
-                          className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors ${isOff ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                          className={`col-span-6 sm:col-span-1 w-full px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors ${isOff ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
                         >
                           {isOff ? "OFF" : "ON"}
                         </button>

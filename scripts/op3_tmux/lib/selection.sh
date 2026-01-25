@@ -1,5 +1,46 @@
-COMPONENTS=(webots manager demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager_sim manager_real demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
+SELECTION_CANCELLED="__CANCEL__"
+MANAGER_MODE=""
+MANAGER_CONFLICT=0
+
+component_label() {
+  case "$1" in
+    webots) echo "Webots" ;;
+    manager_sim) echo "Manager (Sim)" ;;
+    manager_real) echo "Manager (Real)" ;;
+    demo) echo "Demo" ;;
+    teleop) echo "Teleop" ;;
+    action_web) echo "Studio" ;;
+    rqt_image_view) echo "RQT Image View" ;;
+    yolo_vision) echo "YOLO Vision" ;;
+    localization) echo "Localization" ;;
+    ball_localizer) echo "Ball Localizer" ;;
+    action_editor) echo "Action Editor" ;;
+    foxglove) echo "Foxglove" ;;
+    tools) echo "Tools" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+component_id() {
+  case "$1" in
+    "Webots") echo "webots" ;;
+    "Manager (Sim)") echo "manager_sim" ;;
+    "Manager (Real)") echo "manager_real" ;;
+    "Demo") echo "demo" ;;
+    "Teleop") echo "teleop" ;;
+    "Studio") echo "action_web" ;;
+    "RQT Image View") echo "rqt_image_view" ;;
+    "YOLO Vision") echo "yolo_vision" ;;
+    "Localization") echo "localization" ;;
+    "Ball Localizer") echo "ball_localizer" ;;
+    "Action Editor") echo "action_editor" ;;
+    "Foxglove") echo "foxglove" ;;
+    "Tools") echo "tools" ;;
+    *) echo "$1" ;;
+  esac
+}
 
 usual_file_path() {
   echo "${OP3_CONFIG_DIR:-${HOME}/.config/op3-stack}/usual.txt"
@@ -15,7 +56,7 @@ load_usual_selection() {
   if [[ -f "$file" ]]; then
     grep -v '^[[:space:]]*$' "$file"
   else
-    printf "%s\n" webots manager
+    printf "%s\n" manager_sim
   fi
 }
 
@@ -50,37 +91,92 @@ join_by_comma() {
 
 select_with_gum() {
   local selected_csv=""
+  local picked=""
+  local -a labels=()
+  local -a selected_labels=()
   if [[ -f "$(last_file_path)" ]]; then
     mapfile -t _last < <(load_last_selection)
     if [[ ${#_last[@]} -gt 0 ]]; then
-      selected_csv="$(join_by_comma "${_last[@]}")"
+      for item in "${_last[@]}"; do
+        selected_labels+=("$(component_label "$item")")
+      done
+      selected_csv="$(join_by_comma "${selected_labels[@]}")"
     fi
   elif [[ -f "$(usual_file_path)" ]]; then
     mapfile -t _usual < <(load_usual_selection)
     if [[ ${#_usual[@]} -gt 0 ]]; then
-      selected_csv="$(join_by_comma "${_usual[@]}")"
+      for item in "${_usual[@]}"; do
+        selected_labels+=("$(component_label "$item")")
+      done
+      selected_csv="$(join_by_comma "${selected_labels[@]}")"
     fi
   fi
-  [[ -z "$selected_csv" ]] && selected_csv="webots,manager"
+  [[ -z "$selected_csv" ]] && selected_csv=""
+
+  for item in "${COMPONENTS[@]}"; do
+    labels+=("$(component_label "$item")")
+  done
 
   if [[ -n "$selected_csv" ]]; then
-    gum choose --no-limit --selected "$selected_csv" --header "Use <space> to toggle, <enter> to start" "${COMPONENTS[@]}"
+    local -a filtered=()
+    local label
+    for label in "${selected_labels[@]}"; do
+      [[ -z "$label" ]] && continue
+      if printf '%s\n' "${labels[@]}" | grep -Fxq -- "$label"; then
+        filtered+=("$label")
+      fi
+    done
+    selected_csv=""
+    if [[ ${#filtered[@]} -gt 0 ]]; then
+      selected_csv="$(join_by_comma "${filtered[@]}")"
+    fi
+  fi
+
+  if [[ -n "$selected_csv" ]]; then
+    picked="$(gum choose --no-limit --selected "$selected_csv" --header "Use <space> to toggle, <enter> to start" "${labels[@]}")" || {
+      printf '%s\n' "$SELECTION_CANCELLED"
+      return 0
+    }
   else
-    gum choose --no-limit --header "Use <space>  to toggle, <enter> to start" "${COMPONENTS[@]}"
+    picked="$(gum choose --no-limit --header "Use <space>  to toggle, <enter> to start" "${labels[@]}")" || {
+      printf '%s\n' "$SELECTION_CANCELLED"
+      return 0
+    }
   fi
-  if [[ "$?" -ne 0 ]]; then
-    MENU_ACTION="cancel"
-    return 1
+  if [[ -z "$picked" ]]; then
+    printf '%s\n' "$SELECTION_CANCELLED"
+    return 0
   fi
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    printf '%s\n' "$(component_id "$line")"
+  done <<< "$picked"
   return 0
 }
 
 interactive_selection() {
   # banner >&2
   if ! command -v gum >/dev/null 2>&1; then
-    echo "${RED}ERROR:${RST} gum is not installed." >&2
-    echo "${DIM}Install:${RST} sudo apt install gum" >&2
-    exit 1
+    echo "${YLW}gum is not installed.${RST}" >&2
+    cat <<'EOF' >&2
+Install with:
+  sudo mkdir -p /etc/apt/keyrings
+  curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+  sudo apt update && sudo apt install gum
+EOF
+    if [[ -t 0 && -t 1 ]]; then
+      read -r -p "Install gum now? [y/N] " reply
+      case "$reply" in
+        y|Y|yes|YES)
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt update && sudo apt install gum
+          ;;
+      esac
+    fi
+    command -v gum >/dev/null 2>&1 || exit 1
   fi
   select_with_gum
 }
@@ -93,7 +189,7 @@ validate_selection() {
   local item
   for item in "$@"; do
     case "$item" in
-      manager) has_manager=1 ;;
+      manager|manager_sim|manager_real) has_manager=1 ;;
       teleop) has_teleop=1 ;;
       foxglove) has_foxglove=1 ;;
     esac
@@ -117,12 +213,26 @@ apply_selection_flags() {
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
   WITH_DEMO=0
+  MANAGER_MODE=""
+  MANAGER_CONFLICT=0
+
+  local set_manager_mode
+  set_manager_mode() {
+    local mode="$1"
+    if [[ -n "$MANAGER_MODE" && "$MANAGER_MODE" != "$mode" ]]; then
+      MANAGER_CONFLICT=1
+      return
+    fi
+    MANAGER_MODE="$mode"
+  }
 
   local item
   for item in "$@"; do
     case "$item" in
       webots) WITH_WEBOTS=1 ;;
       manager) WITH_MANAGER=1 ;;
+      manager_sim) WITH_MANAGER=1; set_manager_mode "sim" ;;
+      manager_real) WITH_MANAGER=1; set_manager_mode "real" ;;
       demo) WITH_DEMO=1 ;;
       teleop) WITH_TELEOP=1 ;;
       foxglove) WITH_FOXGLOVE=1 ;;
@@ -143,6 +253,7 @@ resolve_selection() {
   local save_usual="$3"
 
   local -a selected=()
+  local from_interactive=0
 
   if [[ "$use_explicit" -eq 1 ]]; then
     selected+=(webots manager)
@@ -158,7 +269,19 @@ resolve_selection() {
   elif [[ "$use_usual" -eq 1 ]]; then
     mapfile -t selected < <(load_usual_selection)
   else
+    from_interactive=1
     mapfile -t selected < <(interactive_selection)
+  fi
+
+  if [[ "$from_interactive" -eq 1 ]]; then
+    if [[ "${#selected[@]}" -eq 0 ]]; then
+      MENU_ACTION="cancel"
+      return 0
+    fi
+    if [[ "${#selected[@]}" -eq 1 && "${selected[0]}" == "$SELECTION_CANCELLED" ]]; then
+      MENU_ACTION="cancel"
+      return 0
+    fi
   fi
 
   if [[ "${#selected[@]}" -eq 0 ]]; then
@@ -167,7 +290,7 @@ resolve_selection() {
     fi
     mapfile -t selected < <(load_usual_selection)
     if [[ "${#selected[@]}" -eq 0 ]]; then
-      selected=(webots manager)
+      selected=(manager_sim)
     fi
   fi
 
@@ -176,7 +299,7 @@ resolve_selection() {
   for item in "${selected[@]}"; do
     case "$item" in
       demo) has_demo=1 ;;
-      manager) has_manager=1 ;;
+      manager|manager_sim|manager_real) has_manager=1 ;;
     esac
   done
   if [[ "$has_demo" -eq 1 && "$has_manager" -eq 0 ]]; then
@@ -195,4 +318,18 @@ resolve_selection() {
   fi
 
   apply_selection_flags "${selected[@]}"
+
+  if [[ "$MANAGER_CONFLICT" -eq 1 ]]; then
+    echo "${YLW}Warning:${RST} Select only one manager type (sim or real)."
+    MENU_ACTION="cancel"
+    return 0
+  fi
+
+  if [[ "$MANAGER_MODE" == "sim" ]]; then
+    PROFILE="webots"
+    apply_profile "$PROFILE"
+  elif [[ "$MANAGER_MODE" == "real" ]]; then
+    PROFILE="real_robot"
+    apply_profile "$PROFILE"
+  fi
 }

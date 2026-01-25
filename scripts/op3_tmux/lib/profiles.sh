@@ -15,7 +15,7 @@ apply_profile() {
       ;;
     real_robot)
       WEBOTS_CMD="ros2 launch op3_webots_ros2 robot_launch.py"
-      MANAGER_CMD="ros2 launch op3_manager op3_simulation.launch.py"
+      MANAGER_CMD="ros2 launch op3_bringup op3_manager_with_camera.launch.py"
       TELEOP_CMD="ros2 launch op3_joy_teleop op3_joy_teleop.launch.py"
       FOXGLOVE_CMD="ros2 launch foxglove_bridge foxglove_bridge_launch.xml"
       YOLO_VISION_CMD="ros2 launch op3_yolo_vision yolo.launch.py"
