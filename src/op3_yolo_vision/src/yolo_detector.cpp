@@ -15,16 +15,14 @@
 #include "op3_yolo_vision/yolo_detector.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
-#include <limits>
+#include <chrono>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <sensor_msgs/image_encodings.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <soccer_msgs/msg/bounding_box.hpp>
 
 namespace op3_yolo_vision
 {
@@ -148,54 +146,6 @@ cv::Mat toBgr(const sensor_msgs::msg::Image& msg)
   throw std::runtime_error("Unsupported image encoding: " + enc);
 }
 
-cv::Mat toMono8(const sensor_msgs::msg::Image& msg)
-{
-  const int width = static_cast<int>(msg.width);
-  const int height = static_cast<int>(msg.height);
-  if (width == 0 || height == 0 || msg.data.empty()) {
-    return cv::Mat();
-  }
-
-  const std::string& enc = msg.encoding;
-  const uint8_t* data = msg.data.data();
-
-  if (enc == sensor_msgs::image_encodings::MONO8) {
-    return cv::Mat(height, width, CV_8UC1, const_cast<uint8_t*>(data), msg.step);
-  }
-  if (enc == sensor_msgs::image_encodings::MONO16) {
-    cv::Mat gray16(height, width, CV_16UC1, const_cast<uint8_t*>(data), msg.step);
-    cv::Mat gray8;
-    gray16.convertTo(gray8, CV_8U, 1.0 / 256.0);
-    return gray8;
-  }
-  if (enc == sensor_msgs::image_encodings::BGR8) {
-    cv::Mat bgr(height, width, CV_8UC3, const_cast<uint8_t*>(data), msg.step);
-    cv::Mat gray;
-    cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
-    return gray;
-  }
-  if (enc == sensor_msgs::image_encodings::RGB8) {
-    cv::Mat rgb(height, width, CV_8UC3, const_cast<uint8_t*>(data), msg.step);
-    cv::Mat gray;
-    cv::cvtColor(rgb, gray, cv::COLOR_RGB2GRAY);
-    return gray;
-  }
-  if (enc == sensor_msgs::image_encodings::RGBA8) {
-    cv::Mat rgba(height, width, CV_8UC4, const_cast<uint8_t*>(data), msg.step);
-    cv::Mat gray;
-    cv::cvtColor(rgba, gray, cv::COLOR_RGBA2GRAY);
-    return gray;
-  }
-  if (enc == sensor_msgs::image_encodings::BGRA8) {
-    cv::Mat bgra(height, width, CV_8UC4, const_cast<uint8_t*>(data), msg.step);
-    cv::Mat gray;
-    cv::cvtColor(bgra, gray, cv::COLOR_BGRA2GRAY);
-    return gray;
-  }
-
-  throw std::runtime_error("Unsupported image encoding: " + enc);
-}
-
 }  // namespace
 
 YoloDetector::YoloDetector()
@@ -204,28 +154,14 @@ YoloDetector::YoloDetector()
   nms_threshold_(0.5f),
   nms_score_threshold_(0.1f),
   publish_debug_(true),
-  use_green_horizon_(true),
   use_gpu_(false),
   use_fp16_(false),
-  ground_z_(0.0),
-  max_range_m_(10.0),
-  horizon_max_age_sec_(0.25),
-  horizon_offset_px_(2),
-  horizon_stride_(4),
-  horizon_smooth_window_(9),
-  min_green_columns_ratio_(0.1),
-  camera_info_received_(false),
-  camera_width_(0),
-  camera_height_(0),
   model_loaded_(false),
-  horizon_valid_(false)
+  frame_count_(0),
+  total_inference_ms_(0.0)
 {
   this->declare_parameter("image_topic", "/robotis_op3/camera/image_raw");
-  this->declare_parameter("camera_info_topic", "/robotis_op3/camera/camera_info");
-  this->declare_parameter("green_mask_topic", "/vision/green/mask");
   this->declare_parameter("ball_center_topic", "/vision/yolo/ball_center");
-  this->declare_parameter("output_frame", "odom");
-  this->declare_parameter("camera_frame", "cam_link");
   this->declare_parameter("model_path", "models/yolo.onnx");
   this->declare_parameter("use_gpu", use_gpu_);
   this->declare_parameter("use_fp16", use_fp16_);
@@ -239,21 +175,9 @@ YoloDetector::YoloDetector()
   this->declare_parameter("nms_threshold", nms_threshold_);
   this->declare_parameter("nms_score_threshold", nms_score_threshold_);
   this->declare_parameter("publish_debug", publish_debug_);
-  this->declare_parameter("use_green_horizon", use_green_horizon_);
-  this->declare_parameter("ground_z", ground_z_);
-  this->declare_parameter("max_range_m", max_range_m_);
-  this->declare_parameter("horizon_max_age_sec", horizon_max_age_sec_);
-  this->declare_parameter("horizon_offset_px", horizon_offset_px_);
-  this->declare_parameter("horizon_stride", horizon_stride_);
-  this->declare_parameter("horizon_smooth_window", horizon_smooth_window_);
-  this->declare_parameter("min_green_columns_ratio", min_green_columns_ratio_);
 
   image_topic_ = this->get_parameter("image_topic").as_string();
-  camera_info_topic_ = this->get_parameter("camera_info_topic").as_string();
-  green_mask_topic_ = this->get_parameter("green_mask_topic").as_string();
   ball_center_topic_ = this->get_parameter("ball_center_topic").as_string();
-  output_frame_ = this->get_parameter("output_frame").as_string();
-  camera_frame_ = this->get_parameter("camera_frame").as_string();
   model_path_ = resolveModelPath(this->get_parameter("model_path").as_string());
   use_gpu_ = this->get_parameter("use_gpu").as_bool();
   use_fp16_ = this->get_parameter("use_fp16").as_bool();
@@ -273,14 +197,6 @@ YoloDetector::YoloDetector()
   nms_threshold_ = static_cast<float>(this->get_parameter("nms_threshold").as_double());
   nms_score_threshold_ = static_cast<float>(this->get_parameter("nms_score_threshold").as_double());
   publish_debug_ = this->get_parameter("publish_debug").as_bool();
-  use_green_horizon_ = this->get_parameter("use_green_horizon").as_bool();
-  ground_z_ = this->get_parameter("ground_z").as_double();
-  max_range_m_ = this->get_parameter("max_range_m").as_double();
-  horizon_max_age_sec_ = this->get_parameter("horizon_max_age_sec").as_double();
-  horizon_offset_px_ = this->get_parameter("horizon_offset_px").as_int();
-  horizon_stride_ = this->get_parameter("horizon_stride").as_int();
-  horizon_smooth_window_ = this->get_parameter("horizon_smooth_window").as_int();
-  min_green_columns_ratio_ = this->get_parameter("min_green_columns_ratio").as_double();
 
   class_info_.resize(kNumClasses);
   class_info_[0] = {"ball", cv::Scalar(0, 255, 255),
@@ -298,33 +214,21 @@ YoloDetector::YoloDetector()
 
   model_loaded_ = loadModel();
 
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
   image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
     image_topic_, rclcpp::SensorDataQoS(),
     std::bind(&YoloDetector::imageCallback, this, std::placeholders::_1));
 
-  camera_info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
-    camera_info_topic_, rclcpp::SensorDataQoS(),
-    std::bind(&YoloDetector::cameraInfoCallback, this, std::placeholders::_1));
-
-  green_mask_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-    green_mask_topic_, rclcpp::SensorDataQoS(),
-    std::bind(&YoloDetector::greenMaskCallback, this, std::placeholders::_1));
-
   debug_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/vision/yolo/debug", 10);
-  balls_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/vision/yolo/balls", 10);
-  goals_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/vision/yolo/goals", 10);
-  robots_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/vision/yolo/robots", 10);
-  intersections_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-    "/vision/yolo/intersections", 10);
+  detections_pub_ = this->create_publisher<soccer_msgs::msg::BoundingBoxes>(
+    "/vision/yolo/detections", 10);
   if (!ball_center_topic_.empty()) {
     ball_center_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
       ball_center_topic_, 10);
   }
 
-  RCLCPP_INFO(this->get_logger(), "YOLO detector initialized");
+  last_log_time_ = this->now();
+
+  RCLCPP_INFO(this->get_logger(), "YOLO detector initialized (SIMPLIFIED - 2D only)");
   RCLCPP_INFO(this->get_logger(), "  Image topic: %s", image_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  Model: %s", model_path_.c_str());
 }
@@ -382,49 +286,6 @@ bool YoloDetector::loadModel()
   return true;
 }
 
-void YoloDetector::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
-{
-  camera_width_ = static_cast<int>(msg->width);
-  camera_height_ = static_cast<int>(msg->height);
-
-  camera_matrix_ = (cv::Mat_<double>(3, 3) <<
-    msg->k[0], msg->k[1], msg->k[2],
-    msg->k[3], msg->k[4], msg->k[5],
-    msg->k[6], msg->k[7], msg->k[8]);
-
-  if (!msg->d.empty()) {
-    dist_coeffs_ = cv::Mat(1, static_cast<int>(msg->d.size()), CV_64F);
-    for (size_t i = 0; i < msg->d.size(); ++i) {
-      dist_coeffs_.at<double>(0, static_cast<int>(i)) = msg->d[i];
-    }
-  } else {
-    dist_coeffs_ = cv::Mat::zeros(1, 5, CV_64F);
-  }
-
-  if (camera_frame_.empty()) {
-    camera_frame_ = msg->header.frame_id;
-  }
-
-  camera_info_received_ = true;
-}
-
-void YoloDetector::greenMaskCallback(const sensor_msgs::msg::Image::SharedPtr msg)
-{
-  if (!use_green_horizon_) {
-    return;
-  }
-
-  cv::Mat mask;
-  try {
-    mask = toMono8(*msg);
-  } catch (const std::exception& e) {
-    RCLCPP_WARN(this->get_logger(), "Green mask conversion failed: %s", e.what());
-    return;
-  }
-
-  updateHorizon(mask, msg->header.stamp);
-}
-
 void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
   if (!model_loaded_) {
@@ -433,11 +294,7 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     return;
   }
 
-  if (!camera_info_received_) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 3000,
-                         "Waiting for camera info on %s", camera_info_topic_.c_str());
-    return;
-  }
+  auto start_time = std::chrono::high_resolution_clock::now();
 
   cv::Mat bgr;
   try {
@@ -459,6 +316,11 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   net_.setInput(blob);
   std::vector<cv::Mat> outputs;
   net_.forward(outputs, net_.getUnconnectedOutLayersNames());
+
+  auto inference_time = std::chrono::high_resolution_clock::now();
+  double inference_ms = std::chrono::duration<double, std::milli>(
+    inference_time - start_time).count();
+
   if (outputs.empty()) {
     RCLCPP_WARN(this->get_logger(), "YOLO inference returned no outputs");
     return;
@@ -472,6 +334,11 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     if (publish_debug_) {
       debug_pub_->publish(toImageMsg(bgr, msg->header, "bgr8"));
     }
+
+    // Publish empty detections
+    soccer_msgs::msg::BoundingBoxes empty_boxes;
+    empty_boxes.header = msg->header;
+    detections_pub_->publish(empty_boxes);
     return;
   }
 
@@ -487,27 +354,14 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   std::vector<int> indices;
   cv::dnn::NMSBoxes(boxes, scores, nms_score_threshold_, nms_threshold_, indices);
 
-  geometry_msgs::msg::TransformStamped tf_msg;
-  try {
-    tf_msg = tf_buffer_->lookupTransform(output_frame_, camera_frame_, msg->header.stamp,
-                                         rclcpp::Duration::from_seconds(0.2));
-  } catch (const tf2::TransformException& ex) {
-    RCLCPP_WARN(this->get_logger(), "TF lookup failed (%s -> %s): %s",
-                output_frame_.c_str(), camera_frame_.c_str(), ex.what());
-    return;
-  }
+  soccer_msgs::msg::BoundingBoxes bboxes_msg;
+  bboxes_msg.header = msg->header;
+  bboxes_msg.bounding_boxes.reserve(indices.size());
 
-  tf2::Transform cam_to_out;
-  tf2::fromMsg(tf_msg.transform, cam_to_out);
-
-  std::vector<tf2::Vector3> ball_points;
-  std::vector<tf2::Vector3> goal_points;
-  std::vector<tf2::Vector3> robot_points;
-  std::vector<tf2::Vector3> intersection_points;
   bool have_ball_center = false;
   cv::Point2f best_ball_pixel(0.0f, 0.0f);
-  double best_ball_dist = std::numeric_limits<double>::infinity();
   float best_ball_score = -1.0f;
+  double best_ball_area = 0.0;
 
   cv::Mat debug_image = bgr.clone();
 
@@ -518,53 +372,32 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     const auto& det = detections[idx];
     const auto& info = class_info_[det.class_id];
 
+    soccer_msgs::msg::BoundingBox bbox;
+    bbox.probability = det.score;
+    bbox.xmin = det.box.x;
+    bbox.ymin = det.box.y;
+    bbox.xmax = det.box.x + det.box.width;
+    bbox.ymax = det.box.y + det.box.height;
+    bbox.class_id = info.name;
+    bbox.id = det.class_id;
+
     int cx = det.box.x + det.box.width / 2;
     int cy = det.box.y + det.box.height / 2;
-    int bottom_y = det.box.y + det.box.height;
+    bbox.xbase = cx;
+    bbox.ybase = det.box.y + det.box.height;
+    bbox.obstacle_detected = false;
 
-    if (!horizonAllows(cx, bottom_y, msg->header.stamp)) {
-      continue;
-    }
-
-    tf2::Vector3 ray_cam;
-    cv::Point2f pixel_center(static_cast<float>(cx), static_cast<float>(cy));
-    cv::Point2f pixel_bottom(static_cast<float>(cx), static_cast<float>(bottom_y));
-
-    const bool use_bottom = (info.name != "L-intersection" &&
-                             info.name != "T-intersection" &&
-                             info.name != "X-intersection");
-
-    if (!computeRay(use_bottom ? pixel_bottom : pixel_center, ray_cam)) {
-      continue;
-    }
-
-    tf2::Vector3 point_out;
-    if (!projectToGround(ray_cam, cam_to_out, point_out)) {
-      continue;
-    }
-
-    double planar_dist = std::hypot(point_out.x(), point_out.y());
-    if (planar_dist > max_range_m_) {
-      continue;
-    }
+    bboxes_msg.bounding_boxes.push_back(bbox);
 
     if (info.name == "ball") {
-      ball_points.push_back(point_out);
-      if (ball_center_pub_) {
-        if (!have_ball_center || planar_dist < best_ball_dist ||
-            (std::abs(planar_dist - best_ball_dist) < 1e-3 && det.score > best_ball_score)) {
-          have_ball_center = true;
-          best_ball_dist = planar_dist;
-          best_ball_score = det.score;
-          best_ball_pixel = pixel_center;
-        }
+      double area = det.box.width * det.box.height;
+      if (!have_ball_center || area > best_ball_area ||
+          (std::abs(area - best_ball_area) < 1e-3 && det.score > best_ball_score)) {
+        have_ball_center = true;
+        best_ball_area = area;
+        best_ball_score = det.score;
+        best_ball_pixel = cv::Point2f(static_cast<float>(cx), static_cast<float>(cy));
       }
-    } else if (info.name == "goal post") {
-      goal_points.push_back(point_out);
-    } else if (info.name == "robot") {
-      robot_points.push_back(point_out);
-    } else {
-      intersection_points.push_back(point_out);
     }
 
     if (publish_debug_) {
@@ -576,10 +409,8 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     }
   }
 
-  balls_pub_->publish(buildCloud(ball_points, msg->header.stamp));
-  goals_pub_->publish(buildCloud(goal_points, msg->header.stamp));
-  robots_pub_->publish(buildCloud(robot_points, msg->header.stamp));
-  intersections_pub_->publish(buildCloud(intersection_points, msg->header.stamp));
+  detections_pub_->publish(bboxes_msg);
+
   if (ball_center_pub_ && have_ball_center && width > 0 && height > 0) {
     geometry_msgs::msg::PointStamped center_msg;
     center_msg.header = msg->header;
@@ -593,6 +424,21 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   if (publish_debug_) {
     debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));
+  }
+
+  // Performance logging
+  frame_count_++;
+  total_inference_ms_ += inference_ms;
+  auto now = this->now();
+  if ((now - last_log_time_).seconds() >= 5.0) {
+    double avg_ms = total_inference_ms_ / frame_count_;
+    double fps = 1000.0 / avg_ms;
+    RCLCPP_INFO(this->get_logger(),
+                "Performance: %.1f ms/frame, %.1f FPS (backend: %s/%s)",
+                avg_ms, fps, dnn_backend_.c_str(), dnn_target_.c_str());
+    frame_count_ = 0;
+    total_inference_ms_ = 0.0;
+    last_log_time_ = now;
   }
 }
 
@@ -676,174 +522,6 @@ std::vector<YoloDetector::Detection> YoloDetector::decodeDetections(
   }
 
   return detections;
-}
-
-bool YoloDetector::computeRay(const cv::Point2f& pixel, tf2::Vector3& ray_cam) const
-{
-  if (camera_matrix_.empty()) {
-    return false;
-  }
-
-  std::vector<cv::Point2f> pts = {pixel};
-  std::vector<cv::Point2f> undist;
-  cv::undistortPoints(pts, undist, camera_matrix_, dist_coeffs_);
-  if (undist.empty()) {
-    return false;
-  }
-
-  ray_cam = tf2::Vector3(undist[0].x, undist[0].y, 1.0);
-  if (ray_cam.length() < 1e-6) {
-    return false;
-  }
-  ray_cam.normalize();
-  return true;
-}
-
-bool YoloDetector::projectToGround(const tf2::Vector3& ray_cam,
-                                  const tf2::Transform& cam_to_out,
-                                  tf2::Vector3& out_point) const
-{
-  const tf2::Vector3 origin = cam_to_out.getOrigin();
-  const tf2::Vector3 direction = cam_to_out.getBasis() * ray_cam;
-  if (std::abs(direction.z()) < 1e-6) {
-    return false;
-  }
-
-  const double t = (ground_z_ - origin.z()) / direction.z();
-  if (t <= 0.0) {
-    return false;
-  }
-
-  out_point = origin + direction * t;
-  return true;
-}
-
-void YoloDetector::updateHorizon(const cv::Mat& mask, const rclcpp::Time& stamp)
-{
-  if (mask.empty()) {
-    return;
-  }
-
-  const int width = mask.cols;
-  const int height = mask.rows;
-  const int stride = std::max(1, horizon_stride_);
-
-  std::vector<int> sample_x;
-  std::vector<int> sample_y;
-  sample_x.reserve((width + stride - 1) / stride);
-  sample_y.reserve((width + stride - 1) / stride);
-
-  int green_columns = 0;
-  for (int x = 0; x < width; x += stride) {
-    int y = 0;
-    for (; y < height; ++y) {
-      if (mask.at<uint8_t>(y, x) > 0) {
-        break;
-      }
-    }
-    if (y < height) {
-      green_columns++;
-    }
-    sample_x.push_back(x);
-    sample_y.push_back(y);
-  }
-
-  const double ratio = sample_x.empty() ? 0.0 :
-    static_cast<double>(green_columns) / static_cast<double>(sample_x.size());
-  if (ratio < min_green_columns_ratio_) {
-    std::lock_guard<std::mutex> lock(horizon_mutex_);
-    horizon_valid_ = false;
-    return;
-  }
-
-  std::vector<int> horizon(width, height);
-  for (size_t i = 0; i < sample_x.size(); ++i) {
-    const int x0 = sample_x[i];
-    const int y0 = sample_y[i];
-    const int x1 = (i + 1 < sample_x.size()) ? sample_x[i + 1] : width - 1;
-    const int y1 = (i + 1 < sample_y.size()) ? sample_y[i + 1] : y0;
-
-    const int span = std::max(1, x1 - x0);
-    for (int x = x0; x <= x1; ++x) {
-      const double t = static_cast<double>(x - x0) / static_cast<double>(span);
-      const int y = static_cast<int>(std::round((1.0 - t) * y0 + t * y1));
-      horizon[x] = std::clamp(y - horizon_offset_px_, 0, height - 1);
-    }
-  }
-
-  const int window = std::max(1, horizon_smooth_window_);
-  if (window > 1) {
-    std::vector<int> smooth(horizon.size(), 0);
-    const int half = window / 2;
-    for (size_t x = 0; x < horizon.size(); ++x) {
-      int sum = 0;
-      int count = 0;
-      const int start = static_cast<int>(x) - half;
-      const int end = static_cast<int>(x) + half;
-      for (int xi = start; xi <= end; ++xi) {
-        if (xi < 0 || xi >= static_cast<int>(horizon.size())) {
-          continue;
-        }
-        sum += horizon[xi];
-        count++;
-      }
-      smooth[x] = count > 0 ? sum / count : horizon[x];
-    }
-    horizon.swap(smooth);
-  }
-
-  std::lock_guard<std::mutex> lock(horizon_mutex_);
-  horizon_y_ = std::move(horizon);
-  horizon_valid_ = true;
-  horizon_stamp_ = stamp;
-}
-
-bool YoloDetector::horizonAllows(int x, int y, const rclcpp::Time& stamp) const
-{
-  if (!use_green_horizon_) {
-    return true;
-  }
-
-  std::lock_guard<std::mutex> lock(horizon_mutex_);
-  if (!horizon_valid_ || horizon_y_.empty()) {
-    return true;
-  }
-
-  if ((stamp - horizon_stamp_).seconds() > horizon_max_age_sec_) {
-    return true;
-  }
-
-  const int clamped_x = std::clamp(x, 0, static_cast<int>(horizon_y_.size()) - 1);
-  const int horizon_y = horizon_y_[clamped_x];
-  return y >= horizon_y;
-}
-
-sensor_msgs::msg::PointCloud2 YoloDetector::buildCloud(
-  const std::vector<tf2::Vector3>& points,
-  const rclcpp::Time& stamp) const
-{
-  sensor_msgs::msg::PointCloud2 cloud;
-  cloud.header.frame_id = output_frame_;
-  cloud.header.stamp = stamp;
-
-  sensor_msgs::PointCloud2Modifier modifier(cloud);
-  modifier.setPointCloud2FieldsByString(1, "xyz");
-  modifier.resize(points.size());
-
-  sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
-  sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
-  sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
-
-  for (const auto& p : points) {
-    *iter_x = static_cast<float>(p.x());
-    *iter_y = static_cast<float>(p.y());
-    *iter_z = static_cast<float>(p.z());
-    ++iter_x;
-    ++iter_y;
-    ++iter_z;
-  }
-
-  return cloud;
 }
 
 }  // namespace op3_yolo_vision

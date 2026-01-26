@@ -13,9 +13,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
+find_package(soccer_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(OpenCV REQUIRED)
 
@@ -33,9 +31,7 @@ ament_target_dependencies(yolo_detector
   rclcpp
   sensor_msgs
   geometry_msgs
-  visualization_msgs
-  tf2_ros
-  tf2_geometry_msgs
+  soccer_msgs
   ament_index_cpp
 )
 

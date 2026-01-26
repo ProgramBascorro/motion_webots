@@ -2,7 +2,7 @@
 <package format="3">
   <name>op3_yolo_vision</name>
   <version>0.0.0</version>
-  <description>YOLO-based vision detections for OP3 Webots (ball, goal, robot, intersections).</description>
+  <description>YOLO-based vision detections for OP3 (2D bounding boxes only).</description>
 
   <maintainer email="farhan@todo.todo">farhan</maintainer>
   <license>Apache-2.0</license>
@@ -12,9 +12,7 @@
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>visualization_msgs</depend>
-  <depend>tf2_ros</depend>
-  <depend>tf2_geometry_msgs</depend>
+  <depend>soccer_msgs</depend>
   <depend>ament_index_cpp</depend>
 
   <test_depend>ament_lint_auto</test_depend>
