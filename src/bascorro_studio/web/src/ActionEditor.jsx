@@ -757,10 +757,10 @@ export default function ActionEditor({ isActive = true }) {
   const activeStepLabel = activeStep ? (activeStep.index ?? selectedStepIndex) : "";
 
   return (
-    <div className="flex h-full gap-6 p-2 overflow-hidden bg-[#f8fafc]">
+    <div className="flex flex-col lg:flex-row h-full gap-6 p-2 overflow-y-auto lg:overflow-hidden bg-[#f8fafc]">
       {/* LEFT COLUMN: Lists & YAML */}
-      <div className="flex flex-col w-1/4 min-w-[280px] gap-4 h-full">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col w-full lg:w-1/4 lg:min-w-[280px] gap-4 h-full">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col flex-1 overflow-hidden min-h-[300px]">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center">
             <h2 className="text-lg font-bold font-display text-gray-800">Pages</h2>
             <button className="text-xs font-medium text-undip-blue hover:underline" onClick={() => { setPreviewPose(null); setSelectedStepIndex(null); }}>
@@ -852,7 +852,7 @@ export default function ActionEditor({ isActive = true }) {
       </div>
 
       {/* MIDDLE COLUMN: Editors */}
-      <div className="flex flex-col flex-1 gap-4 h-full overflow-y-auto custom-scrollbar pb-2">
+      <div className="flex flex-col flex-1 gap-4 h-full lg:overflow-y-auto custom-scrollbar pb-2">
         {/* Page Settings */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex justify-between items-center mb-4">
@@ -995,8 +995,8 @@ export default function ActionEditor({ isActive = true }) {
       </div>
 
       {/* RIGHT COLUMN: 3D View & Connection */}
-      <div className="flex flex-col w-1/4 min-w-[300px] gap-4 h-full">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-[400px]">
+      <div className="flex flex-col w-full lg:w-1/4 lg:min-w-[300px] gap-4 h-full">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[300px] lg:h-[400px]">
           <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
             <h2 className="text-sm font-bold text-gray-700">3D Preview</h2>
             <div className="flex gap-1">
@@ -1005,7 +1005,7 @@ export default function ActionEditor({ isActive = true }) {
               <button onClick={() => setViewerEnabled(!viewerEnabled)} className="p-1.5 text-gray-500 hover:bg-white rounded">{viewerEnabled ? <Eye size={14}/> : <EyeOff size={14}/>}</button>
             </div>
           </div>
-          <div className="relative flex-1 bg-slate-50">
+          <div className="relative flex-1 bg-slate-50 min-h-[250px]">
             {viewerEnabled ? (
               <div ref={viewerRef} className="w-full h-full" />
             ) : (

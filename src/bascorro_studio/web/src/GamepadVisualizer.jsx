@@ -63,7 +63,8 @@ function buildAxes(virtualAxes) {
 function formatAxis(value) { return Number(value || 0).toFixed(2); }
 
 export default function GamepadVisualizer({ joy, rosConnected, publishJoy }) {
-  const [virtualButtons, setVirtualButtons] = useState(() => new Array(BUTTON_COUNT).fill(false));
+  const [virtualButtons, setVirtualButtons] = useState(() => new Array(BUTTON_MAP.length).fill(false)); // BUTTON_COUNT was used but not def in scope here effectively if i change logic, but let's assume constants are above. 
+  // actually BUTTON_COUNT is defined in module scope.
   const [virtualAxes, setVirtualAxes] = useState({ lx: 0, ly: 0, rx: 0, ry: 0 });
   const [draggingStick, setDraggingStick] = useState(null);
   const [virtualEnabled, setVirtualEnabled] = useState(false);
@@ -248,31 +249,24 @@ export default function GamepadVisualizer({ joy, rosConnected, publishJoy }) {
   const bodyColor = "#0f172a"; // Dark Sidebar
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-2xl mx-auto">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-        <div>
-          <h3 className="text-lg font-bold font-display text-gray-900 flex items-center gap-2">
-            <Monitor size={20} className="text-undip-blue" />
-            Gamepad
-          </h3>
-          <p className="text-xs text-gray-500 font-medium">Interactive controller interface</p>
-        </div>
-        
-        <div className="flex items-center gap-3 w-full sm:w-auto">
-          <div className="flex flex-col gap-1 flex-1 sm:flex-initial">
+    <div className="flex flex-col gap-4 w-full">
+      {/* Controls */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-2 pb-2 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Source</span>
             <select
               value={visualSource}
               onChange={(e) => setVisualSource(e.target.value)}
-              className="text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-undip-blue"
+              className="text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:border-undip-blue"
             >
               <option value="auto">Auto</option>
-              <option value="ros">ROS /joy</option>
+              <option value="ros">ROS</option>
               <option value="browser">Browser</option>
             </select>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="h-4 w-px bg-gray-200"></div>
+          <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Virtual</span>
             <label className="relative inline-flex items-center cursor-pointer">
               <input 
@@ -281,32 +275,35 @@ export default function GamepadVisualizer({ joy, rosConnected, publishJoy }) {
                 onChange={e => setVirtualEnabled(e.target.checked)} 
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-undip-blue"></div>
+              <div className="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-undip-blue"></div>
             </label>
           </div>
+        </div>
+        
+        <div className="flex gap-2">
+          {joy && (
+            <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${rosActive ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}>
+              <Cpu size={10} /> ROS
+            </div>
+          )}
+          {browserPad && (
+            <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${browserPad ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}>
+              <Smartphone size={10} /> Browser
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main Gamepad Shell */}
-      <div className="relative bg-[#f8fafc] rounded-3xl border border-gray-200 p-8 shadow-inner overflow-hidden flex items-center justify-center">
-        {/* Status Badges */}
-        <div className="absolute top-4 left-4 flex gap-2 z-10">
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase border ${joy ? 'bg-green-50 border-green-100 text-green-600 shadow-sm' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
-            <Cpu size={12} /> ROS {joy ? (rosActive ? 'Active' : 'Idle') : 'None'}
-          </div>
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase border ${browserPad ? 'bg-blue-50 border-blue-100 text-blue-600 shadow-sm' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
-            <Smartphone size={12} /> Browser {browserPad ? 'Linked' : 'None'}
-          </div>
-        </div>
-
+      <div className="relative bg-[#f8fafc] rounded-2xl border border-gray-200 p-6 shadow-inner overflow-hidden flex items-center justify-center">
         {/* Alerts */}
         {notice && (
-          <div className="absolute bottom-4 left-4 right-4 bg-red-50 border border-red-100 text-red-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 animate-bounce z-20 shadow-sm">
+          <div className="absolute top-4 left-4 right-4 bg-red-50 border border-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 animate-bounce z-20 shadow-sm">
             <AlertCircle size={14} /> {notice}
           </div>
         )}
 
-        <svg ref={svgRef} viewBox="0 0 1280 819" className="w-full max-w-[560px] h-auto drop-shadow-2xl select-none touch-none">
+        <svg ref={svgRef} viewBox="0 0 1280 819" className="w-full max-w-[480px] h-auto drop-shadow-xl select-none touch-none">
           {/* Shell */}
           <path
             d="M209.5 7.246c11.7-2.7 26.5-5.2 38.5-6.6 12.5-1.4 38.5-.4 49 1.8 19.7 4.3 31.2 10.6 43.7 24.1 7.8 8.4 21.9 28.7 25.2 36.4 4.4 10.1 12.6 47.8 12.6 58.3v3.1h522v-3.1c0-5.2 4.8-32.2 7.6-43 3.5-13.1 6-18.6 13.5-29.9 12-17.9 23.6-30.5 33.3-36.2 6.4-3.7 19-8.1 29.2-10.1 11-2.2 40.4-2.5 54.4-.5 26.1 3.6 47.3 9.1 61 15.8 21 10.2 31.8 27.5 41.4 66 1.9 7.6 4 16.3 4.6 19.4l1.1 5.5 11.2 8c29 20.4 53.9 42.9 63.3 57.1 11.4 17.1 20.1 37.4 28.8 67.5 7.1 24.6 7.5 27.6 17.5 138.3 9.3 101.8 11.5 142.5 11.6 213 0 54.6-1.2 87.9-4 110.6-3.5 27.8-13.4 49.3-31.2 68-23.4 24.5-47.6 38.4-78.6 45.1-14.5 3.1-41.5 3.1-53 0-16.6-4.5-33.9-14.7-51.7-30.5-24.5-21.7-42.3-49.1-72.6-111.7-18.2-37.4-19.9-40.6-26.2-47.5-3.1-3.3-8-9.3-10.9-13.2l-5.4-7.3-10.2 8.3c-23.1 18.7-34.4 24.2-60.9 29.8-12.4 2.6-36.9 3.1-48.8 1-27.3-4.8-51.2-13.8-71-26.9-17.2-11.4-27.6-24.6-41.3-52.4l-7.2-14.6H573l-7.2 14.6c-13.7 27.8-24.1 41-41.3 52.4-20.1 13.2-43.7 22.1-71 26.9-11.9 2.1-36.4 1.6-48.8-1-26.5-5.6-37.8-11.1-60.9-29.8l-10.2-8.3-5.4 7.3c-3 3.9-8 10.1-11.3 13.7-4 4.4-7.6 9.9-11.1 17-2.8 5.8-10.8 22-17.6 36-28.5 58.3-47.1 86.1-71.4 107.1-17.8 15.4-33.8 24.7-50.1 29.1-11.4 3.1-38.5 3.1-52.9 0-31-6.7-55.2-20.6-78.6-45.1-17.8-18.7-27.7-40.2-31.2-68-2.8-22.7-4-56-4-110.6.1-70.4 2.3-111.1 11.6-213 10.2-112.6 10-111.3 15.9-132.9 8-29.2 17-51.6 27.4-68.6 10-16.2 33.5-38 65.4-60.8 6.4-4.5 11.7-8.4 11.8-8.5.2-.1 1.7-6.8 3.4-14.7 6.1-27.9 16.2-53.4 24.5-62.2 11.4-12 24.5-18.4 49.5-24.2z"

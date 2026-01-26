@@ -6,24 +6,20 @@ import {
   Battery,
   Camera,
   Cpu,
-  Gauge,
   HardDrive,
-  History,
   LayoutDashboard,
   Menu,
-  Play,
-  Power,
-  RefreshCw,
   Settings,
   StopCircle,
   Terminal,
   Video,
   Wifi,
-  Zap,
+  X,
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
+import TuningPage from "./TuningPage.jsx";
 
 const DEFAULT_ROSBRIDGE =
   import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
@@ -43,55 +39,7 @@ const YOLO_PARAM_KEYS = [
   "robot_confidence_threshold",
 ];
 
-const WALKING_PARAM_FIELDS = [
-  {
-    key: "x_move_amplitude",
-    step: "0.001",
-    quick: [
-      { label: "-0.01", delta: -0.01 },
-      { label: "-0.005", delta: -0.005 },
-      { label: "+0.005", delta: 0.005 },
-      { label: "+0.01", delta: 0.01 },
-    ],
-  },
-  {
-    key: "y_move_amplitude",
-    step: "0.001",
-    quick: [
-      { label: "-0.01", delta: -0.01 },
-      { label: "-0.005", delta: -0.005 },
-      { label: "+0.005", delta: 0.005 },
-      { label: "+0.01", delta: 0.01 },
-    ],
-  },
-  {
-    key: "angle_move_amplitude",
-    step: "0.001",
-    quick: [
-      { label: "-0.02", delta: -0.02 },
-      { label: "-0.01", delta: -0.01 },
-      { label: "+0.01", delta: 0.01 },
-      { label: "+0.02", delta: 0.02 },
-    ],
-  },
-  {
-    key: "period_time",
-    step: "0.001",
-    label: "period time (s)",
-    quick: [
-      { label: "-0.05s", delta: -0.05 },
-      { label: "-0.01s", delta: -0.01 },
-      { label: "+0.01s", delta: 0.01 },
-      { label: "+0.05s", delta: 0.05 },
-    ],
-  },
-];
-
 // --- Utilities ---
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
 
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -105,16 +53,6 @@ function formatPercent(value) {
     return "-%";
   }
   return `${Math.round(value)}%`;
-}
-
-function formatAge(seconds) {
-  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-    return "-";
-  }
-  if (seconds < 1) {
-    return `${Math.round(seconds * 1000)}ms`;
-  }
-  return `${seconds.toFixed(1)}s`;
 }
 
 function decodeImage(msg) {
@@ -226,6 +164,7 @@ const SectionHeader = ({ title, children }) => (
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rosUrl, setRosUrl] = useState(DEFAULT_ROSBRIDGE);
   const [rosState, setRosState] = useState("disconnected");
   
@@ -250,23 +189,12 @@ export default function App() {
   const [cameraTopicsLoading, setCameraTopicsLoading] = useState(false);
   const [cameraTopicsError, setCameraTopicsError] = useState("");
   
-  // Tuning
+  // Tuning - Vision Params
   const [yoloParams, setYoloParams] = useState({
     ball_confidence_threshold: 0.2,
     goalpost_confidence_threshold: 0.5,
     robot_confidence_threshold: 0.2,
   });
-  const [walkingParams, setWalkingParams] = useState({
-    x_move_amplitude: 0.0,
-    y_move_amplitude: 0.0,
-    angle_move_amplitude: 0.0,
-    period_time: 0.0,
-  });
-  const [walkingFull, setWalkingFull] = useState(null);
-  const [paramNode, setParamNode] = useState("op3_yolo_vision");
-  const [paramName, setParamName] = useState("ball_confidence_threshold");
-  const [paramType, setParamType] = useState("double");
-  const [paramValue, setParamValue] = useState("0.2");
   
   // Input
   const [joyState, setJoyState] = useState(null);
@@ -284,16 +212,11 @@ export default function App() {
   const joySubRef = useRef(null);
   const joyPubRef = useRef(null);
   const initPosePubRef = useRef(null);
-  const enableModulePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
   const torquePubRef = useRef(null);
-  const walkingParamPubRef = useRef(null);
-  const walkingGetServiceRef = useRef(null);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
-  const bagStartServiceRef = useRef(null);
-  const bagStopServiceRef = useRef(null);
   const healthCheckServiceRef = useRef(null);
   const demoModePubRef = useRef(null);
   const demoCommandPubRef = useRef(null);
@@ -356,11 +279,6 @@ export default function App() {
       name: "/robotis/base/ini_pose",
       messageType: "std_msgs/String",
     });
-    enableModulePubRef.current = new ROSLIB.Topic({
-      ros,
-      name: "/robotis/enable_ctrl_module",
-      messageType: "std_msgs/String",
-    });
     walkingCommandPubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/walking/command",
@@ -371,16 +289,7 @@ export default function App() {
       name: "/robotis/sync_write_item",
       messageType: "robotis_controller_msgs/SyncWriteItem",
     });
-    walkingParamPubRef.current = new ROSLIB.Topic({
-      ros,
-      name: "/robotis/walking/set_params",
-      messageType: "op3_walking_module_msgs/WalkingParam",
-    });
-    walkingGetServiceRef.current = new ROSLIB.Service({
-      ros,
-      name: "/robotis/walking/get_params",
-      serviceType: "op3_walking_module_msgs/srv/GetWalkingParam",
-    });
+    
     yoloSetServiceRef.current = new ROSLIB.Service({
       ros,
       name: "/op3_yolo_vision/set_parameters",
@@ -394,16 +303,6 @@ export default function App() {
     snapshotServiceRef.current = new ROSLIB.Service({
       ros,
       name: "/bascorro_studio/snapshot",
-      serviceType: "std_srvs/srv/Trigger",
-    });
-    bagStartServiceRef.current = new ROSLIB.Service({
-      ros,
-      name: "/bascorro_studio/bag_start",
-      serviceType: "std_srvs/srv/Trigger",
-    });
-    bagStopServiceRef.current = new ROSLIB.Service({
-      ros,
-      name: "/bascorro_studio/bag_stop",
       serviceType: "std_srvs/srv/Trigger",
     });
     healthCheckServiceRef.current = new ROSLIB.Service({
@@ -533,24 +432,6 @@ export default function App() {
     setCameraTopicsLoading(false);
   };
 
-  const enableWalkingModule = () => {
-    if (!enableModulePubRef.current || rosState !== "connected") {
-      sendStatus("Enable module unavailable", true);
-      return;
-    }
-    enableModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
-    sendStatus("Walking module enabled");
-  };
-
-  const adjustWalkingParam = (key, delta) => {
-    setWalkingParams((prev) => {
-      const current = Number(prev[key]);
-      const base = Number.isFinite(current) ? current : 0;
-      const next = Number((base + delta).toFixed(6));
-      return { ...prev, [key]: next };
-    });
-  };
-
   const handleInitPose = () => {
     if (initPosePubRef.current) {
       initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
@@ -646,49 +527,6 @@ export default function App() {
     return false;
   }, [rosState]);
 
-  const loadWalkingParams = () => {
-    if (walkingGetServiceRef.current) {
-      walkingGetServiceRef.current.callService(new ROSLIB.ServiceRequest({ get_param: true }), (res) => {
-        if (res?.parameters) {
-          setWalkingFull(res.parameters);
-          setWalkingParams({
-            x_move_amplitude: res.parameters.x_move_amplitude ?? 0,
-            y_move_amplitude: res.parameters.y_move_amplitude ?? 0,
-            angle_move_amplitude: res.parameters.angle_move_amplitude ?? 0,
-            period_time: res.parameters.period_time ?? 0,
-          });
-          sendStatus("Walking Params Loaded");
-        }
-      });
-    }
-  };
-
-  const applyWalkingParams = () => {
-    if (!walkingParamPubRef.current) {
-      sendStatus("Walking params unavailable", true);
-      return false;
-    }
-    if (!walkingFull) {
-      sendStatus("Load walking params first", true);
-      return false;
-    }
-    const payload = { ...walkingFull, ...walkingParams };
-    // ensure numbers
-    payload.x_move_amplitude = Number(payload.x_move_amplitude);
-    payload.y_move_amplitude = Number(payload.y_move_amplitude);
-    payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
-    payload.period_time = Number(payload.period_time);
-    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
-    sendStatus("Walking Params Applied");
-    return true;
-  };
-
-  const applyAndStartWalking = () => {
-    if (applyWalkingParams()) {
-      sendWalkingCommand("start", "Walking Started");
-    }
-  };
-
   const applyYoloParams = () => {
     if (yoloSetServiceRef.current) {
       const parameters = YOLO_PARAM_KEYS.map(name => ({
@@ -724,84 +562,100 @@ export default function App() {
   // --- Render Views ---
 
   const renderSidebar = () => (
-    <nav className="w-64 bg-sidebar flex flex-col p-6 text-gray-400 flex-shrink-0">
-      <div className="flex items-center gap-3 mb-8 px-2">
-        <img src="/log.png" alt="Bascorro Logo" className="w-8 h-8 object-contain" />
-        <span className="font-display font-bold text-lg text-white tracking-tight">Bascorro</span>
-      </div>
-      <div className="flex flex-col gap-2 flex-1">
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "dashboard" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("dashboard")}
-        >
-          <LayoutDashboard size={20} className={activeTab === "dashboard" ? "text-accent-yellow" : ""} />
-          <span>Dashboard</span>
-        </button>
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "charts" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("charts")}
-        >
-          <Activity size={20} className={activeTab === "charts" ? "text-accent-yellow" : ""} />
-          <span>Charts</span>
-        </button>
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "vision" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("vision")}
-        >
-          <Video size={20} className={activeTab === "vision" ? "text-accent-yellow" : ""} />
-          <span>Vision</span>
-        </button>
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tuning" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("tuning")}
-        >
-          <Settings size={20} className={activeTab === "tuning" ? "text-accent-yellow" : ""} />
-          <span>Tuning</span>
-        </button>
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("action")}
-        >
-          <Activity size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
-          <span>Action</span>
-        </button>
-        <button
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "logs" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
-          onClick={() => setActiveTab("logs")}
-        >
-          <Terminal size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
-          <span>Logs</span>
-        </button>
-      </div>
-      <div className="pt-6 border-t border-white/10">
-        <div className={`flex items-center gap-2 px-2 text-sm font-medium ${rosState === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
-          <div className={`w-2 h-2 rounded-full ${rosState === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`}></div>
-          <span>{rosState === "connected" ? "System Online" : "Disconnected"}</span>
+    <>
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <nav className={`
+        fixed inset-y-0 left-0 z-40 w-64 bg-sidebar flex flex-col p-6 text-gray-400 transition-transform duration-300 lg:translate-x-0 lg:static lg:flex-shrink-0
+        ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+      `}>
+        <div className="flex items-center justify-between mb-8 px-2">
+          <div className="flex items-center gap-3">
+            <img src="/log.png" alt="Bascorro Logo" className="w-8 h-8 object-contain" />
+            <span className="font-display font-bold text-lg text-white tracking-tight">Bascorro</span>
+          </div>
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white p-1">
+            <X size={20} />
+          </button>
         </div>
-      </div>
-    </nav>
+        <div className="flex flex-col gap-2 flex-1">
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "dashboard" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("dashboard"); setSidebarOpen(false); }}
+          >
+            <LayoutDashboard size={20} className={activeTab === "dashboard" ? "text-accent-yellow" : ""} />
+            <span>Dashboard</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "charts" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("charts"); setSidebarOpen(false); }}
+          >
+            <Activity size={20} className={activeTab === "charts" ? "text-accent-yellow" : ""} />
+            <span>Charts</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "vision" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("vision"); setSidebarOpen(false); }}
+          >
+            <Video size={20} className={activeTab === "vision" ? "text-accent-yellow" : ""} />
+            <span>Vision</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tuning" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("tuning"); setSidebarOpen(false); }}
+          >
+            <Settings size={20} className={activeTab === "tuning" ? "text-accent-yellow" : ""} />
+            <span>Tuning</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("action"); setSidebarOpen(false); }}
+          >
+            <Activity size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
+            <span>Action</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "logs" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("logs"); setSidebarOpen(false); }}
+          >
+            <Terminal size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
+            <span>Logs</span>
+          </button>
+        </div>
+        <div className="pt-6 border-t border-white/10">
+          <div className={`flex items-center gap-2 px-2 text-sm font-medium ${rosState === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
+            <div className={`w-2 h-2 rounded-full ${rosState === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`}></div>
+            <span>{rosState === "connected" ? "System Online" : "Disconnected"}</span>
+          </div>
+        </div>
+      </nav>
+    </>
   );
 
   const renderDashboard = () => (
-    <div className="grid grid-cols-[3fr_1fr] gap-6 h-full p-8 overflow-y-auto">
+    <div className="flex flex-col lg:grid lg:grid-cols-[3fr_1fr] gap-6 h-full p-4 md:p-8 overflow-y-auto">
       <div className="flex flex-col gap-6">
         {/* Safety & Quick Actions */}
-        <div className="flex gap-4 items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleInitPose}>
-            <RefreshCw size={18} /> Init Pose
+        <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleInitPose}>
+            <Settings size={18} /> Init Pose
           </button>
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleSoftStop}>
+          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleSoftStop}>
             <StopCircle size={18} /> Soft Stop
           </button>
-          <div className="flex-1"></div>
-          <div className="flex gap-2">
-            <button className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50" onClick={() => handleTorque(false)}>Torque OFF</button>
-            <button className="px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all" onClick={() => handleTorque(true)}>Torque ON</button>
+          <div className="flex-1 hidden sm:block"></div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button className="flex-1 sm:flex-none px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50 text-sm" onClick={() => handleTorque(false)}>Torque OFF</button>
+            <button className="flex-1 sm:flex-none px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all text-sm" onClick={() => handleTorque(true)}>Torque ON</button>
           </div>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Battery"
             icon={Battery}
@@ -832,11 +686,11 @@ export default function App() {
         {/* Torque Graph */}
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="Joint Torque Load" />
-          <div className="grid grid-cols-4 gap-4 mt-4">
-            {torqueEntries.length === 0 ? <p className="text-gray-400 text-sm col-span-4 text-center py-8">No torque data available</p> :
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4">
+            {torqueEntries.length === 0 ? <p className="text-gray-400 text-sm col-span-2 sm:col-span-4 text-center py-8">No torque data available</p> :
               torqueEntries.map(([name, val]) => (
                 <div key={name} className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-gray-500 font-mono uppercase">{name}</span>
+                  <span className="text-xs font-medium text-gray-500 font-mono uppercase truncate">{name}</span>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-300 ${Math.abs(val) > 80 ? 'bg-red-500' : 'bg-undip-blue'}`}
@@ -984,15 +838,15 @@ export default function App() {
   );
 
   const renderVision = () => (
-    <div className="grid grid-cols-[1fr_320px] gap-6 h-full p-8 overflow-hidden">
-      <div className="bg-black rounded-2xl overflow-hidden relative flex items-center justify-center border border-gray-800 shadow-lg">
+    <div className="flex flex-col lg:grid lg:grid-cols-[1fr_320px] gap-6 h-full p-4 md:p-8 overflow-y-auto lg:overflow-hidden">
+      <div className="bg-black rounded-2xl overflow-hidden relative flex items-center justify-center border border-gray-800 shadow-lg min-h-[300px]">
         {showOverlay ? <canvas ref={overlayCanvasRef} className="max-w-full max-h-full object-contain" /> : <div className="text-gray-500 text-sm font-mono">Stream Paused</div>}
         <div className="absolute top-4 right-4 bg-black/70 text-green-400 px-3 py-1 rounded-full text-xs font-mono backdrop-blur-sm border border-white/10 flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
           {formatNumber(overlayStats.fps, 1)} FPS
         </div>
       </div>
-      <div className="flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
+      <div className="flex flex-col gap-6 lg:overflow-y-auto pr-2 custom-scrollbar">
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="Stream Control" />
           <div className="flex flex-col gap-4">
@@ -1088,138 +942,8 @@ export default function App() {
     </div>
   );
 
-  const renderTuning = () => (
-    <div className="grid grid-cols-[1fr_340px] gap-6 h-full p-8 overflow-hidden">
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col h-full">
-        <SectionHeader title="Teleoperation" />
-        <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-xl border border-gray-100">
-          <GamepadVisualizer
-            joy={joyState}
-            rosConnected={rosState === "connected"}
-            publishJoy={publishJoy}
-          />
-        </div>
-      </div>
-      <div className="flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold font-display text-gray-800">Walking Params</h2>
-            <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors" onClick={loadWalkingParams}><RefreshCw size={14}/></button>
-          </div>
-          <div className="flex flex-col gap-4">
-            {WALKING_PARAM_FIELDS.map(field => (
-              <div key={field.key}>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                  {field.label || field.key.replace(/_/g, ' ')}
-                </label>
-                <input 
-                  type="number" 
-                  step={field.step}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
-                  value={walkingParams[field.key]} 
-                  onChange={e => setWalkingParams({ ...walkingParams, [field.key]: e.target.value })} 
-                />
-                {field.quick?.length ? (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {field.quick.map((chip) => (
-                      <button
-                        key={`${field.key}-${chip.label}`}
-                        className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-                        onClick={() => adjustWalkingParam(field.key, chip.delta)}
-                      >
-                        {chip.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <button className="w-full py-3 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyWalkingParams}>Apply Params</button>
-              <button className="w-full py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyAndStartWalking}>Apply + Start</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-          <SectionHeader title="Walking Control" />
-          <div className="flex flex-col gap-3 mt-2">
-            <button
-              className="w-full py-2 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={enableWalkingModule}
-              disabled={rosState !== "connected"}
-            >
-              <Zap size={14} /> Enable Walking Module
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className="py-2 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => sendWalkingCommand("start", "Walking Started")}
-                disabled={rosState !== "connected"}
-              >
-                Start
-              </button>
-              <button
-                className="py-2 bg-red-50 text-red-600 border border-red-100 hover:bg-red-600 hover:text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => sendWalkingCommand("stop", "Walking Stopped")}
-                disabled={rosState !== "connected"}
-              >
-                Stop
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className="py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => sendWalkingCommand("balance on", "Balance On")}
-                disabled={rosState !== "connected"}
-              >
-                Balance On
-              </button>
-              <button
-                className="py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => sendWalkingCommand("balance off", "Balance Off")}
-                disabled={rosState !== "connected"}
-              >
-                Balance Off
-              </button>
-            </div>
-            <button
-              className="w-full py-2 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={() => sendWalkingCommand("save", "Walking Params Saved")}
-              disabled={rosState !== "connected"}
-            >
-              Save Params
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-          <SectionHeader title="Manual Parameter" />
-          <div className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Node Name</label>
-              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramNode} onChange={e => setParamNode(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Param Name</label>
-              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramName} onChange={e => setParamName(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Value</label>
-              <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={paramValue} onChange={e => setParamValue(e.target.value)} />
-            </div>
-            <button className="w-full py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors mt-2" onClick={() => {
-               const service = new ROSLIB.Service({ ros: rosRef.current, name: `/${paramNode}/set_parameters`, serviceType: "rcl_interfaces/srv/SetParameters" });
-               service.callService(new ROSLIB.ServiceRequest({ parameters: [{ name: paramName, value: makeParamValue("double", paramValue) }] }), () => sendStatus("Param Sent"));
-            }}>Set Value</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   const renderLogs = () => (
-    <div className="h-full p-8 overflow-hidden flex flex-col">
+    <div className="h-full p-4 md:p-8 overflow-hidden flex flex-col">
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex-1 flex flex-col overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
           <h2 className="text-lg font-bold font-display text-gray-800">System Logs</h2>
@@ -1259,8 +983,16 @@ export default function App() {
     <div className="flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden">
       {renderSidebar()}
       <main className="flex-1 flex flex-col min-w-0 bg-[#f8fafc]">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-8 flex-shrink-0 z-20">
-          <h1 className="text-xl font-bold font-display text-gray-900 capitalize tracking-tight">{activeTab}</h1>
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-20">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <Menu size={24} />
+            </button>
+            <h1 className="text-xl font-bold font-display text-gray-900 capitalize tracking-tight">{activeTab}</h1>
+          </div>
           <div className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${studioError ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"} ${!studioStatus && "opacity-0"}`}>
             {studioStatus || "Ready"}
           </div>
@@ -1269,7 +1001,7 @@ export default function App() {
           {activeTab === "dashboard" && renderDashboard()}
           {activeTab === "charts" && <ChartPage currentMetrics={metrics} />}
           {activeTab === "vision" && renderVision()}
-          {activeTab === "tuning" && renderTuning()}
+          {activeTab === "tuning" && <TuningPage ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus} />}
           {activeTab === "logs" && renderLogs()}
           <div className={`absolute inset-0 p-4 ${activeTab === "action" ? "" : "hidden"}`}>
              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">

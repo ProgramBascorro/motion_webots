@@ -90,9 +90,9 @@ export default function ChartPage({ currentMetrics }) {
   };
 
   return (
-    <div className="grid grid-cols-[1fr_300px] gap-6 h-full p-8 overflow-hidden">
+    <div className="flex flex-col lg:grid lg:grid-cols-[1fr_300px] gap-6 h-full p-4 md:p-8 overflow-y-auto lg:overflow-hidden">
       {/* LEFT: Chart Area */}
-      <div className="flex flex-col gap-6 h-full">
+      <div className="flex flex-col gap-6 h-full min-h-[400px]">
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex-1 min-h-0 flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold font-display text-gray-800">Live Data Stream</h2>
@@ -120,7 +120,7 @@ export default function ChartPage({ currentMetrics }) {
             {activeKeys.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <Activity size={48} className="mb-4 opacity-20" />
-                <p>Select data points from the right panel to visualize.</p>
+                <p>Select data points from the panel to visualize.</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -160,50 +160,50 @@ export default function ChartPage({ currentMetrics }) {
         </div>
 
         {/* Bottom Configuration Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex gap-6 items-center flex-wrap">
+        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex gap-4 md:gap-6 items-center flex-wrap">
           <div className="flex items-center gap-2">
             <Settings size={16} className="text-gray-400" />
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Config</span>
           </div>
           
-          <div className="h-8 w-px bg-gray-200 hidden sm:block"></div>
+          <div className="h-8 w-px bg-gray-200 hidden md:block"></div>
 
-          <div className="flex items-center gap-3">
-            <label className="text-xs font-medium text-gray-600">Window (sec)</label>
+          <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-[120px]">
+            <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Window (s)</label>
             <input
               type="number"
               value={windowSeconds}
               onChange={(e) => setWindowSeconds(Number(e.target.value))}
-              className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
+              className="w-full md:w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-[100px]">
             <label className="text-xs font-medium text-gray-600">Y-Min</label>
             <input
               type="text"
               placeholder="auto"
               value={yDomain.min}
               onChange={(e) => setYDomain({ ...yDomain, min: e.target.value === "auto" || e.target.value === "" ? "auto" : Number(e.target.value) })}
-              className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
+              className="w-full md:w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-[100px]">
             <label className="text-xs font-medium text-gray-600">Y-Max</label>
             <input
               type="text"
               placeholder="auto"
               value={yDomain.max}
               onChange={(e) => setYDomain({ ...yDomain, max: e.target.value === "auto" || e.target.value === "" ? "auto" : Number(e.target.value) })}
-              className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
+              className="w-full md:w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:border-undip-blue outline-none"
             />
           </div>
         </div>
       </div>
 
       {/* RIGHT: Data Select Panel */}
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full overflow-hidden min-h-[300px]">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-100">
             <h2 className="text-sm font-bold font-display text-gray-800">Data Sources</h2>
