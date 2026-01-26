@@ -199,6 +199,18 @@ export default function App() {
   // Input
   const [joyState, setJoyState] = useState(null);
 
+  // Build terminal URL dynamically based on current window location
+  // This allows accessing from phone/other devices on local network
+  const terminalUrl = useMemo(() => {
+    // Use current hostname/IP with terminal port
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const terminalPort = import.meta.env.VITE_TERMINAL_PORT || "7681";
+    const url = `${protocol}//${hostname}:${terminalPort}`;
+    console.log("Auto-detected terminal URL:", url, "from hostname:", hostname);
+    return url;
+  }, []);
+
   // Refs
   const rosRef = useRef(null);
   const overlayCanvasRef = useRef(null);
@@ -222,6 +234,9 @@ export default function App() {
   const demoCommandPubRef = useRef(null);
 
   // --- Effects ---
+
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
   useEffect(() => {
     showOverlayRef.current = showOverlay;
@@ -358,6 +373,8 @@ export default function App() {
 
     overlaySubRef.current.subscribe((msg) => {
       if (!showOverlayRef.current) return;
+      if (activeTabRef.current !== "vision") return;
+
       const imageData = decodeImage(msg);
       if (!imageData || !overlayCanvasRef.current) return;
       
@@ -624,6 +641,13 @@ export default function App() {
           >
             <Terminal size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
             <span>Logs</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "terminal" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("terminal"); setSidebarOpen(false); }}
+          >
+            <Terminal size={20} className={activeTab === "terminal" ? "text-accent-yellow" : ""} />
+            <span>Terminal</span>
           </button>
         </div>
         <div className="pt-6 border-t border-white/10">
@@ -963,7 +987,7 @@ export default function App() {
             <tbody className="divide-y divide-gray-100">
               {events.slice().reverse().map((ev, i) => (
                 <tr key={i} className="hover:bg-gray-50 transition-colors group">
-                  <td className="py-3 px-6 text-xs font-mono text-gray-500">{new Date(ev.ts * 1000).toLocaleTimeString()}</td>
+                  <td className="py-3 px-6 text-xs font-mono text-gray-500">{new Date(ev.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</td>
                   <td className="py-3 px-6">
                     <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${ev.type === 'error' ? 'bg-red-100 text-red-600' : ev.type === 'warn' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-600'}`}>
                       {ev.type || "INFO"}
@@ -974,6 +998,31 @@ export default function App() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderTerminal = () => (
+    <div className="h-full p-4 md:p-8 overflow-hidden flex flex-col">
+      <div className="bg-black rounded-2xl border border-gray-800 shadow-lg flex-1 flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+          <div className="flex items-center gap-3">
+            <Terminal size={20} className="text-green-400" />
+            <h2 className="text-lg font-bold font-display text-white">System Terminal</h2>
+          </div>
+          <div className="flex gap-2 items-center">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+            <span className="text-xs text-gray-400 font-mono">Live Shell</span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <iframe
+            src={terminalUrl}
+            className="w-full h-full border-0"
+            title="Terminal"
+            allow="fullscreen"
+          />
         </div>
       </div>
     </div>
@@ -998,11 +1047,24 @@ export default function App() {
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative">
-          {activeTab === "dashboard" && renderDashboard()}
-          {activeTab === "charts" && <ChartPage currentMetrics={metrics} />}
-          {activeTab === "vision" && renderVision()}
-          {activeTab === "tuning" && <TuningPage ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus} />}
-          {activeTab === "logs" && renderLogs()}
+          <div className={activeTab === "dashboard" ? "h-full" : "hidden"}>
+            {renderDashboard()}
+          </div>
+          <div className={activeTab === "charts" ? "h-full" : "hidden"}>
+            <ChartPage currentMetrics={metrics} />
+          </div>
+          <div className={activeTab === "vision" ? "h-full" : "hidden"}>
+            {renderVision()}
+          </div>
+          <div className={activeTab === "tuning" ? "h-full" : "hidden"}>
+            <TuningPage ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus} />
+          </div>
+          <div className={activeTab === "logs" ? "h-full" : "hidden"}>
+            {renderLogs()}
+          </div>
+          <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
+            {renderTerminal()}
+          </div>
           <div className={`absolute inset-0 p-4 ${activeTab === "action" ? "" : "hidden"}`}>
              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">
                <ActionEditor isActive={activeTab === "action"} />

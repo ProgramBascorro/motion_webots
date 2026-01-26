@@ -52,6 +52,19 @@ action_install_deps() {
   $apt_cmd update
   $apt_cmd install -y --no-install-recommends "${base_pkgs[@]}" "${ros_pkgs[@]}"
 
+  # Install ttyd (web terminal) if not already installed
+  if ! command -v ttyd >/dev/null 2>&1; then
+    echo "${GRN}Installing ttyd (web terminal)...${RST}"
+    local install_script="$WS/scripts/install_ttyd.sh"
+    if [[ -f "$install_script" ]]; then
+      NON_INTERACTIVE=1 bash "$install_script" || echo "${YLW}Warning:${RST} ttyd installation failed (non-critical)"
+    else
+      echo "${YLW}Warning:${RST} ttyd install script not found at $install_script"
+    fi
+  else
+    echo "${GRN}OK:${RST} ttyd already installed"
+  fi
+
   if command -v rosdep >/dev/null 2>&1; then
     if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
       sudo rosdep init 2>/dev/null || true

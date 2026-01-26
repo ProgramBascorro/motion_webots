@@ -34,6 +34,7 @@ ARG OPENCV_PREFIX=/opt/opencv-${OPENCV_VERSION}
 ARG NODE_VERSION=20.11.1
 ARG PNPM_VERSION=9.15.4
 ARG GUM_VERSION=0.14.5
+ARG TTYD_VERSION=1.7.7
 
 # (Optional hardening) Prefer HTTPS for Ubuntu + ROS repos to reduce MITM/captive portal issues.
 # Safe even if the files don't exist.
@@ -145,6 +146,20 @@ RUN set -eux; \
   install -m 0755 /tmp/gum_${GUM_VERSION}_Linux_${gum_arch}/gum /usr/local/bin/gum; \
   rm -rf /tmp/gum.tar.gz /tmp/gum_${GUM_VERSION}_Linux_${gum_arch}; \
   gum --version
+
+# ---- ttyd (web terminal) via GitHub release binary ----
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) ttyd_arch="x86_64" ;; \
+    arm64) ttyd_arch="aarch64" ;; \
+    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL -o /tmp/ttyd \
+    "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ttyd_arch}"; \
+  install -m 0755 /tmp/ttyd /usr/local/bin/ttyd; \
+  rm -f /tmp/ttyd; \
+  ttyd --version
 
 # Locale
 RUN locale-gen en_US.UTF-8

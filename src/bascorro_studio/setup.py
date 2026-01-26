@@ -23,6 +23,7 @@ setup(
             "apply_node = bascorro_studio.apply_node:main",
             "asset_server = bascorro_studio.asset_server:main",
             "studio_agent = bascorro_studio.studio_agent:main",
+            "terminal_server = bascorro_studio.terminal_server:main",
         ],
     },
 )

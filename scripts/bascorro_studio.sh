@@ -34,8 +34,11 @@ LOG_DIR="${OP3_STUDIO_LOG_DIR:-${OP3_ACTION_WEB_LOG_DIR:-/tmp/bascorro_studio_lo
 ASSETS_DIR="${OP3_STUDIO_ASSETS_DIR:-${OP3_ACTION_WEB_ASSETS_DIR:-/tmp/bascorro_studio_assets}}"
 ASSETS_PORT="${OP3_STUDIO_ASSETS_PORT:-${OP3_ACTION_WEB_ASSETS_PORT:-8001}}"
 WEB_PORT="${OP3_STUDIO_PORT:-${OP3_ACTION_WEB_PORT:-5173}}"
+TERMINAL_PORT="${OP3_STUDIO_TERMINAL_PORT:-7681}"
+TERMINAL_CREDENTIAL="${OP3_STUDIO_TERMINAL_CREDENTIAL:-}"
 ROSBRIDGE_URL="${OP3_ROSBRIDGE_URL:-ws://localhost:9090}"
 ASSETS_URL="${OP3_STUDIO_ASSETS_URL:-${OP3_ACTION_WEB_ASSETS_URL:-http://localhost:${ASSETS_PORT}}}"
+TERMINAL_URL="${OP3_STUDIO_TERMINAL_URL:-http://localhost:${TERMINAL_PORT}}"
 
 mkdir -p "$LOG_DIR"
 
@@ -84,6 +87,7 @@ fi
 start_bg "apply_node" ros2 run bascorro_studio apply_node
 start_bg "asset_server" ros2 run bascorro_studio asset_server --port "$ASSETS_PORT" --dir "$ASSETS_DIR"
 start_bg "studio_agent" ros2 run bascorro_studio studio_agent
+start_bg "terminal_server" ros2 run bascorro_studio terminal_server
 
 cd "$WEB_DIR"
 if [[ ! -d node_modules ]]; then
@@ -92,6 +96,10 @@ fi
 
 export VITE_ASSETS_URL="$ASSETS_URL"
 export VITE_ROSBRIDGE_URL="$ROSBRIDGE_URL"
+# Don't export VITE_TERMINAL_URL - let the web app auto-detect based on hostname
+# This allows it to work on both localhost and network IP addresses
+# export VITE_TERMINAL_URL="$TERMINAL_URL"
 
 echo "[studio] Vite dev server on port $WEB_PORT"
+echo "[studio] Terminal server on port $TERMINAL_PORT"
 pnpm dev --host 0.0.0.0 --port "$WEB_PORT"

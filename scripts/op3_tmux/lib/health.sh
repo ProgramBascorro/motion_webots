@@ -314,6 +314,13 @@ doctor_check() {
     ok=0
   fi
 
+  if has_cmd ttyd; then
+    echo "${GRN}OK:${RST} ttyd (web terminal)"
+  else
+    echo "${YLW}WARN:${RST} ttyd not found (install for web terminal support)"
+    ok=0
+  fi
+
   if has_cmd docker; then
     echo "${GRN}OK:${RST} docker"
   else
