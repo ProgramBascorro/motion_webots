@@ -180,6 +180,8 @@ action_docker_run() {
   local tag="${OP3_DOCKER_TAG:-op3-webots-ros2:humble}"
   local run_flags="${OP3_DOCKER_RUN_FLAGS:-}"
   local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
+  local mount_mode="${OP3_DOCKER_MOUNT_MODE:-cache}"
+  local src_ro="${OP3_DOCKER_SRC_RO:-1}"
 
   local -a docker_cmd_parts
   read -r -a docker_cmd_parts <<< "$docker_cmd"
@@ -212,7 +214,32 @@ action_docker_run() {
     [[ -f "$xauth" ]] && cmd+=(-e XAUTHORITY=/tmp/.Xauthority -v "$xauth":/tmp/.Xauthority:rw)
   fi
 
-  cmd+=(-v "$WS":/ros2_ws -w /ros2_ws)
+  local ro_suffix=""
+  [[ "$src_ro" == "1" ]] && ro_suffix=":ro"
+
+  case "$mount_mode" in
+    none)
+      ;;
+    full)
+      cmd+=(-v "$WS":/ros2_ws)
+      ;;
+    src|cache)
+      [[ -d "$WS/src" ]] && cmd+=(-v "$WS/src":/ros2_ws/src${ro_suffix})
+      [[ -d "$WS/scripts" ]] && cmd+=(-v "$WS/scripts":/ros2_ws/scripts${ro_suffix})
+      [[ -f "$WS/script.sh" ]] && cmd+=(-v "$WS/script.sh":/ros2_ws/script.sh${ro_suffix})
+      if [[ "$mount_mode" == "cache" ]]; then
+        mkdir -p "$WS/build" "$WS/install" "$WS/log" 2>/dev/null || true
+        cmd+=(-v "$WS/build":/ros2_ws/build)
+        cmd+=(-v "$WS/install":/ros2_ws/install)
+        cmd+=(-v "$WS/log":/ros2_ws/log)
+      fi
+      ;;
+    *)
+      die "Unknown OP3_DOCKER_MOUNT_MODE: $mount_mode"
+      ;;
+  esac
+
+  cmd+=(-w /ros2_ws)
 
   if [[ -n "$run_flags" ]]; then
     read -r -a extra_flags <<< "$run_flags"

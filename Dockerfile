@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /tmp
 
 RUN if [ "$WITH_WEBOTS" = "1" ]; then \
-      wget -q https://github.com/cyberbotics/webots/releases/download/${WEBOTS_VERSION}/webots-${WEBOTS_VERSION}-x86-64${WEBOTS_PACKAGE_PREFIX}.tar.bz2 && \
+      wget -q "https://github.com/cyberbotics/webots/releases/download/${WEBOTS_VERSION}/webots-${WEBOTS_VERSION}-x86-64${WEBOTS_PACKAGE_PREFIX}.tar.bz2" && \
       tar xjf webots-*.tar.bz2 && \
       rm webots-*.tar.bz2 ; \
     else \
@@ -27,7 +27,12 @@ FROM ros:humble-ros-base
 ARG DEBIAN_FRONTEND=noninteractive
 ARG WITH_WEBOTS=1
 
-# 1) System deps
+# Tool versions (pin for reproducibility)
+ARG NODE_MAJOR=20
+ARG PNPM_VERSION=9.15.4
+ARG GUM_VERSION=0.14.5
+
+# 1) System deps (+ Node repo deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git \
     libeigen3-dev libyaml-cpp-dev libboost-all-dev libopencv-dev \
@@ -53,23 +58,53 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-scipy \
     libncurses-dev \
     qtbase5-dev qttools5-dev \
-    xvfb wget locales \
-    curl gnupg \
+    xvfb locales \
+    curl ca-certificates gnupg \
     tmux \
+    xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- Charm repo (gum) ----
-# RUN mkdir -p /etc/apt/keyrings && \
-#    curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg && \
-#    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list && \
-#    apt-get update && apt-get install -y --no-install-recommends gum && \
-#    rm -rf /var/lib/apt/lists/*
+# ---- Install Node.js (Debian/Ubuntu-friendly) ----
+# Using NodeSource repo (stable for Ubuntu 22.04).
+RUN set -eux; \
+  mkdir -p /etc/apt/keyrings; \
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends nodejs; \
+  rm -rf /var/lib/apt/lists/*
 
-# ---- pnpm ----
-# RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
-# ENV PNPM_HOME=/root/.local/share/pnpm
-# ENV PATH=${PNPM_HOME}:${PATH}
-# RUN ${PNPM_HOME}/pnpm env use --global lts
+# ---- pnpm via Corepack (reproducible; no SHELL=bash hack) ----
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
+
+RUN set -eux; \
+  corepack enable; \
+  corepack prepare "pnpm@${PNPM_VERSION}" --activate; \
+  pnpm --version
+
+# ---- gum via GitHub release binary (avoids apt https/keyring issues) ----
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) gum_arch="x86_64" ;; \
+    arm64) gum_arch="arm64" ;; \
+    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL -o /tmp/gum.tar.gz \
+    "https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_Linux_${gum_arch}.tar.gz"; \
+  tar -xzf /tmp/gum.tar.gz -C /tmp; \
+  install -m 0755 /tmp/gum_${GUM_VERSION}_Linux_${gum_arch}/gum /usr/local/bin/gum; \
+  rm -rf /tmp/gum.tar.gz /tmp/gum_${GUM_VERSION}_Linux_${gum_arch}; \
+  gum --version
+
+# Locale
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# rosdep
+RUN rosdep init 2>/dev/null || true && rosdep update
 
 # 2) Install Webots runtime deps (optional)
 RUN if [ "$WITH_WEBOTS" = "1" ]; then \
@@ -84,7 +119,6 @@ RUN if [ "$WITH_WEBOTS" = "1" ]; then \
     fi
 
 # 3) Install Webots itself (optional)
-# NOTE: can't put COPY behind an if, so we copy to a temp location and move conditionally.
 WORKDIR /tmp
 COPY --from=webots_downloader /tmp/webots /tmp/webots
 
@@ -94,20 +128,14 @@ RUN if [ "$WITH_WEBOTS" = "1" ]; then \
       echo "WITH_WEBOTS=0 -> removing staged Webots files" && rm -rf /tmp/webots ; \
     fi
 
-# Webots env (set only if enabled; otherwise keep clean)
+# Webots env (OK if you always build WITH_WEBOTS=1; otherwise these point to non-existent path)
 ENV WEBOTS_HOME=/usr/local/webots
 ENV PATH=/usr/local/webots:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
 ENV QTWEBENGINE_DISABLE_SANDBOX=1
 ENV USER=root
 
-# Locale
-RUN locale-gen en_US.UTF-8
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-
-RUN rosdep init 2>/dev/null || true && rosdep update
-
+# Workspace
 WORKDIR /ros2_ws
 RUN mkdir -p /ros2_ws/src
 COPY src/ /ros2_ws/src/
@@ -117,6 +145,7 @@ COPY ./scripts/ /ros2_ws/scripts/
 RUN chmod +x /ros2_ws/script.sh 2>/dev/null || true && \
     find /ros2_ws/scripts -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
+# Global bash rc convenience
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
     echo "export PNPM_HOME=/root/.local/share/pnpm" >> /etc/bash.bashrc && \
     echo "export PATH=\$PNPM_HOME:\$PATH" >> /etc/bash.bashrc

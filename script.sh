@@ -220,7 +220,29 @@ while true; do
     "$M_DOCKER_RUN")
       run_flags=""
       gum confirm "Run in detached mode?" && run_flags="-d"
-      OP3_DOCKER_RUN_FLAGS="$run_flags" op3_tmux_main --docker-run
+      mount_choice="$(gum choose --header "Mount mode" \
+        "Cache (src read-only + build/install/log)" \
+        "Src only (read-only)" \
+        "Full workspace (read/write)" \
+        "No mounts (sandbox)")"
+      mount_mode="cache"
+      case "$mount_choice" in
+        "Cache (src read-only + build/install/log)") mount_mode="cache" ;;
+        "Src only (read-only)") mount_mode="src" ;;
+        "Full workspace (read/write)") mount_mode="full" ;;
+        "No mounts (sandbox)") mount_mode="none" ;;
+      esac
+      src_ro="1"
+      if [[ "$mount_mode" == "src" || "$mount_mode" == "cache" ]]; then
+        src_choice="$(gum choose --header "Src mount access" \
+          "Read-only (safer)" \
+          "Read/write")"
+        [[ "$src_choice" == "Read/write" ]] && src_ro="0"
+      fi
+      OP3_DOCKER_RUN_FLAGS="$run_flags" \
+        OP3_DOCKER_MOUNT_MODE="$mount_mode" \
+        OP3_DOCKER_SRC_RO="$src_ro" \
+        op3_tmux_main --docker-run
       ;;
 
     "$M_DOCKER_COMPOSE_UP")
