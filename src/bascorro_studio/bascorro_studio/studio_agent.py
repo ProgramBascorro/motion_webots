@@ -175,7 +175,6 @@ class StudioAgent(Node):
         self._bag_log_path: Optional[str] = None
 
         self._last_image: Optional[Image] = None
-
         self.metrics_pub = self.create_publisher(String, "/bascorro_studio/metrics", 10)
         self.events_pub = self.create_publisher(String, "/bascorro_studio/events", 10)
 

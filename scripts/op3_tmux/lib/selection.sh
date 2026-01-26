@@ -1,4 +1,4 @@
-COMPONENTS=(webots manager_sim manager_real demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager_sim manager_real offset_tuner demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
 SELECTION_CANCELLED="__CANCEL__"
 MANAGER_MODE=""
@@ -9,6 +9,7 @@ component_label() {
     webots) echo "Webots" ;;
     manager_sim) echo "Manager (Sim)" ;;
     manager_real) echo "Manager (Real)" ;;
+    offset_tuner) echo "Offset Tuner" ;;
     demo) echo "Demo" ;;
     teleop) echo "Teleop" ;;
     action_web) echo "Studio" ;;
@@ -28,6 +29,7 @@ component_id() {
     "Webots") echo "webots" ;;
     "Manager (Sim)") echo "manager_sim" ;;
     "Manager (Real)") echo "manager_real" ;;
+    "Offset Tuner") echo "offset_tuner" ;;
     "Demo") echo "demo" ;;
     "Teleop") echo "teleop" ;;
     "Studio") echo "action_web" ;;
@@ -213,6 +215,7 @@ apply_selection_flags() {
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
   WITH_DEMO=0
+  WITH_OFFSET_TUNER=0
   MANAGER_MODE=""
   MANAGER_CONFLICT=0
 
@@ -233,6 +236,7 @@ apply_selection_flags() {
       manager) WITH_MANAGER=1 ;;
       manager_sim) WITH_MANAGER=1; set_manager_mode "sim" ;;
       manager_real) WITH_MANAGER=1; set_manager_mode "real" ;;
+      offset_tuner) WITH_OFFSET_TUNER=1 ;;
       demo) WITH_DEMO=1 ;;
       teleop) WITH_TELEOP=1 ;;
       foxglove) WITH_FOXGLOVE=1 ;;
@@ -256,16 +260,20 @@ resolve_selection() {
   local from_interactive=0
 
   if [[ "$use_explicit" -eq 1 ]]; then
-    selected+=(webots manager)
-    [[ "$WITH_DEMO" -eq 1 ]] && selected+=(demo)
-    [[ "$WITH_TELEOP" -eq 1 ]] && selected+=(teleop)
-    [[ "$WITH_FOXGLOVE" -eq 1 ]] && selected+=(foxglove)
-    [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
-    [[ "$WITH_YOLO_VISION" -eq 1 ]] && selected+=(yolo_vision)
-    [[ "$WITH_LOCALIZATION" -eq 1 ]] && selected+=(localization)
-    [[ "$WITH_BALL_LOCALIZER" -eq 1 ]] && selected+=(ball_localizer)
-    [[ "$WITH_ACTION_EDITOR" -eq 1 ]] && selected+=(action_editor)
-    [[ "$WITH_ACTION_WEB" -eq 1 ]] && selected+=(action_web)
+    if [[ "$WITH_OFFSET_TUNER" -eq 1 ]]; then
+      selected+=(offset_tuner)
+    else
+      selected+=(webots manager)
+      [[ "$WITH_DEMO" -eq 1 ]] && selected+=(demo)
+      [[ "$WITH_TELEOP" -eq 1 ]] && selected+=(teleop)
+      [[ "$WITH_FOXGLOVE" -eq 1 ]] && selected+=(foxglove)
+      [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
+      [[ "$WITH_YOLO_VISION" -eq 1 ]] && selected+=(yolo_vision)
+      [[ "$WITH_LOCALIZATION" -eq 1 ]] && selected+=(localization)
+      [[ "$WITH_BALL_LOCALIZER" -eq 1 ]] && selected+=(ball_localizer)
+      [[ "$WITH_ACTION_EDITOR" -eq 1 ]] && selected+=(action_editor)
+      [[ "$WITH_ACTION_WEB" -eq 1 ]] && selected+=(action_web)
+    fi
   elif [[ "$use_usual" -eq 1 ]]; then
     mapfile -t selected < <(load_usual_selection)
   else
@@ -325,10 +333,21 @@ resolve_selection() {
     return 0
   fi
 
+  if [[ "$WITH_OFFSET_TUNER" -eq 1 && "$WITH_MANAGER" -eq 1 ]]; then
+    echo "${YLW}Warning:${RST} Offset Tuner cannot run alongside manager. Stop manager and select only Offset Tuner."
+    MENU_ACTION="cancel"
+    return 0
+  fi
+
   if [[ "$MANAGER_MODE" == "sim" ]]; then
     PROFILE="webots"
     apply_profile "$PROFILE"
   elif [[ "$MANAGER_MODE" == "real" ]]; then
+    PROFILE="real_robot"
+    apply_profile "$PROFILE"
+  fi
+
+  if [[ "$WITH_OFFSET_TUNER" -eq 1 ]]; then
     PROFILE="real_robot"
     apply_profile "$PROFILE"
   fi

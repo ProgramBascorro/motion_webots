@@ -280,6 +280,7 @@ restart_component() {
   case "$comp" in
     webots) pane="$(tmux_env_get @op3_pane_webots)" ;;
     manager) pane="$(tmux_env_get @op3_pane_manager)" ;;
+    offset_tuner) pane="$(tmux_env_get @op3_pane_offset_tuner)" ;;
     teleop) pane="$(tmux_env_get @op3_pane_teleop)" ;;
     foxglove) pane="$(tmux_env_get @op3_pane_foxglove)" ;;
     tools) pane="$(tmux_env_get @op3_pane_tools)" ;;
@@ -307,6 +308,7 @@ restart_component() {
   case "$comp" in
     webots) wrapped="$(wrap_cmd "$WEBOTS_CMD")" ;;
     manager) wrapped="$(wrap_cmd "$MANAGER_CMD")" ;;
+    offset_tuner) wrapped="$(wrap_cmd "$OFFSET_TUNER_CMD")" ;;
     teleop) wrapped="$(wrap_cmd "$TELEOP_CMD")" ;;
     foxglove) wrapped="$(wrap_cmd "$FOXGLOVE_CMD")" ;;
     tools) wrapped="$(wrap_cmd "$TOOLS_CMD")" ;;

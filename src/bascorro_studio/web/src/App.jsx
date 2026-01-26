@@ -43,6 +43,50 @@ const YOLO_PARAM_KEYS = [
   "robot_confidence_threshold",
 ];
 
+const WALKING_PARAM_FIELDS = [
+  {
+    key: "x_move_amplitude",
+    step: "0.001",
+    quick: [
+      { label: "-0.01", delta: -0.01 },
+      { label: "-0.005", delta: -0.005 },
+      { label: "+0.005", delta: 0.005 },
+      { label: "+0.01", delta: 0.01 },
+    ],
+  },
+  {
+    key: "y_move_amplitude",
+    step: "0.001",
+    quick: [
+      { label: "-0.01", delta: -0.01 },
+      { label: "-0.005", delta: -0.005 },
+      { label: "+0.005", delta: 0.005 },
+      { label: "+0.01", delta: 0.01 },
+    ],
+  },
+  {
+    key: "angle_move_amplitude",
+    step: "0.001",
+    quick: [
+      { label: "-0.02", delta: -0.02 },
+      { label: "-0.01", delta: -0.01 },
+      { label: "+0.01", delta: 0.01 },
+      { label: "+0.02", delta: 0.02 },
+    ],
+  },
+  {
+    key: "period_time",
+    step: "0.001",
+    label: "period time (s)",
+    quick: [
+      { label: "-0.05s", delta: -0.05 },
+      { label: "-0.01s", delta: -0.01 },
+      { label: "+0.01s", delta: 0.01 },
+      { label: "+0.05s", delta: 0.05 },
+    ],
+  },
+];
+
 // --- Utilities ---
 
 function clamp(value, min, max) {
@@ -202,6 +246,9 @@ export default function App() {
   const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
   const [showOverlay, setShowOverlay] = useState(true);
   const [overlayStats, setOverlayStats] = useState({ fps: 0, lastFrameMs: null, dropped: 0 });
+  const [cameraTopics, setCameraTopics] = useState([]);
+  const [cameraTopicsLoading, setCameraTopicsLoading] = useState(false);
+  const [cameraTopicsError, setCameraTopicsError] = useState("");
   
   // Tuning
   const [yoloParams, setYoloParams] = useState({
@@ -213,6 +260,7 @@ export default function App() {
     x_move_amplitude: 0.0,
     y_move_amplitude: 0.0,
     angle_move_amplitude: 0.0,
+    period_time: 0.0,
   });
   const [walkingFull, setWalkingFull] = useState(null);
   const [paramNode, setParamNode] = useState("op3_yolo_vision");
@@ -236,6 +284,7 @@ export default function App() {
   const joySubRef = useRef(null);
   const joyPubRef = useRef(null);
   const initPosePubRef = useRef(null);
+  const enableModulePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
   const torquePubRef = useRef(null);
   const walkingParamPubRef = useRef(null);
@@ -305,6 +354,11 @@ export default function App() {
     initPosePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/base/ini_pose",
+      messageType: "std_msgs/String",
+    });
+    enableModulePubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/enable_ctrl_module",
       messageType: "std_msgs/String",
     });
     walkingCommandPubRef.current = new ROSLIB.Topic({
@@ -434,6 +488,69 @@ export default function App() {
     setTimeout(() => { if(studioStatus === msg) setStudioStatus(""); }, 3000);
   };
 
+  const sendWalkingCommand = (command, label) => {
+    if (!walkingCommandPubRef.current || rosState !== "connected") {
+      sendStatus("Walking command unavailable", true);
+      return;
+    }
+    walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
+    sendStatus(label || `Walking command: ${command}`);
+  };
+
+  const refreshCameraTopics = () => {
+    if (!rosRef.current || rosState !== "connected") {
+      setCameraTopicsError("ROS not connected");
+      return;
+    }
+    setCameraTopicsLoading(true);
+    setCameraTopicsError("");
+    const ros = rosRef.current;
+    const handleTopics = (topics) => {
+      setCameraTopics(Array.isArray(topics) ? topics : []);
+      setCameraTopicsLoading(false);
+    };
+    const handleError = () => {
+      setCameraTopicsError("Failed to query topics");
+      setCameraTopicsLoading(false);
+    };
+    if (typeof ros.getTopicsForType === "function") {
+      ros.getTopicsForType("sensor_msgs/Image", (res) => {
+        const topics = Array.isArray(res) ? res : res?.topics;
+        handleTopics(topics);
+      }, handleError);
+      return;
+    }
+    if (typeof ros.getTopics === "function") {
+      ros.getTopics((res) => {
+        const topics = res?.topics || [];
+        const types = res?.types || [];
+        const imageTopics = topics.filter((topic, idx) => types[idx] === "sensor_msgs/Image");
+        handleTopics(imageTopics);
+      }, handleError);
+      return;
+    }
+    setCameraTopicsError("ROS API unavailable");
+    setCameraTopicsLoading(false);
+  };
+
+  const enableWalkingModule = () => {
+    if (!enableModulePubRef.current || rosState !== "connected") {
+      sendStatus("Enable module unavailable", true);
+      return;
+    }
+    enableModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+    sendStatus("Walking module enabled");
+  };
+
+  const adjustWalkingParam = (key, delta) => {
+    setWalkingParams((prev) => {
+      const current = Number(prev[key]);
+      const base = Number.isFinite(current) ? current : 0;
+      const next = Number((base + delta).toFixed(6));
+      return { ...prev, [key]: next };
+    });
+  };
+
   const handleInitPose = () => {
     if (initPosePubRef.current) {
       initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
@@ -442,10 +559,7 @@ export default function App() {
   };
 
   const handleSoftStop = () => {
-    if (walkingCommandPubRef.current) {
-      walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: "stop" }));
-      sendStatus("Soft Stop Sent");
-    }
+    sendWalkingCommand("stop", "Soft Stop Sent");
   };
 
   const handleTorque = (enable) => {
@@ -541,6 +655,7 @@ export default function App() {
             x_move_amplitude: res.parameters.x_move_amplitude ?? 0,
             y_move_amplitude: res.parameters.y_move_amplitude ?? 0,
             angle_move_amplitude: res.parameters.angle_move_amplitude ?? 0,
+            period_time: res.parameters.period_time ?? 0,
           });
           sendStatus("Walking Params Loaded");
         }
@@ -549,14 +664,28 @@ export default function App() {
   };
 
   const applyWalkingParams = () => {
-    if (walkingParamPubRef.current && walkingFull) {
-      const payload = { ...walkingFull, ...walkingParams };
-      // ensure numbers
-      payload.x_move_amplitude = Number(payload.x_move_amplitude);
-      payload.y_move_amplitude = Number(payload.y_move_amplitude);
-      payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
-      walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
-      sendStatus("Walking Params Applied");
+    if (!walkingParamPubRef.current) {
+      sendStatus("Walking params unavailable", true);
+      return false;
+    }
+    if (!walkingFull) {
+      sendStatus("Load walking params first", true);
+      return false;
+    }
+    const payload = { ...walkingFull, ...walkingParams };
+    // ensure numbers
+    payload.x_move_amplitude = Number(payload.x_move_amplitude);
+    payload.y_move_amplitude = Number(payload.y_move_amplitude);
+    payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
+    payload.period_time = Number(payload.period_time);
+    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
+    sendStatus("Walking Params Applied");
+    return true;
+  };
+
+  const applyAndStartWalking = () => {
+    if (applyWalkingParams()) {
+      sendWalkingCommand("start", "Walking Started");
     }
   };
 
@@ -883,10 +1012,47 @@ export default function App() {
                   Pure Camera
                 </button>
               </div>
+              <p className="mt-2 text-[11px] text-gray-400">
+                Hardware camera (manager + usb_cam) publishes on <span className="font-mono">/robotis_op3/camera/image_raw</span>.
+              </p>
             </div>
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Custom Topic</label>
               <input type="text" className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue" value={overlayTopic} onChange={e => setOverlayTopic(e.target.value)} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">Discover Image Topics</label>
+                <button
+                  className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={refreshCameraTopics}
+                  disabled={rosState !== "connected" || cameraTopicsLoading}
+                >
+                  {cameraTopicsLoading ? "Scanning..." : "Scan"}
+                </button>
+              </div>
+              {cameraTopicsError && (
+                <div className="text-[11px] text-red-500 mb-2">{cameraTopicsError}</div>
+              )}
+              {cameraTopics.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {cameraTopics.map((topic) => (
+                    <button
+                      key={topic}
+                      className={`px-2 py-1 rounded-full text-[10px] font-bold border transition-colors ${
+                        overlayTopic === topic
+                          ? "bg-undip-blue text-white border-undip-blue"
+                          : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                      }`}
+                      onClick={() => setOverlayTopic(topic)}
+                    >
+                      {topic}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[11px] text-gray-400">No image topics found yet.</div>
+              )}
             </div>
             <div className="flex gap-2">
               <button className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-bold transition-colors" onClick={() => setShowOverlay(!showOverlay)}>
@@ -941,19 +1107,89 @@ export default function App() {
             <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors" onClick={loadWalkingParams}><RefreshCw size={14}/></button>
           </div>
           <div className="flex flex-col gap-4">
-            {['x_move_amplitude', 'y_move_amplitude', 'angle_move_amplitude'].map(param => (
-              <div key={param}>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{param.replace(/_/g, ' ')}</label>
+            {WALKING_PARAM_FIELDS.map(field => (
+              <div key={field.key}>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                  {field.label || field.key.replace(/_/g, ' ')}
+                </label>
                 <input 
                   type="number" 
-                  step="0.001" 
+                  step={field.step}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
-                  value={walkingParams[param]} 
-                  onChange={e => setWalkingParams({...walkingParams, [param]: e.target.value})} 
+                  value={walkingParams[field.key]} 
+                  onChange={e => setWalkingParams({ ...walkingParams, [field.key]: e.target.value })} 
                 />
+                {field.quick?.length ? (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {field.quick.map((chip) => (
+                      <button
+                        key={`${field.key}-${chip.label}`}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                        onClick={() => adjustWalkingParam(field.key, chip.delta)}
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
-            <button className="w-full py-3 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors shadow-sm mt-2" onClick={applyWalkingParams}>Apply Params</button>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button className="w-full py-3 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyWalkingParams}>Apply Params</button>
+              <button className="w-full py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyAndStartWalking}>Apply + Start</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Walking Control" />
+          <div className="flex flex-col gap-3 mt-2">
+            <button
+              className="w-full py-2 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={enableWalkingModule}
+              disabled={rosState !== "connected"}
+            >
+              <Zap size={14} /> Enable Walking Module
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="py-2 bg-undip-blue text-white hover:bg-opacity-90 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => sendWalkingCommand("start", "Walking Started")}
+                disabled={rosState !== "connected"}
+              >
+                Start
+              </button>
+              <button
+                className="py-2 bg-red-50 text-red-600 border border-red-100 hover:bg-red-600 hover:text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => sendWalkingCommand("stop", "Walking Stopped")}
+                disabled={rosState !== "connected"}
+              >
+                Stop
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => sendWalkingCommand("balance on", "Balance On")}
+                disabled={rosState !== "connected"}
+              >
+                Balance On
+              </button>
+              <button
+                className="py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => sendWalkingCommand("balance off", "Balance Off")}
+                disabled={rosState !== "connected"}
+              >
+                Balance Off
+              </button>
+            </div>
+            <button
+              className="w-full py-2 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => sendWalkingCommand("save", "Walking Params Saved")}
+              disabled={rosState !== "connected"}
+            >
+              Save Params
+            </button>
           </div>
         </div>
 

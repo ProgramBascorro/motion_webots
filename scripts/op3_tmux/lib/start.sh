@@ -1,28 +1,30 @@
 start_stack() {
   local with_webots="$1"
   local with_manager="$2"
-  local with_teleop="$3"
-  local with_foxglove="$4"
-  local with_tools="$5"
-  local with_rqt="$6"
-  local with_yolo_vision="$7"
-  local with_localization="$8"
-  local with_ball_localizer="$9"
-  local with_action_editor="${10}"
-  local with_action_web="${11}"
-  local with_demo="${12}"
-  local dry_run="${13}"
+  local with_offset_tuner="$3"
+  local with_teleop="$4"
+  local with_foxglove="$5"
+  local with_tools="$6"
+  local with_rqt="$7"
+  local with_yolo_vision="$8"
+  local with_localization="$9"
+  local with_ball_localizer="${10}"
+  local with_action_editor="${11}"
+  local with_action_web="${12}"
+  local with_demo="${13}"
+  local dry_run="${14}"
 
   health_check "$with_webots"
   if [[ "$with_manager" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 ]]; then
     ensure_action_file
   fi
 
-  local webots_wrapped manager_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
+  local webots_wrapped manager_wrapped offset_tuner_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
   local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped
   local demo_wrapped demo_cmd
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
+  offset_tuner_wrapped="$(wrap_cmd "$OFFSET_TUNER_CMD")"
   teleop_wrapped="$(wrap_cmd "$TELEOP_CMD")"
   fox_wrapped="$(wrap_cmd "$FOXGLOVE_CMD")"
   tools_wrapped="$(wrap_cmd "$TOOLS_CMD")"
@@ -48,6 +50,7 @@ start_stack() {
     echo
     if [[ "$with_webots" -eq 1 ]]; then echo "${DIM}Pane (webots):  $WEBOTS_CMD${RST}"; fi
     if [[ "$with_manager" -eq 1 ]]; then echo "${DIM}Pane (manager): $MANAGER_CMD${RST}"; fi
+    if [[ "$with_offset_tuner" -eq 1 ]]; then echo "${DIM}Pane (offset_tuner): $OFFSET_TUNER_CMD${RST}"; fi
     if [[ "$with_teleop" -eq 1 ]]; then echo "${DIM}Pane (teleop):  $TELEOP_CMD${RST}"; fi
     if [[ "$with_foxglove" -eq 1 ]]; then echo "${DIM}Pane (fox):     $FOXGLOVE_CMD${RST}"; fi
     if [[ "$with_tools" -eq 1 ]]; then echo "${DIM}Pane (tools):   $TOOLS_CMD${RST}"; fi
@@ -75,6 +78,7 @@ start_stack() {
   local components=()
   [[ "$with_webots" -eq 1 ]] && components+=(webots)
   [[ "$with_manager" -eq 1 ]] && components+=(manager)
+  [[ "$with_offset_tuner" -eq 1 ]] && components+=(offset_tuner)
   [[ "$with_teleop" -eq 1 ]] && components+=(teleop)
   [[ "$with_foxglove" -eq 1 ]] && components+=(foxglove)
   [[ "$with_tools" -eq 1 ]] && components+=(tools)
@@ -120,6 +124,10 @@ start_stack() {
           tmux_send "$SESSION":main.$pane "$manager_wrapped"
         fi
         tmux_env_set "@op3_pane_manager" "$pane"
+        ;;
+      offset_tuner)
+        tmux_send "$SESSION":main.$pane "$offset_tuner_wrapped"
+        tmux_env_set "@op3_pane_offset_tuner" "$pane"
         ;;
       teleop)
         tmux_send "$SESSION":main.$pane "$teleop_wrapped"
@@ -169,6 +177,7 @@ start_stack() {
   tmux_env_set "@op3_with_foxglove" "$with_foxglove"
   tmux_env_set "@op3_with_tools" "$with_tools"
   tmux_env_set "@op3_with_rqt" "$with_rqt"
+  tmux_env_set "@op3_with_offset_tuner" "$with_offset_tuner"
   tmux_env_set "@op3_with_yolo_vision" "$with_yolo_vision"
   tmux_env_set "@op3_with_localization" "$with_localization"
   tmux_env_set "@op3_with_ball_localizer" "$with_ball_localizer"

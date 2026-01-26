@@ -26,6 +26,8 @@ FROM ros:humble-ros-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG WITH_WEBOTS=1
+ARG OPENCV_VERSION=4.8.1
+ARG OPENCV_PREFIX=/opt/opencv-${OPENCV_VERSION}
 
 # Tool versions (pin for reproducibility)
 # NOTE: We avoid NodeSource apt repo to prevent signature/proxy issues during docker build.
@@ -46,6 +48,9 @@ RUN set -eux; \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git \
     libeigen3-dev libyaml-cpp-dev libboost-all-dev libopencv-dev \
+    libjpeg-dev libpng-dev libtiff-dev \
+    libavcodec-dev libavformat-dev libswscale-dev libv4l-dev \
+    libgtk-3-dev \
     python3-colcon-common-extensions python3-rosdep \
     ros-humble-cv-bridge \
     ros-humble-image-transport \
@@ -74,6 +79,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     ubuntu-keyring \
  && rm -rf /var/lib/apt/lists/*
+
+# ---- OpenCV (newer than Ubuntu repo) for ONNX DNN compatibility ----
+RUN set -eux; \
+  mkdir -p /tmp/opencv; \
+  cd /tmp/opencv; \
+  curl -fsSL -o opencv.tar.gz "https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.tar.gz"; \
+  tar -xzf opencv.tar.gz --strip-components=1; \
+  cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="${OPENCV_PREFIX}" \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_PERF_TESTS=OFF \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_opencv_python3=OFF \
+    -DBUILD_opencv_java=OFF \
+    -DBUILD_opencv_apps=OFF \
+    -DWITH_CUDA=OFF \
+    -DWITH_OPENCL=OFF \
+    -DWITH_IPP=OFF \
+    -DWITH_TBB=OFF \
+    -DWITH_FFMPEG=ON \
+    -DWITH_GSTREAMER=OFF \
+    -DWITH_GTK=ON \
+    -DWITH_V4L=ON \
+    -DBUILD_LIST=core,imgproc,imgcodecs,videoio,highgui,objdetect,video,dnn; \
+  cmake --build build --parallel "$(nproc)"; \
+  cmake --install build; \
+  rm -rf /tmp/opencv
 
 # ---- Install Node.js from official tarball (no apt repos) ----
 RUN set -eux; \
@@ -149,6 +182,9 @@ ENV PATH=/usr/local/webots:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
 ENV QTWEBENGINE_DISABLE_SANDBOX=1
 ENV USER=root
+ENV OP3_OPENCV_PREFIX=${OPENCV_PREFIX}
+ENV OpenCV_DIR=${OPENCV_PREFIX}/lib/cmake/opencv4
+ENV LD_LIBRARY_PATH=${OPENCV_PREFIX}/lib:${LD_LIBRARY_PATH}
 
 # Workspace
 WORKDIR /ros2_ws

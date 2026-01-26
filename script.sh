@@ -47,6 +47,7 @@ readonly M_LAUNCH_PICKER="launch_picker"
 readonly M_BUILD="build"
 readonly M_DOCTOR="doctor"
 readonly M_INSTALL_DEPS="install_deps"
+readonly M_ROS_ENV="ros_env"
 readonly M_DOCKER_BUILD="docker_build"
 readonly M_DOCKER_RUN="docker_run"
 readonly M_DOCKER_COMPOSE_UP="docker_compose_up"
@@ -60,6 +61,7 @@ readonly MENU_ENUMS=(
   "$M_BUILD"
   "$M_DOCTOR"
   "$M_INSTALL_DEPS"
+  "$M_ROS_ENV"
   "$M_DOCKER_BUILD"
   "$M_DOCKER_RUN"
   "$M_DOCKER_COMPOSE_UP"
@@ -75,6 +77,7 @@ menu_label() {
     "$M_BUILD")         echo "Build workspace" ;;
     "$M_DOCTOR")        echo "Health check" ;;
     "$M_INSTALL_DEPS")  echo "Install deps" ;;
+    "$M_ROS_ENV")       echo "Set ROS env" ;;
     "$M_DOCKER_BUILD")  echo " Docker build" ;;
     "$M_DOCKER_RUN")    echo "Docker run (container)" ;;
     "$M_DOCKER_COMPOSE_UP") echo "Docker compose up" ;;
@@ -92,6 +95,7 @@ menu_emoji() {
     "$M_BUILD")         echo "🔧" ;;
     "$M_DOCTOR")        echo "🩺" ;;
     "$M_INSTALL_DEPS")  echo "📦" ;;
+    "$M_ROS_ENV")       echo "🌐" ;;
     "$M_DOCKER_BUILD")  echo "🏗️" ;;
     "$M_DOCKER_RUN")    echo "🐳" ;;
     "$M_DOCKER_COMPOSE_UP") echo "🐳" ;;
@@ -126,6 +130,7 @@ choice_to_enum() {
     "Build workspace")   echo "$M_BUILD" ;;
     "Health check")      echo "$M_DOCTOR" ;;
     "Install deps")      echo "$M_INSTALL_DEPS" ;;
+    "Set ROS env")       echo "$M_ROS_ENV" ;;
     "Docker build")      echo "$M_DOCKER_BUILD" ;;
     "Docker run (container)") echo "$M_DOCKER_RUN" ;;
     "Docker compose up") echo "$M_DOCKER_COMPOSE_UP" ;;
@@ -199,6 +204,32 @@ while true; do
 
     "$M_INSTALL_DEPS")
       op3_tmux_main --install-deps
+      ;;
+
+    "$M_ROS_ENV")
+      current_domain="${ROS_DOMAIN_ID:-}"
+      default_domain="${ROS_DOMAIN_ID_DEFAULT:-0}"
+      echo "Current ROS_DOMAIN_ID: ${current_domain:-<default ${default_domain}>}"
+      domain_value="$(gum input --prompt "ROS_DOMAIN_ID (blank = default ${default_domain}): " --value "$current_domain")"
+      if [[ -z "$domain_value" ]]; then
+        unset ROS_DOMAIN_ID
+        echo "ROS_DOMAIN_ID unset (using default ${default_domain})"
+      elif [[ "$domain_value" =~ ^[0-9]+$ ]]; then
+        export ROS_DOMAIN_ID="$domain_value"
+        echo "ROS_DOMAIN_ID set to ${domain_value}"
+      else
+        echo "Invalid ROS_DOMAIN_ID: $domain_value"
+      fi
+      localhost_current="${ROS_LOCALHOST_ONLY:-unset}"
+      localhost_choice="$(gum choose --header "ROS_LOCALHOST_ONLY (isolate DDS to localhost)" \
+        "Keep (${localhost_current})" \
+        "Enable (1)" \
+        "Disable (0)")"
+      case "$localhost_choice" in
+        "Enable (1)") export ROS_LOCALHOST_ONLY="1"; echo "ROS_LOCALHOST_ONLY=1" ;;
+        "Disable (0)") export ROS_LOCALHOST_ONLY="0"; echo "ROS_LOCALHOST_ONLY=0" ;;
+        *) ;;
+      esac
       ;;
 
     "$M_DOCKER_BUILD")
