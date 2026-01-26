@@ -75,7 +75,7 @@ menu_label() {
     "$M_BUILD")         echo "Build workspace" ;;
     "$M_DOCTOR")        echo "Health check" ;;
     "$M_INSTALL_DEPS")  echo "Install deps" ;;
-    "$M_DOCKER_BUILD")  echo "Docker build" ;;
+    "$M_DOCKER_BUILD")  echo " Docker build" ;;
     "$M_DOCKER_RUN")    echo "Docker run (container)" ;;
     "$M_DOCKER_COMPOSE_UP") echo "Docker compose up" ;;
     "$M_DOCKER_STOP")   echo "Docker compose down" ;;

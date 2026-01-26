@@ -164,6 +164,7 @@ action_docker_build() {
   local build_flags="${OP3_DOCKER_BUILD_FLAGS:-}"
 
   (cd "$WS" && $docker_cmd build \
+    --network=host \
     -t "$tag" \
     --build-arg WITH_WEBOTS="$with_webots" \
     --build-arg WEBOTS_VERSION="$webots_version" \

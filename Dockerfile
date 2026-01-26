@@ -28,11 +28,21 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG WITH_WEBOTS=1
 
 # Tool versions (pin for reproducibility)
-ARG NODE_MAJOR=20
+# NOTE: We avoid NodeSource apt repo to prevent signature/proxy issues during docker build.
+ARG NODE_VERSION=20.11.1
 ARG PNPM_VERSION=9.15.4
 ARG GUM_VERSION=0.14.5
 
-# 1) System deps (+ Node repo deps)
+# (Optional hardening) Prefer HTTPS for Ubuntu + ROS repos to reduce MITM/captive portal issues.
+# Safe even if the files don't exist.
+RUN set -eux; \
+    sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true; \
+    sed -i 's|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true; \
+    if [ -f /etc/apt/sources.list.d/ros2.list ]; then \
+      sed -i 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/ubuntu|g' /etc/apt/sources.list.d/ros2.list; \
+    fi
+
+# 1) System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git \
     libeigen3-dev libyaml-cpp-dev libboost-all-dev libopencv-dev \
@@ -62,17 +72,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates gnupg \
     tmux \
     xz-utils \
+    ubuntu-keyring \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- Install Node.js (Debian/Ubuntu-friendly) ----
-# Using NodeSource repo (stable for Ubuntu 22.04).
+# ---- Install Node.js from official tarball (no apt repos) ----
 RUN set -eux; \
-  mkdir -p /etc/apt/keyrings; \
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends nodejs; \
-  rm -rf /var/lib/apt/lists/*
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) node_arch="x64" ;; \
+    arm64) node_arch="arm64" ;; \
+    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL -o /tmp/node.tar.xz \
+    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+  tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \
+  rm -f /tmp/node.tar.xz; \
+  node -v; npm -v
 
 # ---- pnpm via Corepack (reproducible; no SHELL=bash hack) ----
 ENV PNPM_HOME=/root/.local/share/pnpm
@@ -128,7 +143,7 @@ RUN if [ "$WITH_WEBOTS" = "1" ]; then \
       echo "WITH_WEBOTS=0 -> removing staged Webots files" && rm -rf /tmp/webots ; \
     fi
 
-# Webots env (OK if you always build WITH_WEBOTS=1; otherwise these point to non-existent path)
+# Webots env
 ENV WEBOTS_HOME=/usr/local/webots
 ENV PATH=/usr/local/webots:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
