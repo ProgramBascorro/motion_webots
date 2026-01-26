@@ -148,17 +148,20 @@ cv::Mat toBgr(const sensor_msgs::msg::Image& msg)
 
 }  // namespace
 
-YoloDetector::YoloDetector()
-: Node("yolo_detector"),
+YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
+: Node("yolo_detector", options),
   input_size_(640),
   nms_threshold_(0.5f),
   nms_score_threshold_(0.1f),
   publish_debug_(true),
   use_gpu_(false),
   use_fp16_(false),
+  frame_skip_(1),
   model_loaded_(false),
   frame_count_(0),
-  total_inference_ms_(0.0)
+  frame_counter_(0),
+  total_inference_ms_(0.0),
+  total_full_ms_(0.0)
 {
   this->declare_parameter("image_topic", "/robotis_op3/camera/image_raw");
   this->declare_parameter("ball_center_topic", "/vision/yolo/ball_center");
@@ -175,6 +178,7 @@ YoloDetector::YoloDetector()
   this->declare_parameter("nms_threshold", nms_threshold_);
   this->declare_parameter("nms_score_threshold", nms_score_threshold_);
   this->declare_parameter("publish_debug", publish_debug_);
+  this->declare_parameter("frame_skip", frame_skip_);
 
   image_topic_ = this->get_parameter("image_topic").as_string();
   ball_center_topic_ = this->get_parameter("ball_center_topic").as_string();
@@ -197,6 +201,8 @@ YoloDetector::YoloDetector()
   nms_threshold_ = static_cast<float>(this->get_parameter("nms_threshold").as_double());
   nms_score_threshold_ = static_cast<float>(this->get_parameter("nms_score_threshold").as_double());
   publish_debug_ = this->get_parameter("publish_debug").as_bool();
+  frame_skip_ = this->get_parameter("frame_skip").as_int();
+  if (frame_skip_ < 1) frame_skip_ = 1;
 
   class_info_.resize(kNumClasses);
   class_info_[0] = {"ball", cv::Scalar(0, 255, 255),
@@ -294,6 +300,12 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     return;
   }
 
+  // Frame skipping
+  frame_counter_++;
+  if (frame_counter_ % frame_skip_ != 0) {
+    return;
+  }
+
   auto start_time = std::chrono::high_resolution_clock::now();
 
   cv::Mat bgr;
@@ -306,12 +318,17 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   const int width = bgr.cols;
   const int height = bgr.rows;
-  const int max_dim = std::max(width, height);
-  cv::Mat letterbox(max_dim, max_dim, CV_8UC3, cv::Scalar(0, 0, 0));
-  bgr.copyTo(letterbox(cv::Rect(0, 0, width, height)));
+
+  // Direct resize instead of letterboxing (faster, less memory)
+  cv::Mat resized;
+  cv::resize(bgr, resized, cv::Size(input_size_, input_size_));
+
+  // Calculate scale for bbox coordinates
+  float scale_x = static_cast<float>(width) / static_cast<float>(input_size_);
+  float scale_y = static_cast<float>(height) / static_cast<float>(input_size_);
 
   cv::Mat blob = cv::dnn::blobFromImage(
-    letterbox, 1.0 / 255.0, cv::Size(input_size_, input_size_), cv::Scalar(), true, false);
+    resized, 1.0 / 255.0, cv::Size(input_size_, input_size_), cv::Scalar(), true, false);
 
   net_.setInput(blob);
   std::vector<cv::Mat> outputs;
@@ -327,14 +344,18 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   }
 
   cv::Mat output = outputs[0];
-  float scale = static_cast<float>(max_dim) / static_cast<float>(input_size_);
 
-  std::vector<Detection> detections = decodeDetections(output, scale, width, height);
+  std::vector<Detection> detections = decodeDetections(output, 1.0f, input_size_, input_size_);
+
+  // Scale detections back to original image size
+  for (auto& det : detections) {
+    det.box.x = static_cast<int>(det.box.x * scale_x);
+    det.box.y = static_cast<int>(det.box.y * scale_y);
+    det.box.width = static_cast<int>(det.box.width * scale_x);
+    det.box.height = static_cast<int>(det.box.height * scale_y);
+  }
+
   if (detections.empty()) {
-    if (publish_debug_) {
-      debug_pub_->publish(toImageMsg(bgr, msg->header, "bgr8"));
-    }
-
     // Publish empty detections
     soccer_msgs::msg::BoundingBoxes empty_boxes;
     empty_boxes.header = msg->header;
@@ -363,7 +384,11 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   float best_ball_score = -1.0f;
   double best_ball_area = 0.0;
 
-  cv::Mat debug_image = bgr.clone();
+  // Only clone for debug if needed
+  cv::Mat debug_image;
+  if (publish_debug_) {
+    debug_image = bgr.clone();
+  }
 
   for (int idx : indices) {
     if (idx < 0 || idx >= static_cast<int>(detections.size())) {
@@ -426,18 +451,25 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));
   }
 
+  auto end_time = std::chrono::high_resolution_clock::now();
+  double full_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
   // Performance logging
   frame_count_++;
   total_inference_ms_ += inference_ms;
+  total_full_ms_ += full_ms;
   auto now = this->now();
   if ((now - last_log_time_).seconds() >= 5.0) {
-    double avg_ms = total_inference_ms_ / frame_count_;
-    double fps = 1000.0 / avg_ms;
+    double avg_inference_ms = total_inference_ms_ / frame_count_;
+    double avg_full_ms = total_full_ms_ / frame_count_;
+    double effective_fps = 1000.0 / avg_full_ms;
     RCLCPP_INFO(this->get_logger(),
-                "Performance: %.1f ms/frame, %.1f FPS (backend: %s/%s)",
-                avg_ms, fps, dnn_backend_.c_str(), dnn_target_.c_str());
+                "Performance: inference=%.1fms, total=%.1fms, %.1f FPS (skip=%d, backend=%s/%s)",
+                avg_inference_ms, avg_full_ms, effective_fps, frame_skip_,
+                dnn_backend_.c_str(), dnn_target_.c_str());
     frame_count_ = 0;
     total_inference_ms_ = 0.0;
+    total_full_ms_ = 0.0;
     last_log_time_ = now;
   }
 }

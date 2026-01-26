@@ -33,7 +33,7 @@ namespace op3_yolo_vision
 class YoloDetector : public rclcpp::Node
 {
 public:
-  YoloDetector();
+  explicit YoloDetector(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
 private:
   struct Detection
@@ -71,6 +71,7 @@ private:
   bool publish_debug_;
   bool use_gpu_;
   bool use_fp16_;
+  int frame_skip_;
 
   cv::dnn::Net net_;
   bool model_loaded_;
@@ -84,7 +85,9 @@ private:
 
   rclcpp::Time last_log_time_;
   int frame_count_;
+  int frame_counter_;
   double total_inference_ms_;
+  double total_full_ms_;
 };
 
 }  // namespace op3_yolo_vision

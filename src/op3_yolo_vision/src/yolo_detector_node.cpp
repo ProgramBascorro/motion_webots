@@ -18,8 +18,15 @@
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
+
+  // Use multi-threaded executor for better performance
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
+
   auto node = std::make_shared<op3_yolo_vision::YoloDetector>();
-  rclcpp::spin(node);
+  executor.add_node(node);
+
+  executor.spin();
+
   rclcpp::shutdown();
   return 0;
 }
