@@ -44,6 +44,14 @@ class YoloToDemoBridge(Node):
         ball_bbox = None
         best_confidence = 0.0
 
+        # Log all detections for debugging
+        if len(msg.bounding_boxes) > 0:
+            classes_detected = [bbox.class_id for bbox in msg.bounding_boxes]
+            self.get_logger().info(
+                f'YOLO detected {len(msg.bounding_boxes)} objects: {classes_detected}',
+                throttle_duration_sec=2.0
+            )
+
         for bbox in msg.bounding_boxes:
             if bbox.class_id == "ball" and bbox.probability > best_confidence:
                 ball_bbox = bbox
@@ -77,9 +85,16 @@ class YoloToDemoBridge(Node):
             circle_point = Point(x=norm_x, y=norm_y, z=norm_radius)
             circle_msg.circles = [circle_point]
 
-            self.get_logger().debug(
-                f'Ball detected: center=({norm_x:.2f}, {norm_y:.2f}), '
-                f'radius={norm_radius:.3f}, conf={best_confidence:.2f}'
+            self.get_logger().info(
+                f'✓ BALL FOUND: center=({norm_x:.2f}, {norm_y:.2f}), '
+                f'radius={norm_radius:.3f}, conf={best_confidence:.2f}',
+                throttle_duration_sec=1.0
+            )
+        else:
+            # No ball detected
+            self.get_logger().info(
+                'No ball detected in this frame',
+                throttle_duration_sec=3.0
             )
 
         # Publish (even if empty, to indicate no ball found)
