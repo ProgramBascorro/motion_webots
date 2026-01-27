@@ -1,0 +1,26 @@
+head_tracking_node:
+  ros__parameters:
+    # PID Control Gains
+    p_gain: 0.45
+    d_gain: 0.045
+
+    # Scanning Parameters
+    scan_enabled: true
+    scan_pan_min: -1.2
+    scan_pan_max: 1.2
+    scan_tilt_down: -0.6
+    scan_tilt_up: -0.25
+    scan_step: 0.2          # Step size between scan positions (radians)
+    scan_dwell_sec: 0.8     # Time to pause at each scan position
+
+    # Detection Parameters
+    lost_timeout: 1.5       # Time before considering ball lost (seconds)
+    min_ball_radius: 0.01   # Minimum ball radius to consider valid
+
+    # Joint Names
+    head_pan_joint: head_pan
+    head_tilt_joint: head_tilt
+    head_module_name: head_control_module
+
+    # Control Rate
+    control_rate: 10.0      # Hz

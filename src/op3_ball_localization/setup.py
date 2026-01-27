@@ -12,11 +12,14 @@ setup(
         ("share/" + package_name + "/launch", [
             "launch/ball_localizer.launch.py",
             "launch/simple_ball_tracker.launch.py",
-            "launch/yolo_demo.launch.py"
+            "launch/yolo_demo.launch.py",
+            "launch/yolo_full_demo.launch.py",
+            "launch/yolo_scan_only.launch.py"
         ]),
         ("share/" + package_name + "/config", [
             "config/ball_localizer.yaml",
-            "config/simple_ball_tracker.yaml"
+            "config/simple_ball_tracker.yaml",
+            "config/head_tracking.yaml"
         ]),
     ],
     install_requires=["setuptools"],
@@ -31,6 +34,7 @@ setup(
             "ball_localizer = op3_ball_localization.ball_localizer_node:main",
             "simple_ball_tracker = op3_ball_localization.simple_ball_tracker:main",
             "yolo_to_demo_bridge = op3_ball_localization.yolo_to_demo_bridge:main",
+            "head_tracking_node = op3_ball_localization.head_tracking_node:main",
         ],
     },
 )
