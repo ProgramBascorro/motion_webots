@@ -1,8 +1,8 @@
 head_tracking_node:
   ros__parameters:
-    # PID Control Gains (increased for better tracking)
-    p_gain: 0.65
-    d_gain: 0.08
+    # PID Control Gains (reduced for smoother, less jerky tracking)
+    p_gain: 0.35            # Reduced from 0.65 - less aggressive
+    d_gain: 0.10            # Increased from 0.08 - more damping
 
     # Scanning Parameters (slower and safer range)
     scan_enabled: true
@@ -13,8 +13,8 @@ head_tracking_node:
     scan_step: 0.15         # Smaller step for smoother scan (was 0.2)
     scan_dwell_sec: 1.5     # Longer pause at each position (was 0.8)
 
-    # Detection Parameters
-    lost_timeout: 2.5       # Longer timeout to keep tracking (was 1.5)
+    # Detection Parameters (much longer timeout to keep tracking stable)
+    lost_timeout: 4.0       # Much longer timeout (was 2.5) - stay in tracking mode longer
     min_ball_radius: 0.005  # Lower threshold to detect smaller balls (was 0.01)
 
     # Joint Names

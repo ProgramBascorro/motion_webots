@@ -168,6 +168,11 @@ class HeadTrackingNode(Node):
             self._d_gain * (tilt_error - self._prev_tilt_error)
         )
 
+        # Limit maximum change per iteration to prevent jerky movements
+        max_delta = 0.05  # Maximum movement per iteration (radians)
+        pan_cmd = max(-max_delta, min(max_delta, pan_cmd))
+        tilt_cmd = max(-max_delta, min(max_delta, tilt_cmd))
+
         # Update previous errors for next iteration
         self._prev_pan_error = pan_error
         self._prev_tilt_error = tilt_error
