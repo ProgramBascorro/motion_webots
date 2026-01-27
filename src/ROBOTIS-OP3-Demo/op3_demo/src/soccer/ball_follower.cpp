@@ -32,7 +32,7 @@ BallFollower::BallFollower()
     kick_motion_index_(83),
     CAMERA_HEIGHT(0.46),
     NOT_FOUND_THRESHOLD(50),
-    MAX_FB_STEP(40.0 * 0.001),
+    MAX_FB_STEP(35.0 * 0.001),
     MAX_RL_TURN(15.0 * M_PI / 180),
     IN_PLACE_FB_STEP(-3.0 * 0.001),
     MIN_FB_STEP(5.0 * 0.001),

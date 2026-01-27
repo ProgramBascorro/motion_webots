@@ -10,9 +10,9 @@ op3_joy_teleop:
     require_deadman_released_for_init_pose: true
     auto_stop_before_init_pose: true
 
-    max_x: 0.02
-    max_y: 0.015
-    max_yaw: 0.25
+    max_x: 0.010
+    max_y: 0.010
+    max_yaw: 0.18
     joy_sign_x: 1.0
     joy_sign_y: 1.0
     joy_sign_yaw: 1.0
@@ -43,19 +43,26 @@ op3_joy_teleop:
     turn_max_yaw: 0.25
 
     enable_kicks: true
-    left_kick_page: 120
-    right_kick_page: 121
+    # left_kick_page: 120
+    # right_kick_page: 121
+    left_kick_page: 104
+    right_kick_page: 218
+
     kick_mode_button: 4
     kick_mode_longpress_sec: 0.5
     kick_mode_window_sec: 2.0
-    require_deadman_released_for_kick: true
+    require_deadman_released_for_kick: false
     auto_stop_before_kick: true
     kick_apply_mode_delay_sec: 0.2
     kick_timeout_sec: 5.0
     kick_cooldown_sec: 1.0
     enable_getups: true
-    getup_front_page: 122
-    getup_back_page: 123
+    
+    # getup_front_page: 122
+    # getup_back_page: 123
+    getup_front_page: 85
+    getup_back_page: 86
+
     getup_mode_button: 1
     getup_front_button: 8
     getup_back_button: 9
