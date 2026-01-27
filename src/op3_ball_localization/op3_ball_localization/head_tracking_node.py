@@ -99,38 +99,33 @@ class HeadTrackingNode(Node):
             return
 
         # Get the largest ball (assuming it's the closest/most relevant)
+        # CircleSetStamped uses Point objects where:
+        # - x, y = normalized center coordinates [-1, 1]
+        # - z = normalized radius
         best_ball = None
         best_radius = 0.0
 
         for circle in msg.circles:
-            if circle.radius > self._min_ball_radius and circle.radius > best_radius:
-                best_radius = circle.radius
+            # Circle is a Point object: x, y = center, z = radius
+            radius = circle.z
+            if radius > self._min_ball_radius and radius > best_radius:
+                best_radius = radius
                 best_ball = circle
 
         if best_ball is None:
             return
 
         # Update ball state
-        # Convert from image coordinates to normalized coordinates
-        # Assuming x, y are already normalized to [-1, 1] or [0, 1]
-        # Based on the bridge implementation, x and y should be in image coordinates
-        # We need to normalize them to [-1, 1] range
-
-        # If x, y are in pixel coordinates, we need image dimensions
-        # For now, assume they're already normalized to [0, 1]
-        x_norm = best_ball.x
-        y_norm = best_ball.y
-
-        # Convert [0, 1] to [-1, 1] with center at 0
-        # x: 0 = left, 0.5 = center, 1 = right
-        # y: 0 = top, 0.5 = center, 1 = bottom
-        self._last_ball_x = (x_norm - 0.5) * 2.0  # [-1, 1]
-        self._last_ball_y = -(y_norm - 0.5) * 2.0  # [-1, 1], inverted so up is positive
+        # The bridge already provides normalized coordinates [-1, 1]
+        # x: -1 (left) to +1 (right)
+        # y: -1 (top) to +1 (bottom)
+        self._last_ball_x = best_ball.x  # Already normalized [-1, 1]
+        self._last_ball_y = -best_ball.y  # Invert so up is positive
         self._last_ball_time = time.monotonic()
 
         self.get_logger().debug(
             f"Ball detected: x={self._last_ball_x:.2f}, y={self._last_ball_y:.2f}, "
-            f"radius={best_ball.radius:.3f}",
+            f"radius={best_ball.z:.3f}",
             throttle_duration_sec=1.0
         )
 
