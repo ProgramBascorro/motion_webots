@@ -3,11 +3,11 @@ yolo_detector:
     image_topic: /robotis_op3/camera/image_raw
     ball_center_topic: /vision/yolo/ball_center
     model_path: models/yolo.onnx
-    use_gpu: false
-    use_fp16: false
-    dnn_backend: opencv
-    dnn_target: cpu
-    input_size: 416
+    use_gpu: true
+    use_fp16: true
+    dnn_backend: cuda
+    dnn_target: cuda
+    input_size: 640
     ball_confidence_threshold: 0.2
     goalpost_confidence_threshold: 0.2
     robot_confidence_threshold: 0.2

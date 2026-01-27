@@ -1,0 +1,43 @@
+simple_ball_tracker:
+  ros__parameters:
+    # Topics
+    detections_topic: /vision/yolo/detections
+    ball_center_topic: /vision/yolo/ball_center
+
+    # Control rate
+    publish_rate: 10.0
+
+    # Head scan (slower for better detection)
+    scan_pan_min: -1.2
+    scan_pan_max: 1.2
+    scan_tilt_down: -0.6
+    scan_tilt_up: -0.25
+    scan_step: 0.2          # Slower step (was 0.3)
+    scan_dwell_sec: 0.8     # Longer dwell (was 0.4)
+
+    # Detection timeouts
+    lost_timeout: 1.5       # Longer timeout (was 0.8)
+
+    # Distance estimation from bbox size
+    ball_real_diameter_m: 0.065      # Soccer ball ~6.5cm diameter
+    camera_focal_length_px: 500.0    # Tune this for your camera
+    min_bbox_area: 100.0             # Minimum bbox area to consider
+
+    # Approach behavior
+    arrive_distance: 0.25
+    approach_x_gain: 0.05
+    approach_max_x: 0.02
+    approach_yaw_gain: 1.5
+    approach_max_yaw: 0.3
+
+    # Head tracking
+    head_pan_joint: head_pan
+    head_tilt_joint: head_tilt
+    head_track_enable: true
+    head_track_pan_gain: 1.2
+    head_track_tilt_fixed: -0.5
+
+    # Module control
+    auto_enable_walking: true
+    walking_module_name: walking_module
+    head_module_name: head_control_module

@@ -319,16 +319,27 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   const int width = bgr.cols;
   const int height = bgr.rows;
 
-  // Direct resize instead of letterboxing (faster, less memory)
-  cv::Mat resized;
-  cv::resize(bgr, resized, cv::Size(input_size_, input_size_));
+  // Use square aspect ratio preserving resize (faster than letterbox)
+  // Find the longer dimension to determine scale
+  const int max_dim = std::max(width, height);
+
+  // Create a square canvas (but don't use black padding, just resize)
+  cv::Mat processed;
+  if (width == height) {
+    // Already square, just resize
+    cv::resize(bgr, processed, cv::Size(input_size_, input_size_));
+  } else {
+    // Create square letterbox (more efficient than before)
+    cv::Mat square(max_dim, max_dim, CV_8UC3, cv::Scalar(114, 114, 114));
+    bgr.copyTo(square(cv::Rect(0, 0, width, height)));
+    cv::resize(square, processed, cv::Size(input_size_, input_size_));
+  }
 
   // Calculate scale for bbox coordinates
-  float scale_x = static_cast<float>(width) / static_cast<float>(input_size_);
-  float scale_y = static_cast<float>(height) / static_cast<float>(input_size_);
+  float scale = static_cast<float>(max_dim) / static_cast<float>(input_size_);
 
   cv::Mat blob = cv::dnn::blobFromImage(
-    resized, 1.0 / 255.0, cv::Size(input_size_, input_size_), cv::Scalar(), true, false);
+    processed, 1.0 / 255.0, cv::Size(input_size_, input_size_), cv::Scalar(), true, false);
 
   net_.setInput(blob);
   std::vector<cv::Mat> outputs;
@@ -345,15 +356,7 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   cv::Mat output = outputs[0];
 
-  std::vector<Detection> detections = decodeDetections(output, 1.0f, input_size_, input_size_);
-
-  // Scale detections back to original image size
-  for (auto& det : detections) {
-    det.box.x = static_cast<int>(det.box.x * scale_x);
-    det.box.y = static_cast<int>(det.box.y * scale_y);
-    det.box.width = static_cast<int>(det.box.width * scale_x);
-    det.box.height = static_cast<int>(det.box.height * scale_y);
-  }
+  std::vector<Detection> detections = decodeDetections(output, scale, width, height);
 
   if (detections.empty()) {
     // Publish empty detections
