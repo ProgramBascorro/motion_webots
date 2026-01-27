@@ -1,25 +1,25 @@
 /**:
   ros__parameters:
-    gaussian_blur_size: 7
-    gaussian_blur_sigma: 2.0
-    canny_edge_th: 90.0
-    hough_accum_resolution: 1.0
-    min_circle_dist: 50.0
-    hough_accum_th: 25.0
-    min_radius: 15
-    max_radius: 300
-    filter_h_min: 350
-    filter_h_max: 40
-    filter_s_min: 150
+    gaussian_blur_size: 3
+    gaussian_blur_sigma: 2.08
+    canny_edge_th: 100
+    hough_accum_resolution: 3.01
+    min_circle_dist: 199.5
+    hough_accum_th: 28.5
+    min_radius: 33
+    max_radius: 110
+    filter_h_min: 16
+    filter_h_max: 155
+    filter_s_min: 70
     filter_s_max: 255
     filter_v_min: 50
     filter_v_max: 255
     use_second_filter: false
-    filter2_h_min: 30
-    filter2_h_max: 355
-    filter2_s_min: 0
-    filter2_s_max: 40
-    filter2_v_min: 200
+    filter2_h_min: 209
+    filter2_h_max: 212
+    filter2_s_min: 255
+    filter2_s_max: 251
+    filter2_v_min: 217
     filter2_v_max: 255
-    ellipse_size: 2
+    ellipse_size: 3
     filter_debug: false

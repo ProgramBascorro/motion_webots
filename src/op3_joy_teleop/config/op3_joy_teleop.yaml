@@ -10,9 +10,9 @@ op3_joy_teleop:
     require_deadman_released_for_init_pose: true
     auto_stop_before_init_pose: true
 
-    max_x: 0.010
-    max_y: 0.010
-    max_yaw: 0.18
+    max_x: 0.005
+    max_y: 0.005
+    max_yaw: 0.12
     joy_sign_x: 1.0
     joy_sign_y: 1.0
     joy_sign_yaw: 1.0

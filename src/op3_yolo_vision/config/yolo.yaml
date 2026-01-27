@@ -3,10 +3,10 @@ yolo_detector:
     image_topic: /robotis_op3/camera/image_raw
     ball_center_topic: /vision/yolo/ball_center
     model_path: models/yolo.onnx
-    use_gpu: true
-    use_fp16: true
-    dnn_backend: cuda
-    dnn_target: cuda
+    use_gpu: false
+    use_fp16: false
+    dnn_backend: opencv
+    dnn_target: cpu
     input_size: 640
     ball_confidence_threshold: 0.2
     goalpost_confidence_threshold: 0.2
@@ -14,5 +14,5 @@ yolo_detector:
     intersection_confidence_threshold: 0.4
     nms_threshold: 0.5
     nms_score_threshold: 0.1
-    publish_debug: false
+    publish_debug: true
     frame_skip: 1

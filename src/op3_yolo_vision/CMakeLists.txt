@@ -58,4 +58,9 @@ install(DIRECTORY models/
   DESTINATION share/${PROJECT_NAME}/models
 )
 
+install(PROGRAMS
+  scripts/yolo_detector_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
