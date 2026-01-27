@@ -11,7 +11,8 @@ setup(
         ("share/" + package_name, ["package.xml", "README.md"]),
         ("share/" + package_name + "/launch", [
             "launch/ball_localizer.launch.py",
-            "launch/simple_ball_tracker.launch.py"
+            "launch/simple_ball_tracker.launch.py",
+            "launch/yolo_demo.launch.py"
         ]),
         ("share/" + package_name + "/config", [
             "config/ball_localizer.yaml",
@@ -29,6 +30,7 @@ setup(
         "console_scripts": [
             "ball_localizer = op3_ball_localization.ball_localizer_node:main",
             "simple_ball_tracker = op3_ball_localization.simple_ball_tracker:main",
+            "yolo_to_demo_bridge = op3_ball_localization.yolo_to_demo_bridge:main",
         ],
     },
 )

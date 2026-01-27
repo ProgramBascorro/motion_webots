@@ -226,6 +226,7 @@ export default function App() {
   const initPosePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
   const torquePubRef = useRef(null);
+  const headModulePubRef = useRef(null);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
@@ -304,7 +305,12 @@ export default function App() {
       name: "/robotis/sync_write_item",
       messageType: "robotis_controller_msgs/SyncWriteItem",
     });
-    
+    headModulePubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/enable_ctrl_module",
+      messageType: "std_msgs/String",
+    });
+
     yoloSetServiceRef.current = new ROSLIB.Service({
       ros,
       name: "/op3_yolo_vision/set_parameters",
@@ -469,6 +475,13 @@ export default function App() {
         value: values
       }));
       sendStatus(enable ? "Torque ON" : "Torque OFF");
+    }
+  };
+
+  const handleEnableHeadModule = () => {
+    if (headModulePubRef.current) {
+      headModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
+      sendStatus("Head Module Enabled");
     }
   };
 
@@ -675,6 +688,9 @@ export default function App() {
           <div className="flex gap-2 w-full sm:w-auto">
             <button className="flex-1 sm:flex-none px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50 text-sm" onClick={() => handleTorque(false)}>Torque OFF</button>
             <button className="flex-1 sm:flex-none px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all text-sm" onClick={() => handleTorque(true)}>Torque ON</button>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button className="flex-1 sm:flex-none px-4 py-2 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 shadow-sm transition-all text-sm" onClick={handleEnableHeadModule}>Enable Head</button>
           </div>
         </div>
 
