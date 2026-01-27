@@ -1,21 +1,21 @@
 head_tracking_node:
   ros__parameters:
-    # PID Control Gains
-    p_gain: 0.45
-    d_gain: 0.045
+    # PID Control Gains (increased for better tracking)
+    p_gain: 0.65
+    d_gain: 0.08
 
-    # Scanning Parameters
+    # Scanning Parameters (slower and safer range)
     scan_enabled: true
-    scan_pan_min: -1.2
-    scan_pan_max: 1.2
-    scan_tilt_down: -0.6
-    scan_tilt_up: -0.25
-    scan_step: 0.2          # Step size between scan positions (radians)
-    scan_dwell_sec: 0.8     # Time to pause at each scan position
+    scan_pan_min: -0.9      # Reduced from -1.2 to avoid servo limits
+    scan_pan_max: 0.9       # Reduced from 1.2 to avoid servo limits
+    scan_tilt_down: -0.5    # Reduced from -0.6 to avoid servo limits
+    scan_tilt_up: -0.2      # Reduced from -0.25 for better view
+    scan_step: 0.15         # Smaller step for smoother scan (was 0.2)
+    scan_dwell_sec: 1.5     # Longer pause at each position (was 0.8)
 
     # Detection Parameters
-    lost_timeout: 1.5       # Time before considering ball lost (seconds)
-    min_ball_radius: 0.01   # Minimum ball radius to consider valid
+    lost_timeout: 2.5       # Longer timeout to keep tracking (was 1.5)
+    min_ball_radius: 0.005  # Lower threshold to detect smaller balls (was 0.01)
 
     # Joint Names
     head_pan_joint: head_pan

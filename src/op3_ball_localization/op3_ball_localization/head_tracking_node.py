@@ -176,17 +176,17 @@ class HeadTrackingNode(Node):
         self._current_pan += pan_cmd
         self._current_tilt += tilt_cmd
 
-        # Clamp to reasonable limits
-        self._current_pan = max(-1.5, min(1.5, self._current_pan))
-        self._current_tilt = max(-1.0, min(0.5, self._current_tilt))
+        # Clamp to safe servo limits (avoid extreme positions)
+        self._current_pan = max(-1.0, min(1.0, self._current_pan))
+        self._current_tilt = max(-0.7, min(0.3, self._current_tilt))
 
         # Publish head command
         self._publish_head(self._current_pan, self._current_tilt)
 
         self.get_logger().info(
-            f"Tracking: pan={self._current_pan:.2f}, tilt={self._current_tilt:.2f}, "
-            f"errors=({pan_error:.2f}, {tilt_error:.2f})",
-            throttle_duration_sec=2.0
+            f"[TRACKING] pan={self._current_pan:.2f}, tilt={self._current_tilt:.2f}, "
+            f"ball_error=({pan_error:.2f}, {tilt_error:.2f})",
+            throttle_duration_sec=1.0
         )
 
     def _scan_for_ball(self, now: float) -> None:
@@ -223,9 +223,9 @@ class HeadTrackingNode(Node):
         self._publish_head(next_pan, next_tilt)
 
         self.get_logger().info(
-            f"Scanning: pan={next_pan:.2f}, tilt={next_tilt:.2f}, "
-            f"dir={self._scan_direction:.0f}",
-            throttle_duration_sec=2.0
+            f"[SCANNING] pan={next_pan:.2f}, tilt={next_tilt:.2f}, "
+            f"dir={'+' if self._scan_direction > 0 else '-'}",
+            throttle_duration_sec=1.0
         )
 
     def _publish_head(self, pan: float, tilt: float) -> None:
