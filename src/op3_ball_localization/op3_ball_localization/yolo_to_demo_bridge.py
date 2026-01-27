@@ -7,7 +7,7 @@ Converts YOLO detections to CircleSetStamped format for op3_demo compatibility.
 import rclpy
 from rclpy.node import Node
 from soccer_msgs.msg import BoundingBoxes
-from op3_ball_detector_msgs.msg import CircleSetStamped, Circle2D
+from op3_ball_detector_msgs.msg import CircleSetStamped
 from geometry_msgs.msg import Point
 
 
@@ -54,17 +54,15 @@ class YoloToDemoBridge(Node):
         circle_msg.header = msg.header
 
         if ball_bbox is not None:
-            # Convert bbox to circle
-            circle = Circle2D()
-
+            # Convert bbox to circle representation
             # Calculate center
             cx = (ball_bbox.xmin + ball_bbox.xmax) / 2.0
             cy = (ball_bbox.ymin + ball_bbox.ymax) / 2.0
 
-            # Calculate diameter (average of width and height)
+            # Calculate radius (average of width and height / 2)
             width = ball_bbox.xmax - ball_bbox.xmin
             height = ball_bbox.ymax - ball_bbox.ymin
-            diameter = (width + height) / 2.0
+            radius = (width + height) / 4.0
 
             # Normalize to [-1, 1] range (op3_demo format)
             # x: -1 (left) to +1 (right)
@@ -72,17 +70,16 @@ class YoloToDemoBridge(Node):
             norm_x = (cx / self.image_width) * 2.0 - 1.0
             norm_y = (cy / self.image_height) * 2.0 - 1.0
 
-            # Size as fraction of image
-            norm_diameter = diameter / max(self.image_width, self.image_height)
+            # Radius as fraction of image
+            norm_radius = radius / max(self.image_width, self.image_height)
 
-            circle.center = Point(x=norm_x, y=norm_y, z=0.0)
-            circle.z = norm_diameter  # Size indicator
-
-            circle_msg.circles = [circle]
+            # Create Point where (x, y) = center, z = radius
+            circle_point = Point(x=norm_x, y=norm_y, z=norm_radius)
+            circle_msg.circles = [circle_point]
 
             self.get_logger().debug(
                 f'Ball detected: center=({norm_x:.2f}, {norm_y:.2f}), '
-                f'size={norm_diameter:.3f}, conf={best_confidence:.2f}'
+                f'radius={norm_radius:.3f}, conf={best_confidence:.2f}'
             )
 
         # Publish (even if empty, to indicate no ball found)
