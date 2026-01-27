@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>soccer_localization</name>
+  <version>0.0.0</version>
+  <description>Localization under a known map using AMCL for walking robots</description>
+  
+  <maintainer email="jiashen.wang@mail.utoronto.ca">Jason</maintainer>
+  <license>BSD</license>
+
+  <!-- Build tool dependencies -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- ROS2 Python dependencies -->
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>sensor_msgs_py</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  
+  <!-- Custom dependencies -->
+  <depend>soccer_common</depend>
+  <depend>soccer_msgs</depend>
+
+  <!-- Python dependencies (these should be installed via pip/conda) -->
+  <!-- numpy, scipy, filterpy, opencv-python -->
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

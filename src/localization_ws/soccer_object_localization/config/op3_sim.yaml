@@ -1,0 +1,66 @@
+/**:
+  ros__parameters:
+    # ========================================
+    # MODE SELECTION
+    # ========================================
+    use_dynamic_tf: false  # Static mode for simulator
+    
+    # ========================================
+    # CAMERA PARAMETERS - CALIBRATED!
+    # ========================================
+    camera:
+      # Intrinsics - FROM WEBOTS camera_info
+      focal_length: 790.38      # CORRECTED! Was 900.0
+      image_width: 1280
+      image_height: 720
+      
+      # Static mount (for simulator)
+      # Adjusted based on visual comparison
+      height: 0.48              # meters above ground (slightly higher)
+      tilt: -0.3491             # radians (~-20 degrees, keep same)
+      offset_x: 0.08            # meters forward from base_link
+      offset_y: 0.0             # meters sideways
+    
+    # ========================================
+    # FRAME NAMES
+    # ========================================
+    frames:
+      camera: "cam_link"
+      base: "base_link"
+      world: "odom"
+    
+    # ========================================
+    # DETECTION PARAMETERS
+    # ========================================
+    detection:
+      white_threshold: 180      # Increased from 150 for better line detection
+      min_line_length: 20       # pixels
+      max_line_gap: 10          # pixels
+      
+      # Additional tuning
+      canny_low: 50
+      canny_high: 150
+      hough_threshold: 50
+    
+    # ========================================
+    # POINT CLOUD PARAMETERS
+    # ========================================
+    point_cloud:
+      max_distance: 5.0         # meters, points beyond this ignored
+      spacing: 40               # INCREASED from 30 - less dense points
+      min_points: 5             # minimum points to publish
+      
+      # Height filtering (reject points not on ground)
+      z_min: -0.05              # Allow slight below ground (sensor noise)
+      z_max: 0.05               # Reject points above ground
+    
+    # ========================================
+    # PUBLISHING OPTIONS
+    # ========================================
+    publish:
+      debug_image: true         # publish line detection visualization
+      point_cloud: true         # publish point cloud
+      
+      # Publishing rates
+      image_rate: 10.0          # Hz, debug image
+      cloud_rate: 10.0          # Hz, point cloud

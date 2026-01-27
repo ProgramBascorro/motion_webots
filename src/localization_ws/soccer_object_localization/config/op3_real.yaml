@@ -1,0 +1,52 @@
+/**:
+  ros__parameters:
+    # ========================================
+    # MODE SELECTION
+    # ========================================
+    use_dynamic_tf: true  # Dynamic mode for real robot
+    
+    # ========================================
+    # CAMERA PARAMETERS
+    # ========================================
+    camera:
+      # Intrinsics (calibrate on real robot!)
+      focal_length: 900.0
+      image_width: 1280
+      image_height: 720
+      
+      # Not used in dynamic mode (TF tree provides pose)
+      height: 0.475
+      tilt: -0.349
+      offset_x: 0.08
+      offset_y: 0.0
+    
+    # ========================================
+    # FRAME NAMES
+    # ========================================
+    frames:
+      camera: "camera_link"      # Actual camera frame from URDF
+      base: "base_link"           # Robot base frame
+      world: "odom"               # World/odometry frame
+    
+    # ========================================
+    # DETECTION PARAMETERS
+    # ========================================
+    detection:
+      white_threshold: 180    # Lower for real camera (may have noise)
+      min_line_length: 25     # Longer to filter noise
+      max_line_gap: 15        # Allow more gaps
+    
+    # ========================================
+    # POINT CLOUD PARAMETERS
+    # ========================================
+    point_cloud:
+      max_distance: 4.0       # Shorter for more reliable points
+      spacing: 25             # Denser sampling for accuracy
+      min_points: 10          # More points required
+    
+    # ========================================
+    # PUBLISHING OPTIONS
+    # ========================================
+    publish:
+      debug_image: true
+      point_cloud: true

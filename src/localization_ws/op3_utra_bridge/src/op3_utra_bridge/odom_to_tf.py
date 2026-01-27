@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""
+Odometry to TF Publisher - FIXED VERSION
+Converts /odom_combined to TF transform with correct frame 'base'
+"""
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
+from tf2_ros import TransformBroadcaster
+
+
+class OdomToTFPublisher(Node):
+    def __init__(self):
+        super().__init__('odom_to_tf_publisher')
+        
+        # Parameters
+        self.declare_parameter('odom_topic', '/odom_combined')
+        self.declare_parameter('parent_frame', 'odom')
+        self.declare_parameter('child_frame', 'base')  # ✅ FIXED: Changed from 'base_link' to 'base'
+        
+        self.odom_topic = self.get_parameter('odom_topic').value
+        self.parent_frame = self.get_parameter('parent_frame').value
+        self.child_frame = self.get_parameter('child_frame').value
+        
+        # TF Broadcaster
+        self.tf_broadcaster = TransformBroadcaster(self)
+        
+        # Last published time (to avoid duplicate timestamps)
+        self.last_stamp = None
+        
+        # Subscribe to odometry
+        self.odom_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.odom_topic,
+            self.odom_callback,
+            10
+        )
+        
+        self.get_logger().info(
+            f'Publishing TF: {self.parent_frame} -> {self.child_frame} from {self.odom_topic}'
+        )
+    
+    def odom_callback(self, msg: PoseWithCovarianceStamped):
+        """Convert odometry message to TF transform"""
+        
+        # Avoid duplicate timestamps
+        current_stamp = msg.header.stamp
+        if self.last_stamp is not None:
+            if (current_stamp.sec == self.last_stamp.sec and 
+                current_stamp.nanosec == self.last_stamp.nanosec):
+                return
+        
+        self.last_stamp = current_stamp
+        
+        # Create TransformStamped message
+        t = TransformStamped()
+        
+        # Header
+        t.header.stamp = msg.header.stamp
+        t.header.frame_id = self.parent_frame
+        t.child_frame_id = self.child_frame  # ✅ Now correctly 'base'
+        
+        # Translation
+        t.transform.translation.x = msg.pose.pose.position.x
+        t.transform.translation.y = msg.pose.pose.position.y
+        t.transform.translation.z = msg.pose.pose.position.z
+        
+        # Rotation
+        t.transform.rotation.x = msg.pose.pose.orientation.x
+        t.transform.rotation.y = msg.pose.pose.orientation.y
+        t.transform.rotation.z = msg.pose.pose.orientation.z
+        t.transform.rotation.w = msg.pose.pose.orientation.w
+        
+        # Broadcast transform
+        self.tf_broadcaster.sendTransform(t)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = OdomToTFPublisher()
+    
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

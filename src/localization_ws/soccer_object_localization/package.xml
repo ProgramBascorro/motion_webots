@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>soccer_object_localization</name>
+  <version>1.0.0</version>
+  <description>Soccer field line and object localization for ROS2 Humble - UTRA RoboSoccer Team</description>
+  
+  <author email="jonathan.spraggett@mail.utoronto.ca">Jonathan Spraggett</author>
+  <maintainer email="namnam.nguyen@mail.utoronto.ca">Nam Nguyen</maintainer>
+  <maintainer email="jiashen.wang@mail.utoronto.ca">Jason Wang</maintainer>
+  
+  <license>BSD</license>
+
+  <!-- Build tool dependencies -->
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- Core ROS2 dependencies -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+
+  <!-- Custom dependencies -->
+  <depend>soccer_common</depend>
+  <depend>soccer_object_detection</depend>
+  <depend>soccer_msgs</depend>
+
+  <!-- Python dependencies -->
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <!-- Test dependencies -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
