@@ -13,6 +13,7 @@ import {
   Gamepad2,
   Terminal,
   CheckCircle2,
+  Download,
 } from "lucide-react";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 
@@ -287,6 +288,37 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
     sendStatus(label || `Command: ${command}`);
   };
 
+  const downloadOffsetYAML = () => {
+    if (offsetRows.length === 0) {
+      sendStatus("No offset data to download", true);
+      return;
+    }
+
+    // Build YAML content
+    let yamlContent = "offset:\n";
+    offsetRows.forEach(row => {
+      yamlContent += `  ${row.joint_name}: ${toNumber(row.offset_deg) !== 0 ? degToRad(toNumber(row.offset_deg)).toFixed(6) : 0}\n`;
+    });
+
+    yamlContent += "init_pose_for_offset_tuner:\n";
+    offsetRows.forEach(row => {
+      yamlContent += `  ${row.joint_name}: ${toNumber(row.goal_deg) !== 0 ? degToRad(toNumber(row.goal_deg)).toFixed(6) : 0}\n`;
+    });
+
+    // Create and download file
+    const blob = new Blob([yamlContent], { type: 'text/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    a.download = `offset_${timestamp}.yaml`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    sendStatus("Offset YAML downloaded");
+  };
+
   // --- Actions: Walking ---
 
   const loadWalkingParams = () => {
@@ -496,13 +528,20 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
             </div>
 
             {/* Bottom Actions */}
-             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4">
+             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3">
                <button
                   className="py-2.5 bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                   onClick={() => sendOffsetCommand("ini_pose", "Offset init pose")}
                   disabled={rosState !== "connected"}
                 >
-                  Init Pose (Offset)
+                  Init Pose
+                </button>
+                <button
+                  className="py-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  onClick={downloadOffsetYAML}
+                  disabled={offsetRows.length === 0}
+                >
+                  <Download size={14} /> Download
                 </button>
                 <button
                   className="py-2.5 bg-accent-yellow text-black hover:bg-yellow-400 rounded-xl text-xs font-bold transition-all disabled:opacity-50 shadow-sm"
