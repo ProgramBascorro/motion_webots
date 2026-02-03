@@ -18,7 +18,8 @@ import {
   Send,
   Download,
   Upload,
-  RefreshCw
+  RefreshCw,
+  Plus
 } from "lucide-react";
 
 // --- Constants & Helpers ---
@@ -535,6 +536,65 @@ export default function ActionEditor({ isActive = true }) {
     });
   };
 
+  const findNextPageIndex = (existingPages) => {
+    const used = new Set((existingPages || [])
+      .map(p => Number(p.index))
+      .filter(n => Number.isFinite(n) && n >= 1 && n <= 255));
+    const maxUsed = used.size ? Math.max(...used) : 0;
+    const candidate = maxUsed + 1;
+    if (candidate >= 1 && candidate <= 255 && !used.has(candidate)) return candidate;
+    for (let i = 1; i <= 255; i += 1) {
+      if (!used.has(i)) return i;
+    }
+    return null;
+  };
+
+  const handleAddPage = () => {
+    if (editorDisabled) return;
+    const nextIndex = findNextPageIndex(pages);
+    if (nextIndex === null) {
+      setStatus("No free page index (1-255)");
+      setStatusError(true);
+      return;
+    }
+    const name = `Page ${nextIndex}`;
+    const header = { repeat: 1, schedule: 0, speed: 0, accel: 0, next: 0, exit: 0 };
+    updateYamlData(draft => {
+      if (!Array.isArray(draft.pages)) draft.pages = [];
+      draft.pages.push({ index: nextIndex, name, header, steps: [] });
+      draft.pages.sort((a, b) => Number(a.index) - Number(b.index));
+    });
+    setSelectedPageIndex(nextIndex);
+    setSelectedStepIndex(null);
+    setPreviewPose(null);
+    setStatus(`Added ${name}`);
+    setStatusError(false);
+  };
+
+  const handleAddStep = () => {
+    if (!activePage || editorDisabled) return;
+    let insertAt = activePage.steps?.length || 0;
+    if (selectedStepIndex !== null) {
+      const byIndex = activePage.steps?.findIndex(s => Number(s.index) === Number(selectedStepIndex));
+      if (Number.isInteger(byIndex) && byIndex >= 0) insertAt = byIndex + 1;
+      else if (selectedStepIndex >= 0 && selectedStepIndex < (activePage.steps?.length || 0)) {
+        insertAt = selectedStepIndex + 1;
+      }
+    }
+    updateYamlData(draft => {
+      const p = draft.pages?.find(i => i.index === activePage.index);
+      if (!p) return;
+      if (!Array.isArray(p.steps)) p.steps = [];
+      const newStep = { index: 0, pause: 0, time: 0, positions: {} };
+      p.steps.splice(insertAt, 0, newStep);
+      p.steps.forEach((step, idx) => { step.index = idx; });
+    });
+    setSelectedStepIndex(insertAt);
+    setPreviewPose(buildPose({}, livePoseRef.current));
+    setStatus(`Added step ${insertAt}`);
+    setStatusError(false);
+  };
+
   const stepHistoryKey = (pi=selectedPageIndex, si=selectedStepIndex) => (pi !== null && si !== null) ? `${pi}:${si}` : null;
   const snapshotStep = (s) => ({ positions: cloneData(s?.positions||{}), time: s?.time??0, pause: s?.pause??0 });
   const pushStepHistory = (key, snap) => {
@@ -763,9 +823,19 @@ export default function ActionEditor({ isActive = true }) {
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col flex-1 overflow-hidden min-h-[300px]">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center">
             <h2 className="text-lg font-bold font-display text-gray-800">Pages</h2>
-            <button className="text-xs font-medium text-undip-blue hover:underline" onClick={() => { setPreviewPose(null); setSelectedStepIndex(null); }}>
-              Reset Live
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleAddPage}
+                disabled={editorDisabled}
+                title="Add new page"
+              >
+                <Plus size={12} /> Add Page
+              </button>
+              <button className="text-xs font-medium text-undip-blue hover:underline" onClick={() => { setPreviewPose(null); setSelectedStepIndex(null); }}>
+                Reset Live
+              </button>
+            </div>
           </div>
           <div className="p-2">
             <input 
@@ -795,8 +865,18 @@ export default function ActionEditor({ isActive = true }) {
             ))}
           </div>
           <div className="p-2 border-t border-gray-100 bg-gray-50/50 flex-1 overflow-y-auto max-h-[40%] custom-scrollbar">
-            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-              Steps {activePage ? `(Page ${activePage.index})` : ""}
+            <div className="flex items-center justify-between mb-2 px-1">
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Steps {activePage ? `(Page ${activePage.index})` : ""}
+              </div>
+              <button
+                className="text-[10px] font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleAddStep}
+                disabled={editorDisabled || !activePage}
+                title="Insert step after current"
+              >
+                <Plus size={10} /> Add Step
+              </button>
             </div>
             {!activePage ? (
               <div className="text-center py-4 text-gray-400 text-xs">Select a page</div>
