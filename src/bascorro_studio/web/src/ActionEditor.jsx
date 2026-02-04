@@ -55,6 +55,39 @@ const JOINT_META = {
   head_tilt: { id: 20, labelEn: "Head Tilt", labelId: "Kepala atas-bawah" },
 };
 
+// Joint limits in degrees, based on op3_kinematics_dynamics.cpp.
+const JOINT_LIMITS_DEG = {
+  head_pan: { min: -90, max: 90 },
+  head_tilt: { min: -90, max: 90 },
+  r_sho_pitch: { min: -90, max: 90 },
+  r_sho_roll: { min: -90, max: 54 },
+  r_el: { min: -90, max: 90 },
+  l_sho_pitch: { min: -90, max: 90 },
+  l_sho_roll: { min: -54, max: 90 },
+  l_el: { min: -90, max: 90 },
+  r_hip_yaw: { min: -81, max: 81 },
+  l_hip_yaw: { min: -81, max: 81 },
+  r_hip_roll: { min: -54, max: 54 },
+  l_hip_roll: { min: -54, max: 54 },
+  r_hip_pitch: { min: -72, max: 72 },
+  l_hip_pitch: { min: -72, max: 72 },
+  r_knee: { min: -126, max: 18 },
+  l_knee: { min: -18, max: 126 },
+  r_ank_pitch: { min: -81, max: 81 },
+  l_ank_pitch: { min: -81, max: 81 },
+  r_ank_roll: { min: -81, max: 81 },
+  l_ank_roll: { min: -81, max: 81 },
+};
+
+const JOINT_GROUPS = {
+  head: ["head_pan", "head_tilt"],
+  arm: ["r_sho_pitch", "r_sho_roll", "r_el", "l_sho_pitch", "l_sho_roll", "l_el"],
+  leg: [
+    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+  ],
+};
+
 const JOINT_ID = Object.fromEntries(
   Object.entries(JOINT_META).map(([name, meta]) => [name, meta.id])
 );
@@ -70,6 +103,7 @@ const RAW_RANGE = 2048;
 const HISTORY_LIMIT = 60;
 const PRESET_STORAGE_KEY = "op3PosePresets";
 const JOINT_SOURCE_TIMEOUT_MS = 1500;
+const TICK_SECONDS = 0.008;
 
 const DEFAULT_ASSETS = import.meta.env.VITE_ASSETS_URL || "http://localhost:8001";
 const DEFAULT_ROSBRIDGE = import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
@@ -77,6 +111,7 @@ const DEFAULT_ROSBRIDGE = import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:
 function toRadians(raw) { return ((raw - RAW_CENTER) * Math.PI) / RAW_RANGE; }
 function toDegrees(raw) { return ((raw - RAW_CENTER) * 180) / RAW_RANGE; }
 function clampRaw(value) { return Math.max(0, Math.min(4095, value)); }
+function clampNumber(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function toRawDegrees(degrees) { return clampRaw(Math.round((degrees * RAW_RANGE) / 180 + RAW_CENTER)); }
 function isTorqueOff(value) { return typeof value === "string" && value.toLowerCase() === "torque_off"; }
 function isInvalidRaw(value) {
@@ -98,6 +133,60 @@ function normalizeRaw(value) {
 }
 function formatJointLabel(name) { return JOINT_LABELS[name] || name; }
 function formatJointLabelId(name) { return JOINT_LABELS_ID[name] || name; }
+function formatLimitDeg(value) {
+  return Number.isFinite(value) ? value.toFixed(1) : "";
+}
+function buildLimitPreset(preset) {
+  if (preset === "default") return JOINT_LIMITS_DEG;
+  const scaled = {};
+  Object.entries(JOINT_LIMITS_DEG).forEach(([name, lim]) => {
+    scaled[name] = { min: lim.min, max: lim.max };
+  });
+  const scales = preset === "walking"
+    ? { head: 0.6, arm: 0.6, leg: 1 }
+    : preset === "gesture"
+      ? { head: 1, arm: 1, leg: 0.6 }
+      : {};
+  Object.entries(scales).forEach(([group, factor]) => {
+    (JOINT_GROUPS[group] || []).forEach(name => {
+      const lim = scaled[name];
+      if (!lim) return;
+      scaled[name] = { min: lim.min * factor, max: lim.max * factor };
+    });
+  });
+  return scaled;
+}
+function stepDurationSeconds(step, header, scheduleMode) {
+  const time = Number(step?.time ?? 0);
+  const pause = Number(step?.pause ?? 0);
+  const timeTicks = Number.isFinite(time) ? time : 0;
+  const pauseTicks = Number.isFinite(pause) ? pause : 0;
+  const speed = resolveSpeed(header);
+  const safeSpeed = Number.isFinite(speed) && speed > 0 ? speed : 32;
+  if (scheduleMode === "time") {
+    const ticks = timeTicks + pauseTicks;
+    return (ticks > 0 ? ticks : 1) * TICK_SECONDS;
+  }
+  const timeSeconds = timeTicks * TICK_SECONDS * (safeSpeed / 32);
+  const pauseSeconds = pauseTicks * TICK_SECONDS * (32 / safeSpeed);
+  const total = timeSeconds + pauseSeconds;
+  return total > 0 ? total : TICK_SECONDS;
+}
+
+function getTimelineSegment(pos, durations, cumulative) {
+  if (!durations.length) return { index: 0, t: 0 };
+  const total = cumulative[cumulative.length - 1] + durations[durations.length - 1];
+  const clamped = clampNumber(Number(pos) || 0, 0, total);
+  for (let i = 0; i < durations.length; i += 1) {
+    const start = cumulative[i];
+    const end = start + durations[i];
+    if (clamped <= end || i === durations.length - 1) {
+      const t = durations[i] > 0 ? (clamped - start) / durations[i] : 0;
+      return { index: i, t: clampNumber(t, 0, 1) };
+    }
+  }
+  return { index: durations.length - 1, t: 1 };
+}
 
 function lookupRawPosition(positions, name, idMap) {
   if (!positions) return undefined;
@@ -191,6 +280,11 @@ export default function ActionEditor({ isActive = true }) {
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [recordLastDelta, setRecordLastDelta] = useState(null);
   const [recordLastTicks, setRecordLastTicks] = useState(null);
+  const [timelinePos, setTimelinePos] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
+  const [timelineSpeed, setTimelineSpeed] = useState(1);
+  const [timelineLoop, setTimelineLoop] = useState(false);
+  const [limitPreset, setLimitPreset] = useState("default");
   const [jointGridColumns, setJointGridColumns] = useState(() => {
     const raw = localStorage.getItem("op3JointGridColumns");
     return raw === "2" ? 2 : 1;
@@ -233,6 +327,7 @@ export default function ActionEditor({ isActive = true }) {
   const pendingRunRef = useRef(null);
   const historyRef = useRef({});
   const recordRef = useRef({ lastTime: null, lastStepIndex: null, lastPageIndex: null });
+  const timelineRef = useRef({ lastTime: null });
 
   const viewerRef = useRef(null);
   const robotRef = useRef(null);
@@ -263,6 +358,21 @@ export default function ActionEditor({ isActive = true }) {
     if (!activePage || selectedStepIndex === null) return null;
     return activePage.steps?.find(s => Number(s.index) === Number(selectedStepIndex)) || activePage.steps?.[selectedStepIndex] || null;
   }, [activePage, selectedStepIndex]);
+  const scheduleMode = useMemo(() => {
+    const header = activePage?.header;
+    return header?.schedule === 10 || header?.schedule === "time" ? "time" : "speed";
+  }, [activePage]);
+
+  const timelineData = useMemo(() => {
+    const steps = activePage?.steps || [];
+    if (!steps.length) return { total: 0, durations: [], cumulative: [] };
+    const durations = steps.map(step => stepDurationSeconds(step, activePage?.header, scheduleMode));
+    const cumulative = [];
+    let acc = 0;
+    durations.forEach((d) => { cumulative.push(acc); acc += d; });
+    return { total: acc, durations, cumulative };
+  }, [activePage, scheduleMode]);
+  const activeLimitMap = useMemo(() => buildLimitPreset(limitPreset), [limitPreset]);
 
   const editorDisabled = !yamlData || Boolean(parseError);
 
@@ -518,6 +628,70 @@ export default function ActionEditor({ isActive = true }) {
     setPreviewPose(buildPose(activeStep.positions || {}, livePoseRef.current));
   }, [activeStep, yamlData]);
 
+  useEffect(() => {
+    if (!activePage || selectedStepIndex === null) return;
+    const steps = activePage.steps || [];
+    if (!steps.length) { setTimelinePos(0); return; }
+    const byIndex = steps.findIndex(s => Number(s.index) === Number(selectedStepIndex));
+    const idx = Number.isInteger(byIndex) && byIndex >= 0 ? byIndex : selectedStepIndex;
+    if (!Number.isFinite(idx)) return;
+    const clampedIdx = clampNumber(Number(idx), 0, steps.length - 1);
+    const start = timelineData.cumulative[clampedIdx] ?? 0;
+    setTimelinePos(start);
+  }, [activePage, selectedStepIndex, timelineData]);
+
+  useEffect(() => {
+    if (!activePage?.steps?.length) { setTimelinePos(0); setTimelinePlaying(false); return; }
+    setTimelinePos(pos => clampNumber(Number(pos) || 0, 0, timelineData.total));
+    setTimelinePlaying(false);
+  }, [activePage, timelineData.total]);
+
+  useEffect(() => {
+    if (!timelinePlaying) { timelineRef.current.lastTime = null; return; }
+    const total = timelineData.total;
+    if (!activePage?.steps?.length || total <= 0) { setTimelinePlaying(false); return; }
+    let frameId;
+    const tick = (now) => {
+      if (!timelineRef.current.lastTime) timelineRef.current.lastTime = now;
+      const dt = (now - timelineRef.current.lastTime) / 1000;
+      timelineRef.current.lastTime = now;
+      setTimelinePos(prev => {
+        const next = prev + dt * timelineSpeed;
+        if (next >= total) {
+          if (timelineLoop) {
+            return 0;
+          }
+          setTimelinePlaying(false);
+          return total;
+        }
+        return next;
+      });
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [timelinePlaying, timelineSpeed, activePage, timelineData.total]);
+
+  useEffect(() => {
+    if (!activePage || !activePage.steps?.length) return;
+    if (!timelineData.durations.length) return;
+    const steps = activePage.steps;
+    const { index, t } = getTimelineSegment(timelinePos, timelineData.durations, timelineData.cumulative);
+    const stepA = steps[index];
+    if (!stepA) return;
+    const poseA = buildPose(stepA.positions || {}, livePoseRef.current);
+    if (index >= steps.length - 1) { setPreviewPose(poseA); return; }
+    const stepB = steps[index + 1];
+    const poseB = buildPose(stepB?.positions || {}, livePoseRef.current);
+    const interp = {};
+    JOINT_ORDER.forEach(name => {
+      const a = poseA[name] ?? 0;
+      const b = poseB[name] ?? a;
+      interp[name] = a + (b - a) * t;
+    });
+    setPreviewPose(interp);
+  }, [timelinePos, activePage, livePose, timelineData]);
+
   // --- Handlers (Requests, Updates, History) ---
   const sendRequest = (payload) => {
     if (!requestRef.current) { setStatus("ROS not connected"); setStatusError(true); return; }
@@ -586,8 +760,8 @@ export default function ActionEditor({ isActive = true }) {
     setStatusError(false);
   };
 
-  const handleAddStep = () => {
-    if (!activePage || editorDisabled) return;
+  const getInsertStepIndex = () => {
+    if (!activePage) return 0;
     let insertAt = activePage.steps?.length || 0;
     if (selectedStepIndex !== null) {
       const byIndex = activePage.steps?.findIndex(s => Number(s.index) === Number(selectedStepIndex));
@@ -596,6 +770,12 @@ export default function ActionEditor({ isActive = true }) {
         insertAt = selectedStepIndex + 1;
       }
     }
+    return insertAt;
+  };
+
+  const handleAddStep = () => {
+    if (!activePage || editorDisabled) return;
+    const insertAt = getInsertStepIndex();
     updateYamlData(draft => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if (!p) return;
@@ -608,6 +788,135 @@ export default function ActionEditor({ isActive = true }) {
     setPreviewPose(buildPose({}, livePoseRef.current));
     setStatus(`Added step ${insertAt}`);
     setStatusError(false);
+  };
+
+  const handleDuplicateStep = () => {
+    if (!activePage || !activeStep || editorDisabled) return;
+    const insertAt = getInsertStepIndex();
+    const stepCopy = cloneData(activeStep.positions || {});
+    updateYamlData(draft => {
+      const p = draft.pages?.find(i => i.index === activePage.index);
+      if (!p) return;
+      if (!Array.isArray(p.steps)) p.steps = [];
+      const newStep = { index: 0, pause: activeStep.pause ?? 0, time: activeStep.time ?? 0, positions: stepCopy };
+      p.steps.splice(insertAt, 0, newStep);
+      p.steps.forEach((step, idx) => { step.index = idx; });
+    });
+    setSelectedStepIndex(insertAt);
+    setPreviewPose(buildPose(stepCopy, livePoseRef.current));
+    setStatus(`Duplicated step ${activeStep.index ?? selectedStepIndex}`);
+    setStatusError(false);
+  };
+
+  const handleCapturePose = () => {
+    if (!activeStep || editorDisabled) return;
+    const live = livePoseRef.current || {};
+    const captureNames = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
+    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
+    if (!hasLive) {
+      setStatus("No live pose available");
+      setStatusError(true);
+      return;
+    }
+    pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
+    updateActiveStep(s => {
+      if (!s.positions || typeof s.positions !== "object") s.positions = {};
+      captureNames.forEach(name => {
+        const rad = live[name];
+        if (!Number.isFinite(rad)) return;
+        const raw = toRawDegrees((rad * 180) / Math.PI);
+        setRawPosition(s.positions, name, jointIdMap, raw);
+      });
+    });
+    setJointDrafts({});
+    setPreviewPose({ ...live });
+    setStatus("Captured live pose");
+    setStatusError(false);
+  };
+
+  const handleCapturePoseToNewStep = () => {
+    if (!activePage || !activeStep || editorDisabled) return;
+    const live = livePoseRef.current || {};
+    const captureNames = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
+    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
+    if (!hasLive) {
+      setStatus("No live pose available");
+      setStatusError(true);
+      return;
+    }
+    const positions = Array.isArray(activeStep.positions) ? [] : {};
+    captureNames.forEach(name => {
+      const rad = live[name];
+      if (!Number.isFinite(rad)) return;
+      const raw = toRawDegrees((rad * 180) / Math.PI);
+      setRawPosition(positions, name, jointIdMap, raw);
+    });
+    const insertAt = getInsertStepIndex();
+    updateYamlData(draft => {
+      const p = draft.pages?.find(i => i.index === activePage.index);
+      if (!p) return;
+      if (!Array.isArray(p.steps)) p.steps = [];
+      const newStep = { index: 0, pause: activeStep.pause ?? 0, time: activeStep.time ?? 0, positions };
+      p.steps.splice(insertAt, 0, newStep);
+      p.steps.forEach((step, idx) => { step.index = idx; });
+    });
+    setSelectedStepIndex(insertAt);
+    setPreviewPose({ ...live });
+    setJointDrafts({});
+    setStatus("Captured pose to new step");
+    setStatusError(false);
+  };
+
+  const handleSwapLeftRight = () => {
+    if (!activeStep || editorDisabled) return;
+    const names = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
+    const nameSet = new Set(names);
+    const current = {};
+    names.forEach(name => {
+      current[name] = lookupRawPosition(activeStep.positions || {}, name, jointIdMap);
+    });
+    pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
+    updateActiveStep(s => {
+      if (!s.positions || typeof s.positions !== "object") {
+        s.positions = Array.isArray(activeStep.positions) ? [] : {};
+      }
+      names.forEach(name => {
+        if (!name.startsWith("r_")) return;
+        const other = `l_${name.slice(2)}`;
+        if (!nameSet.has(other)) return;
+        setRawPosition(s.positions, name, jointIdMap, current[other]);
+        setRawPosition(s.positions, other, jointIdMap, current[name]);
+      });
+    });
+    const previewPositions = cloneData(activeStep.positions || {});
+    names.forEach(name => {
+      if (!name.startsWith("r_")) return;
+      const other = `l_${name.slice(2)}`;
+      if (!nameSet.has(other)) return;
+      setRawPosition(previewPositions, name, jointIdMap, current[other]);
+      setRawPosition(previewPositions, other, jointIdMap, current[name]);
+    });
+    setJointDrafts({});
+    setPreviewPose(buildPose(previewPositions, livePoseRef.current));
+    setStatus("Swapped left/right joints");
+    setStatusError(false);
+  };
+
+  const snapTimelineToNearestStep = () => {
+    if (!activePage?.steps?.length || !timelineData.cumulative.length) return;
+    const current = clampNumber(Number(timelinePos) || 0, 0, timelineData.total);
+    let nearest = 0;
+    let best = Infinity;
+    timelineData.cumulative.forEach((start, idx) => {
+      const dist = Math.abs(current - start);
+      if (dist < best) {
+        best = dist;
+        nearest = idx;
+      }
+    });
+    const snapped = timelineData.cumulative[nearest] ?? 0;
+    setTimelinePos(snapped);
+    setSelectedStepIndex(nearest);
   };
 
   const handleDeletePage = () => {
@@ -889,8 +1198,17 @@ export default function ActionEditor({ isActive = true }) {
 
   // --- Render Helpers ---
   const activeHeader = activePage?.header || {};
-  const scheduleMode = activeHeader.schedule === 10 || activeHeader.schedule === "time" ? "time" : "speed";
   const activeStepLabel = activeStep ? (activeStep.index ?? selectedStepIndex) : "";
+  const timelineMax = Math.max(0, timelineData.total);
+  const timelineClamped = clampNumber(Number(timelinePos) || 0, 0, timelineMax);
+  const timelineSegment = getTimelineSegment(timelineClamped, timelineData.durations, timelineData.cumulative);
+  const timelineLeft = timelineSegment.index;
+  const timelineRight = Math.min(timelineLeft + 1, Math.max(0, (activePage?.steps?.length || 0) - 1));
+  const timelinePct = Math.round(timelineSegment.t * 100);
+  const timelineHasRange = (activePage?.steps?.length || 0) > 1;
+  const timelineLabel = timelineMax > 0 && (activePage?.steps?.length || 0) > 1
+    ? `${timelineLeft}→${timelineRight} (${timelinePct}%)`
+    : `Step ${timelineLeft}`;
 
   return (
     <div className="flex flex-col lg:flex-row h-full gap-6 p-2 overflow-y-auto lg:overflow-hidden bg-[#f8fafc]">
@@ -961,6 +1279,22 @@ export default function ActionEditor({ isActive = true }) {
                   title="Insert step after current"
                 >
                   <Plus size={10} /> Add Step
+                </button>
+                <button
+                  className="text-[10px] font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                  onClick={handleCapturePoseToNewStep}
+                  disabled={editorDisabled || !activePage || selectedStepIndex === null}
+                  title="Capture live pose to a new step"
+                >
+                  Capture New
+                </button>
+                <button
+                  className="text-[10px] font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                  onClick={handleDuplicateStep}
+                  disabled={editorDisabled || !activePage || selectedStepIndex === null}
+                  title="Duplicate selected step"
+                >
+                  Duplicate
                 </button>
                 <button
                   className="text-[10px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
@@ -1089,6 +1423,18 @@ export default function ActionEditor({ isActive = true }) {
                 <input type="checkbox" checked={sendStepToWebots} onChange={e => setSendStepToWebots(e.target.checked)} className="accent-undip-blue"/>
                 Auto-Send
               </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                <span className="uppercase tracking-wider text-[10px] text-gray-400">Limits</span>
+                <select
+                  value={limitPreset}
+                  onChange={e => setLimitPreset(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-gray-700 outline-none"
+                >
+                  <option value="default">Default</option>
+                  <option value="walking">Walking</option>
+                  <option value="gesture">Gesture</option>
+                </select>
+              </label>
               <button
                 onClick={() => setJointGridColumns(jointGridColumns === 2 ? 1 : 2)}
                 className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
@@ -1116,6 +1462,60 @@ export default function ActionEditor({ isActive = true }) {
                 </div>
                 <div className="flex items-end gap-2">
                   <button onClick={() => sendStepPoseToWebots(activeStep)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-undip-blue hover:text-undip-blue rounded-lg text-xs font-bold flex items-center gap-1 transition-all"><Send size={14}/> Send</button>
+                  <button onClick={handleCapturePose} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-green-500 hover:text-green-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Capture</button>
+                  <button onClick={handleCapturePoseToNewStep} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-green-500 hover:text-green-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Capture New</button>
+                  <button onClick={handleSwapLeftRight} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-amber-500 hover:text-amber-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Swap L/R</button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">Timeline Preview</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setTimelinePlaying(p => !p)}
+                      disabled={!activePage || !timelineHasRange}
+                      className="px-2 py-1 bg-white border border-gray-200 text-gray-700 hover:border-undip-blue hover:text-undip-blue rounded text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+                      title={timelinePlaying ? "Pause preview" : "Play preview"}
+                    >
+                      {timelinePlaying ? <Square size={12}/> : <Play size={12}/>}
+                      {timelinePlaying ? "Pause" : "Play"}
+                    </button>
+                    <button
+                      onClick={() => setTimelineLoop(p => !p)}
+                      disabled={!activePage || !timelineHasRange}
+                      className={`px-2 py-1 border rounded text-xs font-bold flex items-center gap-1 disabled:opacity-50 ${timelineLoop ? "bg-undip-blue text-white border-undip-blue" : "bg-white text-gray-700 border-gray-200 hover:border-undip-blue hover:text-undip-blue"}`}
+                      title="Loop preview"
+                    >
+                      Loop
+                    </button>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Speed</label>
+                    <input
+                      type="range"
+                      min="0.25"
+                      max="4"
+                      step="0.25"
+                      value={timelineSpeed}
+                      onChange={e => setTimelineSpeed(Number(e.target.value))}
+                      className="w-24 accent-undip-blue"
+                    />
+                    <span className="text-[10px] font-mono text-gray-500 w-8 text-right">{timelineSpeed.toFixed(2)}x</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max={timelineMax}
+                    step="0.01"
+                    value={timelineClamped}
+                    onChange={e => { setTimelinePos(Number(e.target.value)); if (timelinePlaying) setTimelinePlaying(false); }}
+                    onMouseUp={snapTimelineToNearestStep}
+                    onTouchEnd={snapTimelineToNearestStep}
+                    disabled={!activePage || !timelineHasRange}
+                    className="flex-1 accent-undip-blue"
+                  />
+                  <span className="text-[10px] font-mono text-gray-500 w-24 text-right">{timelineLabel}</span>
                 </div>
               </div>
 
@@ -1131,19 +1531,33 @@ export default function ActionEditor({ isActive = true }) {
                     const draft = jointDrafts[key] ?? (norm===null ? "" : deg.toFixed(1));
                     const displayId = JOINT_ID[name] ?? jointIdMap[name];
                     const idText = displayId ? `ID ${displayId}` : "ID ?";
+                    const limit = activeLimitMap[name];
+                    const outOfRange = Boolean(limit && !isOff && norm !== null && (deg < limit.min || deg > limit.max));
+                    const rowClass = isOff
+                      ? "bg-red-50 border-red-100 opacity-70"
+                      : outOfRange
+                        ? "bg-amber-50 border-amber-200"
+                        : "bg-white border-gray-100 hover:border-gray-300";
+                    const limitText = limit ? `${formatLimitDeg(limit.min)}°..${formatLimitDeg(limit.max)}°` : "";
                     
                     return (
-                      <div key={name} className={`grid grid-cols-12 items-center gap-2 p-2 rounded-lg border transition-all ${isOff ? 'bg-red-50 border-red-100 opacity-70' : 'bg-white border-gray-100 hover:border-gray-300'}`}>
+                      <div key={name} className={`grid grid-cols-12 items-center gap-2 p-2 rounded-lg border transition-all ${rowClass}`}>
                         <div className="col-span-12 sm:col-span-4 min-w-0 flex flex-col">
                           <span className="text-[10px] font-mono text-gray-400 truncate">{name}</span>
                           <span className="text-xs font-bold text-gray-700 truncate" title={formatJointLabel(name)}>{formatJointLabel(name)}</span>
                           <span className="text-[10px] text-gray-500 truncate" title={formatJointLabelId(name)}>{idText} • {formatJointLabelId(name)}</span>
+                          {outOfRange && (
+                            <span className="text-[10px] font-bold text-amber-600 uppercase truncate" title="Outside recommended joint limit">
+                              Limit {limitText}
+                            </span>
+                          )}
                         </div>
                         <input
                           type="range" min="-180" max="180" step="0.5"
                           value={Number.isFinite(Number(draft)) ? Number(draft) : deg}
                           onChange={e => commitJointDraft(name, e.target.value)}
                           disabled={editorDisabled || isOff}
+                          title={limitText ? `Limit ${limitText}` : undefined}
                           className="col-span-12 sm:col-span-5 w-full min-w-0 accent-undip-blue h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer"
                         />
                         <input
@@ -1153,6 +1567,7 @@ export default function ActionEditor({ isActive = true }) {
                           onBlur={e => commitJointDraft(name, e.target.value)}
                           onKeyDown={e => e.key === "Enter" && commitJointDraft(name, e.target.value)}
                           disabled={editorDisabled || isOff}
+                          title={limitText ? `Limit ${limitText}` : undefined}
                           className="col-span-6 sm:col-span-2 w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-mono text-right focus:outline-none focus:border-undip-blue"
                         />
                         <button
