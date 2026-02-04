@@ -27,4 +27,4 @@ dynamixel | /dev/ttyUSB0 | 17  | XM540-W270     | 2.0      | r_ank_roll     | pr
 dynamixel | /dev/ttyUSB0 | 18  | XM540-W270     | 2.0      | l_ank_roll     | present_position, position_p_gain, position_i_gain, position_d_gain
 dynamixel | /dev/ttyUSB0 | 19  | XM430-W350     | 2.0      | head_pan       | present_position, position_p_gain, position_i_gain, position_d_gain
 dynamixel | /dev/ttyUSB0 | 20  | XM430-W350     | 2.0      | head_tilt      | present_position, position_p_gain, position_i_gain, position_d_gain
-sensor    | /dev/ttyUSB0 | 200 | OPEN-CR        | 2.0      | open-cr        | button, present_voltage, gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, roll, pitch, yaw
+# sensor    | /dev/ttyUSB0 | 200 | OPEN-CR        | 2.0      | open-cr        | button, present_voltage, gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, roll, pitch, yaw

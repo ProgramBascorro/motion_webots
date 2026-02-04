@@ -31,25 +31,39 @@ const JOINT_ORDER = [
   "r_ank_roll", "l_ank_roll", "head_pan", "head_tilt",
 ];
 
-const JOINT_ID = {
-  r_sho_pitch: 1, l_sho_pitch: 2, r_sho_roll: 3, l_sho_roll: 4,
-  r_el: 5, l_el: 6, r_hip_yaw: 7, l_hip_yaw: 8, r_hip_roll: 9, l_hip_roll: 10,
-  r_hip_pitch: 11, l_hip_pitch: 12, r_knee: 13, l_knee: 14, r_ank_pitch: 15,
-  l_ank_pitch: 16, r_ank_roll: 17, l_ank_roll: 18, head_pan: 19, head_tilt: 20,
+// Source of truth: src/ROBOTIS-OP3/op3_manager/config/OP3.robot
+const JOINT_META = {
+  r_sho_pitch: { id: 1, labelEn: "R Shoulder Pitch", labelId: "Bahu kanan pitch" },
+  l_sho_pitch: { id: 2, labelEn: "L Shoulder Pitch", labelId: "Bahu kiri pitch" },
+  r_sho_roll: { id: 3, labelEn: "R Shoulder Roll", labelId: "Bahu kanan roll" },
+  l_sho_roll: { id: 4, labelEn: "L Shoulder Roll", labelId: "Bahu kiri roll" },
+  r_el: { id: 5, labelEn: "R Elbow", labelId: "Siku kanan" },
+  l_el: { id: 6, labelEn: "L Elbow", labelId: "Siku kiri" },
+  r_hip_yaw: { id: 7, labelEn: "R Hip Yaw", labelId: "Pinggul kanan yaw" },
+  l_hip_yaw: { id: 8, labelEn: "L Hip Yaw", labelId: "Pinggul kiri yaw" },
+  r_hip_roll: { id: 9, labelEn: "R Hip Roll", labelId: "Pinggul kanan roll" },
+  l_hip_roll: { id: 10, labelEn: "L Hip Roll", labelId: "Pinggul kiri roll" },
+  r_hip_pitch: { id: 11, labelEn: "R Hip Pitch", labelId: "Pinggul kanan pitch" },
+  l_hip_pitch: { id: 12, labelEn: "L Hip Pitch", labelId: "Pinggul kiri pitch" },
+  r_knee: { id: 13, labelEn: "R Knee", labelId: "Lutut kanan" },
+  l_knee: { id: 14, labelEn: "L Knee", labelId: "Lutut kiri" },
+  r_ank_pitch: { id: 15, labelEn: "R Ankle Pitch", labelId: "Pergelangan kaki kanan pitch" },
+  l_ank_pitch: { id: 16, labelEn: "L Ankle Pitch", labelId: "Pergelangan kaki kiri pitch" },
+  r_ank_roll: { id: 17, labelEn: "R Ankle Roll", labelId: "Pergelangan kaki kanan roll" },
+  l_ank_roll: { id: 18, labelEn: "L Ankle Roll", labelId: "Pergelangan kaki kiri roll" },
+  head_pan: { id: 19, labelEn: "Head Pan", labelId: "Kepala kiri-kanan" },
+  head_tilt: { id: 20, labelEn: "Head Tilt", labelId: "Kepala atas-bawah" },
 };
 
-const JOINT_LABELS = {
-  r_sho_pitch: "R Shoulder Pitch", l_sho_pitch: "L Shoulder Pitch",
-  r_sho_roll: "R Shoulder Roll", l_sho_roll: "L Shoulder Roll",
-  r_el: "R Elbow", l_el: "L Elbow",
-  r_hip_yaw: "R Hip Yaw", l_hip_yaw: "L Hip Yaw",
-  r_hip_roll: "R Hip Roll", l_hip_roll: "L Hip Roll",
-  r_hip_pitch: "R Hip Pitch", l_hip_pitch: "L Hip Pitch",
-  r_knee: "R Knee", l_knee: "L Knee",
-  r_ank_pitch: "R Ankle Pitch", l_ank_pitch: "L Ankle Pitch",
-  r_ank_roll: "R Ankle Roll", l_ank_roll: "L Ankle Roll",
-  head_pan: "Head Pan", head_tilt: "Head Tilt",
-};
+const JOINT_ID = Object.fromEntries(
+  Object.entries(JOINT_META).map(([name, meta]) => [name, meta.id])
+);
+const JOINT_LABELS = Object.fromEntries(
+  Object.entries(JOINT_META).map(([name, meta]) => [name, meta.labelEn])
+);
+const JOINT_LABELS_ID = Object.fromEntries(
+  Object.entries(JOINT_META).map(([name, meta]) => [name, meta.labelId])
+);
 
 const RAW_CENTER = 2048;
 const RAW_RANGE = 2048;
@@ -83,6 +97,7 @@ function normalizeRaw(value) {
   return null;
 }
 function formatJointLabel(name) { return JOINT_LABELS[name] || name; }
+function formatJointLabelId(name) { return JOINT_LABELS_ID[name] || name; }
 
 function lookupRawPosition(positions, name, idMap) {
   if (!positions) return undefined;
@@ -595,6 +610,56 @@ export default function ActionEditor({ isActive = true }) {
     setStatusError(false);
   };
 
+  const handleDeletePage = () => {
+    if (!activePage || editorDisabled) return;
+    const pageIndex = activePage.index;
+    const pageName = activePage.name || "Untitled";
+    if (!window.confirm(`Delete page ${pageIndex} (${pageName})?`)) return;
+    const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
+    const currentIdx = sortedPages.findIndex(p => p.index === pageIndex);
+    const nextPage = sortedPages[currentIdx + 1] || sortedPages[currentIdx - 1] || null;
+    updateYamlData(draft => {
+      if (!Array.isArray(draft.pages)) return;
+      draft.pages = draft.pages.filter(p => p.index !== pageIndex);
+    });
+    clearPageStepHistory(pageIndex);
+    setSelectedPageIndex(nextPage ? nextPage.index : null);
+    setSelectedStepIndex(null);
+    setPreviewPose(null);
+    setJointDrafts({});
+    setStatus(`Deleted page ${pageIndex}`);
+    setStatusError(false);
+  };
+
+  const handleDeleteStep = () => {
+    if (!activePage || selectedStepIndex === null || editorDisabled) return;
+    const steps = activePage.steps || [];
+    if (!steps.length) return;
+    const byIndex = steps.findIndex(s => Number(s.index) === Number(selectedStepIndex));
+    const removeIndex = Number.isInteger(byIndex) && byIndex >= 0 ? byIndex : selectedStepIndex;
+    if (removeIndex < 0 || removeIndex >= steps.length) return;
+    const stepLabel = steps[removeIndex]?.index ?? removeIndex;
+    if (!window.confirm(`Delete step ${stepLabel}?`)) return;
+    const remaining = steps.filter((_, idx) => idx !== removeIndex);
+    const nextSelected = remaining.length ? Math.min(removeIndex, remaining.length - 1) : null;
+    const nextStep = nextSelected !== null ? remaining[nextSelected] : null;
+    updateYamlData(draft => {
+      const p = draft.pages?.find(i => i.index === activePage.index);
+      if (!p?.steps) return;
+      const byIdx = p.steps.findIndex(s => Number(s.index) === Number(selectedStepIndex));
+      const removeAt = Number.isInteger(byIdx) && byIdx >= 0 ? byIdx : selectedStepIndex;
+      if (removeAt < 0 || removeAt >= p.steps.length) return;
+      p.steps.splice(removeAt, 1);
+      p.steps.forEach((step, idx) => { step.index = idx; });
+    });
+    clearPageStepHistory(activePage.index);
+    setSelectedStepIndex(nextSelected);
+    setPreviewPose(nextStep ? buildPose(nextStep.positions || {}, livePoseRef.current) : null);
+    setJointDrafts({});
+    setStatus(`Deleted step ${stepLabel}`);
+    setStatusError(false);
+  };
+
   const stepHistoryKey = (pi=selectedPageIndex, si=selectedStepIndex) => (pi !== null && si !== null) ? `${pi}:${si}` : null;
   const snapshotStep = (s) => ({ positions: cloneData(s?.positions||{}), time: s?.time??0, pause: s?.pause??0 });
   const pushStepHistory = (key, snap) => {
@@ -606,6 +671,17 @@ export default function ActionEditor({ isActive = true }) {
     if(h.undo.length > HISTORY_LIMIT) h.undo.shift();
     h.redo = [];
     historyRef.current[key] = h;
+    setHistoryTick(t => t+1);
+  };
+
+  const clearPageStepHistory = (pageIndex) => {
+    if (pageIndex === null || pageIndex === undefined) return;
+    const prefix = `${pageIndex}:`;
+    const next = {};
+    Object.entries(historyRef.current).forEach(([key, value]) => {
+      if (!key.startsWith(prefix)) next[key] = value;
+    });
+    historyRef.current = next;
     setHistoryTick(t => t+1);
   };
 
@@ -832,6 +908,14 @@ export default function ActionEditor({ isActive = true }) {
               >
                 <Plus size={12} /> Add Page
               </button>
+              <button
+                className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleDeletePage}
+                disabled={editorDisabled || !activePage}
+                title="Delete selected page"
+              >
+                <Trash2 size={12} /> Delete
+              </button>
               <button className="text-xs font-medium text-undip-blue hover:underline" onClick={() => { setPreviewPose(null); setSelectedStepIndex(null); }}>
                 Reset Live
               </button>
@@ -869,14 +953,24 @@ export default function ActionEditor({ isActive = true }) {
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                 Steps {activePage ? `(Page ${activePage.index})` : ""}
               </div>
-              <button
-                className="text-[10px] font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
-                onClick={handleAddStep}
-                disabled={editorDisabled || !activePage}
-                title="Insert step after current"
-              >
-                <Plus size={10} /> Add Step
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-[10px] font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                  onClick={handleAddStep}
+                  disabled={editorDisabled || !activePage}
+                  title="Insert step after current"
+                >
+                  <Plus size={10} /> Add Step
+                </button>
+                <button
+                  className="text-[10px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                  onClick={handleDeleteStep}
+                  disabled={editorDisabled || !activePage || selectedStepIndex === null}
+                  title="Delete selected step"
+                >
+                  <Trash2 size={10} /> Delete
+                </button>
+              </div>
             </div>
             {!activePage ? (
               <div className="text-center py-4 text-gray-400 text-xs">Select a page</div>
@@ -1035,12 +1129,15 @@ export default function ActionEditor({ isActive = true }) {
                     const deg = norm === null ? 0 : toDegrees(norm);
                     const key = jointDraftKey(name);
                     const draft = jointDrafts[key] ?? (norm===null ? "" : deg.toFixed(1));
+                    const displayId = JOINT_ID[name] ?? jointIdMap[name];
+                    const idText = displayId ? `ID ${displayId}` : "ID ?";
                     
                     return (
                       <div key={name} className={`grid grid-cols-12 items-center gap-2 p-2 rounded-lg border transition-all ${isOff ? 'bg-red-50 border-red-100 opacity-70' : 'bg-white border-gray-100 hover:border-gray-300'}`}>
                         <div className="col-span-12 sm:col-span-4 min-w-0 flex flex-col">
                           <span className="text-[10px] font-mono text-gray-400 truncate">{name}</span>
                           <span className="text-xs font-bold text-gray-700 truncate" title={formatJointLabel(name)}>{formatJointLabel(name)}</span>
+                          <span className="text-[10px] text-gray-500 truncate" title={formatJointLabelId(name)}>{idText} • {formatJointLabelId(name)}</span>
                         </div>
                         <input
                           type="range" min="-180" max="180" step="0.5"

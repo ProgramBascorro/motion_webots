@@ -15,6 +15,8 @@ import {
   Video,
   Wifi,
   X,
+  ScrollText,
+  BicepsFlexed
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
@@ -645,14 +647,14 @@ export default function App() {
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("action"); setSidebarOpen(false); }}
           >
-            <Activity size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
+            <BicepsFlexed size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
             <span>Action</span>
           </button>
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "logs" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("logs"); setSidebarOpen(false); }}
           >
-            <Terminal size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
+            <ScrollText size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
             <span>Logs</span>
           </button>
           <button
