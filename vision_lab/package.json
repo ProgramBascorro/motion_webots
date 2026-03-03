@@ -1,0 +1,14 @@
+{
+  "name": "vision-lab-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "dev:web": "pnpm --filter @vision-lab/web dev",
+    "build:web": "pnpm --filter @vision-lab/web build",
+    "lint:web": "pnpm --filter @vision-lab/web lint",
+    "typecheck:web": "pnpm --filter @vision-lab/web typecheck",
+    "dev:server": "cd apps/server && python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "test:server": "cd apps/server && python3 -m pytest"
+  }
+}

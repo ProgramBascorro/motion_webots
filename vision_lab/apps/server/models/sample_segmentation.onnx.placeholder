@@ -1,0 +1,1 @@
+Add a segmentation ONNX model here and point `onnx_segmentation.model_path` at it.

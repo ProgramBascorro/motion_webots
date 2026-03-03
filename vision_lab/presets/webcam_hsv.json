@@ -1,0 +1,39 @@
+{
+  "id": "preset-webcam-hsv",
+  "name": "Webcam HSV Threshold",
+  "version": "1.0",
+  "nodes": [
+    {
+      "id": "cam_1",
+      "type": "webcam_input",
+      "label": "Webcam Input",
+      "position": { "x": 40, "y": 80 },
+      "params": { "device_index": 0, "width": 1280, "height": 720 }
+    },
+    {
+      "id": "resize_1",
+      "type": "resize",
+      "label": "Resize",
+      "position": { "x": 280, "y": 80 },
+      "params": { "width": 640, "height": 640, "interpolation": "linear" }
+    },
+    {
+      "id": "hsv_1",
+      "type": "hsv_threshold",
+      "label": "HSV Threshold",
+      "position": { "x": 520, "y": 80 },
+      "params": {
+        "lower_h": 25,
+        "lower_s": 40,
+        "lower_v": 40,
+        "upper_h": 95,
+        "upper_s": 255,
+        "upper_v": 255
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "cam_1", "target": "resize_1" },
+    { "id": "e2", "source": "resize_1", "target": "hsv_1" }
+  ]
+}

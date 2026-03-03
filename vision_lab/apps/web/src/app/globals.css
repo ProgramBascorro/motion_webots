@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #08111f;
+  --bg-soft: #101c31;
+  --panel: rgba(15, 26, 44, 0.92);
+  --panel-strong: #132543;
+  --panel-border: rgba(123, 166, 255, 0.18);
+  --text: #edf3ff;
+  --muted: #8ca3c8;
+  --accent: #4fc3f7;
+  --accent-strong: #8be9fd;
+  --success: #65d6a6;
+  --warning: #f4b740;
+  --danger: #ff7d7d;
+}
+
+html,
+body {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(79, 195, 247, 0.16), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(101, 214, 166, 0.12), transparent 24%),
+    linear-gradient(180deg, #07101d 0%, #050a13 100%);
+  color: var(--text);
+}
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 18px 80px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.panel-strong {
+  background: linear-gradient(180deg, rgba(18, 36, 66, 0.95), rgba(10, 19, 34, 0.96));
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+.react-flow__attribution {
+  display: none;
+}

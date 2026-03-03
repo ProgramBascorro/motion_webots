@@ -1,0 +1,1 @@
+Add a detection ONNX model here and point `onnx_detection.model_path` at it.

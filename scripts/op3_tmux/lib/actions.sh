@@ -303,6 +303,7 @@ restart_component() {
     ball_localizer) pane="$(tmux_env_get @op3_pane_ball_localizer)" ;;
     action_editor) pane="$(tmux_env_get @op3_pane_action_editor)" ;;
     action_web) pane="$(tmux_env_get @op3_pane_action_web)" ;;
+    vision_lab) pane="$(tmux_env_get @op3_pane_vision_lab)" ;;
     demo) pane="$(tmux_env_get @op3_pane_demo)" ;;
     *) die "Unknown component for --restart: $comp" ;;
   esac
@@ -331,6 +332,7 @@ restart_component() {
     ball_localizer) wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")" ;;
     action_editor) wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")" ;;
     action_web) wrapped="$(wrap_cmd "$ACTION_WEB_CMD")" ;;
+    vision_lab) wrapped="$VISION_LAB_CMD" ;;
     demo) wrapped="$(wrap_cmd "$DEMO_CMD")" ;;
   esac
 

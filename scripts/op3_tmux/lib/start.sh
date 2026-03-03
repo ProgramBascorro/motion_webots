@@ -11,16 +11,27 @@ start_stack() {
   local with_ball_localizer="${10}"
   local with_action_editor="${11}"
   local with_action_web="${12}"
-  local with_demo="${13}"
-  local dry_run="${14}"
+  local with_vision_lab="${13}"
+  local with_demo="${14}"
+  local dry_run="${15}"
 
-  health_check "$with_webots"
+  local needs_ros_stack=0
+  if [[ "$with_webots" -eq 1 || "$with_manager" -eq 1 || "$with_offset_tuner" -eq 1 || "$with_teleop" -eq 1 || "$with_foxglove" -eq 1 || "$with_tools" -eq 1 || "$with_rqt" -eq 1 || "$with_yolo_vision" -eq 1 || "$with_localization" -eq 1 || "$with_ball_localizer" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 || "$with_demo" -eq 1 ]]; then
+    needs_ros_stack=1
+  fi
+
+  if [[ "$needs_ros_stack" -eq 1 ]]; then
+    health_check "$with_webots"
+  else
+    ensure_tmux_installed
+    auto_detect_shell_runner
+  fi
   if [[ "$with_manager" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 ]]; then
     ensure_action_file
   fi
 
   local webots_wrapped manager_wrapped offset_tuner_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
-  local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped
+  local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped vision_lab_wrapped
   local demo_wrapped demo_cmd
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
@@ -34,6 +45,7 @@ start_stack() {
   ball_localizer_wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")"
   action_editor_wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")"
   action_web_wrapped="$(wrap_cmd "$ACTION_WEB_CMD")"
+  vision_lab_wrapped="$VISION_LAB_CMD"
   demo_cmd="$DEMO_CMD"
   if [[ "$with_demo" -eq 1 && -n "${DEMO_MODE:-}" ]]; then
     local demo_wait_steps="${DEMO_WAIT_STEPS:-40}"
@@ -60,6 +72,7 @@ start_stack() {
     if [[ "$with_ball_localizer" -eq 1 ]]; then echo "${DIM}Pane (ball_localizer): $BALL_LOCALIZER_CMD${RST}"; fi
     if [[ "$with_action_editor" -eq 1 ]]; then echo "${DIM}Pane (action_editor): $ACTION_EDITOR_CMD${RST}"; fi
     if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (studio): $ACTION_WEB_CMD${RST}"; fi
+    if [[ "$with_vision_lab" -eq 1 ]]; then echo "${DIM}Pane (vision_lab): $VISION_LAB_CMD${RST}"; fi
     if [[ "$with_demo" -eq 1 ]]; then echo "${DIM}Pane (demo): $demo_cmd${RST}"; fi
     echo
     echo "${DIM}Delay between webots->manager: ${START_DELAY_SEC}s${RST}"
@@ -88,6 +101,7 @@ start_stack() {
   [[ "$with_ball_localizer" -eq 1 ]] && components+=(ball_localizer)
   [[ "$with_action_editor" -eq 1 ]] && components+=(action_editor)
   [[ "$with_action_web" -eq 1 ]] && components+=(action_web)
+  [[ "$with_vision_lab" -eq 1 ]] && components+=(vision_lab)
   [[ "$with_demo" -eq 1 ]] && components+=(demo)
 
   local count=${#components[@]}
@@ -165,6 +179,10 @@ start_stack() {
         tmux_send "$SESSION":main.$pane "$action_web_wrapped"
         tmux_env_set "@op3_pane_action_web" "$pane"
         ;;
+      vision_lab)
+        tmux_send "$SESSION":main.$pane "$vision_lab_wrapped"
+        tmux_env_set "@op3_pane_vision_lab" "$pane"
+        ;;
       demo)
         tmux_send "$SESSION":main.$pane "$demo_wrapped"
         tmux_env_set "@op3_pane_demo" "$pane"
@@ -183,6 +201,7 @@ start_stack() {
   tmux_env_set "@op3_with_ball_localizer" "$with_ball_localizer"
   tmux_env_set "@op3_with_action_editor" "$with_action_editor"
   tmux_env_set "@op3_with_action_web" "$with_action_web"
+  tmux_env_set "@op3_with_vision_lab" "$with_vision_lab"
   tmux_env_set "@op3_with_demo" "$with_demo"
   tmux_env_set "@op3_profile" "$PROFILE"
   tmux_env_set "@op3_layout" "$count"

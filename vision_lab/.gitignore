@@ -1,0 +1,11 @@
+.next/
+node_modules/
+.pnpm-store/
+.runtime/
+dist/
+coverage/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

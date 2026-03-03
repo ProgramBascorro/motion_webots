@@ -1,0 +1,48 @@
+{
+  "id": "preset-video-segmentation",
+  "name": "Video Segmentation",
+  "version": "1.0",
+  "nodes": [
+    {
+      "id": "video_1",
+      "type": "video_input",
+      "label": "Video Input",
+      "position": { "x": 40, "y": 80 },
+      "params": { "file_id": "", "loop": false }
+    },
+    {
+      "id": "resize_1",
+      "type": "resize",
+      "label": "Resize",
+      "position": { "x": 280, "y": 80 },
+      "params": { "width": 640, "height": 640, "interpolation": "linear" }
+    },
+    {
+      "id": "seg_1",
+      "type": "onnx_segmentation",
+      "label": "ONNX Segmentation",
+      "position": { "x": 520, "y": 80 },
+      "params": {
+        "model_path": "",
+        "input_width": 640,
+        "input_height": 640,
+        "mask_threshold": 0.5,
+        "palette": [0, 255, 0],
+        "use_mock": true
+      }
+    },
+    {
+      "id": "overlay_1",
+      "type": "mask_overlay",
+      "label": "Mask Overlay",
+      "position": { "x": 780, "y": 80 },
+      "params": { "alpha": 0.45, "color_map": "green" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "video_1", "target": "resize_1" },
+    { "id": "e2", "source": "resize_1", "target": "seg_1" },
+    { "id": "e3", "source": "resize_1", "target": "overlay_1" },
+    { "id": "e4", "source": "seg_1", "target": "overlay_1" }
+  ]
+}

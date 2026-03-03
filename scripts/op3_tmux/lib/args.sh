@@ -18,6 +18,7 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --demo-action${RST}   Start: webots + manager + demo (action)
   ${BOLD}./$(basename "$0") --studio${RST}        Start: webots + manager + bascorro studio
   ${BOLD}./$(basename "$0") --action-web${RST}    Alias for --studio
+  ${BOLD}./$(basename "$0") --vision-lab${RST}    Start: Vision Lab MVP (Next.js + FastAPI)
   ${BOLD}./$(basename "$0") --localization${RST}  Start: webots + manager + localization (+ rviz)
   ${BOLD}./$(basename "$0") --tools${RST}         Start: add quick ROS tools pane
   ${BOLD}./$(basename "$0") -u${RST}              Start: usual selection from ~/.config/op3-stack/usual.txt
@@ -54,8 +55,9 @@ ${BOLD}Options${RST}
   --demo-action        Enable demo stack and switch to action mode
   --studio             Enable bascorro studio UI (bridge + apply node + Vite)
   --action-web         Alias for --studio
+  --vision-lab         Enable Bascorro Studio Vision Lab (standalone MVP)
   --localization       Enable localization stack (soccer_localization + rviz)
-  --restart <comp>      comp: webots|manager|offset_tuner|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web|demo
+  --restart <comp>      comp: webots|manager|offset_tuner|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web|vision_lab|demo
   --doctor              Health check (deps + workspace)
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
@@ -72,6 +74,7 @@ ${BOLD}Defaults (env override)${RST}
   MANAGER: ${MANAGER_CMD}
   ACTION_EDITOR: ${ACTION_EDITOR_CMD}
   STUDIO: ${ACTION_WEB_CMD}
+  VISION_LAB: ${VISION_LAB_CMD}
   DEMO: ${DEMO_CMD}
   OFFSET_TUNER: ${OFFSET_TUNER_CMD}
   ACTION_FILE: ${ACTION_FILE_PATH}
@@ -84,6 +87,7 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_ACTION_EDITOR_CMD, OP3_ACTION_FILE, OP3_ACTION_FILE_SEED, OP3_ACTION_EDITOR_LOG, OP3_DEMO_CMD
   OP3_DEMO_MODE, OP3_DEMO_WAIT_STEP_SEC, OP3_DEMO_WAIT_STEPS
   OP3_STUDIO_CMD, OP3_ACTION_WEB_CMD
+  OP3_VISION_LAB_CMD, OP3_VISION_LAB_DIR, OP3_VISION_LAB_API_PORT, OP3_VISION_LAB_WEB_PORT
   OP3_SHELL_RUNNER (e.g. "zsh -lc" or "bash -lc")
   OP3_PREFER_ZSH (set 1 to prefer zsh + setup.zsh)
   OP3_PREFS_FILE (default: ~/.config/op3-stack/prefs.sh)
@@ -119,6 +123,7 @@ op3_tmux_dispatch() {
   WITH_OFFSET_TUNER=0
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
+  WITH_VISION_LAB=0
   WITH_DEMO=0
   DEMO_MODE=""
   DO_ATTACH=0
@@ -159,6 +164,7 @@ op3_tmux_dispatch() {
       --demo-vision) WITH_DEMO=1; DEMO_MODE="vision"; START_EXPLICIT=1; shift ;;
       --demo-action) WITH_DEMO=1; DEMO_MODE="action"; START_EXPLICIT=1; shift ;;
       --studio|--action-web) WITH_ACTION_WEB=1; START_EXPLICIT=1; shift ;;
+      --vision-lab) WITH_VISION_LAB=1; START_EXPLICIT=1; shift ;;
       --localization) WITH_LOCALIZATION=1; START_EXPLICIT=1; shift ;;
       --tools) WITH_TOOLS=1; START_EXPLICIT=1; shift ;;
     --usual|-u) DO_USUAL=1; shift ;;
@@ -210,5 +216,5 @@ op3_tmux_dispatch() {
     exit 0
   fi
 
-  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_OFFSET_TUNER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$WITH_DEMO" "$DRY_RUN"
+  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_OFFSET_TUNER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$WITH_VISION_LAB" "$WITH_DEMO" "$DRY_RUN"
 }

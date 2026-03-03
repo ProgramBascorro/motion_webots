@@ -1,0 +1,14 @@
+{
+  "name": "@vision-lab/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./graph-schema": "./src/graph-schema.ts",
+    "./node-types": "./src/node-types.ts",
+    "./presets": "./src/presets.ts",
+    "./websocket": "./src/websocket.ts",
+    "./validation": "./src/validation.ts"
+  }
+}

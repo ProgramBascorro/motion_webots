@@ -1,4 +1,4 @@
-COMPONENTS=(webots manager_sim manager_real offset_tuner demo teleop action_web rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager_sim manager_real offset_tuner demo teleop action_web vision_lab rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
 SELECTION_CANCELLED="__CANCEL__"
 MANAGER_MODE=""
@@ -13,6 +13,7 @@ component_label() {
     demo) echo "Demo" ;;
     teleop) echo "Teleop" ;;
     action_web) echo "Studio" ;;
+    vision_lab) echo "Vision Lab" ;;
     rqt_image_view) echo "RQT Image View" ;;
     yolo_vision) echo "YOLO Vision" ;;
     localization) echo "Localization" ;;
@@ -33,6 +34,7 @@ component_id() {
     "Demo") echo "demo" ;;
     "Teleop") echo "teleop" ;;
     "Studio") echo "action_web" ;;
+    "Vision Lab") echo "vision_lab" ;;
     "RQT Image View") echo "rqt_image_view" ;;
     "YOLO Vision") echo "yolo_vision" ;;
     "Localization") echo "localization" ;;
@@ -214,6 +216,7 @@ apply_selection_flags() {
   WITH_BALL_LOCALIZER=0
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
+  WITH_VISION_LAB=0
   WITH_DEMO=0
   WITH_OFFSET_TUNER=0
   MANAGER_MODE=""
@@ -247,6 +250,7 @@ apply_selection_flags() {
       ball_localizer) WITH_BALL_LOCALIZER=1 ;;
       action_editor) WITH_ACTION_EDITOR=1 ;;
       action_web) WITH_ACTION_WEB=1 ;;
+      vision_lab) WITH_VISION_LAB=1 ;;
     esac
   done
 }
@@ -263,7 +267,13 @@ resolve_selection() {
     if [[ "$WITH_OFFSET_TUNER" -eq 1 ]]; then
       selected+=(offset_tuner)
     else
-      selected+=(webots manager)
+      local needs_base_stack=0
+      if [[ "$WITH_TELEOP" -eq 1 || "$WITH_FOXGLOVE" -eq 1 || "$WITH_TOOLS" -eq 1 || "$WITH_YOLO_VISION" -eq 1 || "$WITH_LOCALIZATION" -eq 1 || "$WITH_BALL_LOCALIZER" -eq 1 || "$WITH_ACTION_EDITOR" -eq 1 || "$WITH_ACTION_WEB" -eq 1 || "$WITH_DEMO" -eq 1 ]]; then
+        needs_base_stack=1
+      fi
+      if [[ "$WITH_VISION_LAB" -eq 0 || "$needs_base_stack" -eq 1 ]]; then
+        selected+=(webots manager)
+      fi
       [[ "$WITH_DEMO" -eq 1 ]] && selected+=(demo)
       [[ "$WITH_TELEOP" -eq 1 ]] && selected+=(teleop)
       [[ "$WITH_FOXGLOVE" -eq 1 ]] && selected+=(foxglove)
@@ -273,6 +283,7 @@ resolve_selection() {
       [[ "$WITH_BALL_LOCALIZER" -eq 1 ]] && selected+=(ball_localizer)
       [[ "$WITH_ACTION_EDITOR" -eq 1 ]] && selected+=(action_editor)
       [[ "$WITH_ACTION_WEB" -eq 1 ]] && selected+=(action_web)
+      [[ "$WITH_VISION_LAB" -eq 1 ]] && selected+=(vision_lab)
     fi
   elif [[ "$use_usual" -eq 1 ]]; then
     mapfile -t selected < <(load_usual_selection)

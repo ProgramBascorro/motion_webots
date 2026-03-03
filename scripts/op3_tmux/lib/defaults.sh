@@ -46,6 +46,7 @@ ACTION_EDITOR_CMD="${OP3_ACTION_EDITOR_CMD:-bridge_log='${ACTION_EDITOR_LOG}'; b
 
 # Action web
 ACTION_WEB_CMD="${OP3_ACTION_WEB_CMD:-${OP3_STUDIO_CMD:-$WS/scripts/bascorro_studio.sh}}"
+VISION_LAB_CMD="${OP3_VISION_LAB_CMD:-$WS/scripts/vision_lab.sh}"
 
 # Demo
 DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo.launch.xml with_manager:=false}"
