@@ -29,15 +29,16 @@ class OPDemo
  public:
   enum Motion_Index
   {
-    InitPose = 1,
-    WalkingReady = 9,
-    GetUpFront = 122,
-    GetUpBack = 123,
-    RightKick = 121,
-    LeftKick = 120,
-    Ceremony = 27,
-    ForGrass = 20,
+    InitPose = 2,
+    WalkingReady = 8,
+    GetUpFront = 85,
+    GetUpBack = 86,
+    RightKick = 218, //32 inti  //218 regional //220 nasional // smpg kanan : 6 
+    LeftKick = 104, //104 inti //219 regional //221 nasional // smpg kiri : 7 
+    Ceremony = 27, //
+    ForGrass = 21,
   };
+
 
   OPDemo()
   : enable_(false)

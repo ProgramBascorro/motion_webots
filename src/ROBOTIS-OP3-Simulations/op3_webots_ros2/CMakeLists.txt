@@ -11,11 +11,9 @@ find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(webots_ros2_driver REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(tf2 REQUIRED)
-
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
@@ -39,6 +37,7 @@ endif(NOT ${YAML_CPP_VERSION} VERSION_LESS "0.5")
 
 include_directories(
   include
+  ../gc_bridge_webots/include
   ${rclcpp_INCLUDE_DIRS}
   ${YAML_CPP_INCLUDE_DIRS}
 )
@@ -49,6 +48,11 @@ add_executable(op3_extern_controller
   src/extern_controller_main.cpp
 )
 
+add_executable(op3_gc_bridge
+  ../gc_bridge_webots/src/gc_bridge.cpp
+  ../gc_bridge_webots/src/gc_bridge_main.cpp
+)
+
 target_link_libraries(op3_extern_controller ${YAML_CPP_LIBRARIES})
 
 ament_target_dependencies(op3_extern_controller
@@ -56,17 +60,25 @@ ament_target_dependencies(op3_extern_controller
   rclcpp
   webots_ros2_driver
   nav_msgs
-  tf2_ros
-  tf2
+)
+
+ament_target_dependencies(op3_gc_bridge
+  rclcpp
+  std_msgs
 )
 
 install(TARGETS
   op3_extern_controller
+  op3_gc_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
+)
+
+install(DIRECTORY ../gc_bridge_webots/include/gc_bridge_webots
+  DESTINATION include/
 )
 
 install(DIRECTORY

@@ -13,7 +13,7 @@ offset:
   r_ank_pitch: 0
   r_ank_roll: 0
   r_el: 0
-  r_hip_pitch: 0
+  r_hip_pitch: -0.008727
   r_hip_roll: 0
   r_hip_yaw: 0
   r_knee: 0
