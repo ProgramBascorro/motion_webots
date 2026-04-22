@@ -8,7 +8,7 @@ KEY FIXES:
 4. No conflicting publishers
 5. ADDED: Particle cloud publishing rate for RViz visualization
 """
-# launch file 4
+# launch file 5
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -39,7 +39,7 @@ def generate_launch_description():
     # Field Line Detector - OPTIMIZED PARAMETERS
     detector_node = Node(
         package='soccer_object_localization',
-        executable='detector_fieldline_hybrid',
+        executable='detector_fieldline_enhanced',
         name='detector_fieldline',
         output='screen',
         parameters=[
@@ -47,14 +47,17 @@ def generate_launch_description():
             {
                 'use_dynamic_tf': False,
                 'detection.white_threshold': LaunchConfiguration('white_threshold'),
-                'detection.min_line_length': 15,  # Shorter segments
-                'detection.max_line_gap': 15,      # Bridge gaps
-                'point_cloud.spacing': 10,         # Denser (2x)
+                'detection.roi_top_cut': 0.35,         # DOWN from 0.45 ✓✓✓ CRITICAL!
+                'detection.roi_bottom_cut': 0.08,      # DOWN from 0.10 ✓
+                'detection.min_line_length': 15,     # Keep
+                'detection.max_line_gap': 25,        # INCREASE from 10
+                'detection.canny_low': 60,           # NEW
+                'detection.canny_high': 180,         # NEW
+                'detection.hough_threshold': 60,     # NEW
+                'detection.use_enhanced': True,      # NEW: enable enhanced
+                'point_cloud.spacing': 12,           # Keep (denser sampling)
                 'point_cloud.max_distance': 5.0,
-                'point_cloud.min_points': 3,       # Lower threshold
-                'camera.focal_length': 790.38,
-                'camera.height': 0.48,
-                'camera.tilt': -0.3491,
+                # ... other params
             }
         ],
         remappings=[

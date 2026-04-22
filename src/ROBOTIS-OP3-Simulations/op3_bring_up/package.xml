@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>op3_bring_up</name>
+  <version>0.1.0</version>
+  <description>
+    Master bringup package untuk robot OP3.
+    Mengelola urutan startup Webots, op3_manager, dan op3_gui_demo.
+  </description>
+  <maintainer email="your@email.com">Muhammad Miftah</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>op3_webots_ros2</exec_depend>
+  <exec_depend>op3_manager</exec_depend>
+  <exec_depend>op3_gui_demo</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

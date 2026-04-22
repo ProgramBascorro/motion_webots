@@ -12,7 +12,7 @@ def generate_launch_description():
         default_value='8',
         description='Control cycle in milliseconds'
     )
-    
+
     use_dummy_data_arg = DeclareLaunchArgument(
         'use_dummy_data',
         default_value='false',

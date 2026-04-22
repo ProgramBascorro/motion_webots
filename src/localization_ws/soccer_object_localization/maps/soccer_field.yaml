@@ -1,6 +1,9 @@
-image: soccer_field.pgm
+# VERSION 2: Field centered at origin (0,0) - RECOMMENDED
+# Coordinates: Field from (-4.5,-3) to (4.5,3)
+# Center of field at (0,0)
+image: soccer_field_kidsize.pgm
 resolution: 0.02
-origin: [-3.000, -4.500, 0.0]
+origin: [-5.5, -4.0, 0.0]
 occupied_thresh: 0.65
 free_thresh: 0.196
 negate: 0

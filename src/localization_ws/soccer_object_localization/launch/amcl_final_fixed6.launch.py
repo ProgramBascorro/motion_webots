@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-FINAL CORRECTED: Complete Localization with Particle Cloud Fix
+FINAL CORRECTED: Complete Localization with Filtered Dynamic Camera
 KEY FIXES:
-1. base_frame_id = cam_link (matches scan frame!)
-2. Optimized detector parameters (spacing=10, min_line_length=15)
-3. Uses simple_pc2scan (proven working)
-4. No conflicting publishers
-5. ADDED: Particle cloud publishing rate for RViz visualization
+1. FilteredDynamicCameraPose with proper smoothing parameters
+2. Frame names configured correctly
+3. AMCL: base_frame_id = base_link (NOT cam_link!)
+4. AMCL: explicit scan_topic = field_scan
+5. Optimized detector parameters
+6. Particle cloud converter included
 """
-# launch file 4
+
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -24,7 +25,7 @@ def generate_launch_description():
     
     white_threshold_arg = DeclareLaunchArgument(
         'white_threshold',
-        default_value='170',
+        default_value='165',
         description='White detection threshold'
     )
     
@@ -36,25 +37,57 @@ def generate_launch_description():
         output='screen'
     )
     
-    # Field Line Detector - OPTIMIZED PARAMETERS
+    # Field Line Detector - FILTERED DYNAMIC MODE
     detector_node = Node(
         package='soccer_object_localization',
-        executable='detector_fieldline_hybrid',
+        executable='detector_fieldline_enhanced2',
         name='detector_fieldline',
         output='screen',
         parameters=[
             config_file,
             {
+                # ===== DYNAMIC TF MODE (for moving camera) =====
                 'use_dynamic_tf': False,
+                
+                # ===== FRAME NAMES (CRITICAL!) =====
+                'frames.camera': 'cam_link',
+                'frames.base': 'base_link',
+                'frames.world': 'odom',
+                
+                # ===== SMOOTHING PARAMETERS (prevents jitter!) =====
+                'camera.position_alpha': 0.7,    # Position smoothing
+                'camera.rotation_alpha': 0.8,    # Rotation smoothing (yaw stability!)
+                
+                # ===== DETECTION PARAMETERS =====
                 'detection.white_threshold': LaunchConfiguration('white_threshold'),
-                'detection.min_line_length': 15,  # Shorter segments
-                'detection.max_line_gap': 15,      # Bridge gaps
-                'point_cloud.spacing': 10,         # Denser (2x)
-                'point_cloud.max_distance': 5.0,
-                'point_cloud.min_points': 3,       # Lower threshold
-                'camera.focal_length': 790.38,
-                'camera.height': 0.48,
-                'camera.tilt': -0.3491,
+                'detection.use_enhanced': True,
+                
+                # ROI (optimized for all field lines)
+                'detection.roi_top_cut': 0.35,        # Keeps goal line visible
+                'detection.roi_bottom_cut': 0.08,     # Keeps sidelines
+                
+                # Hough parameters (tuned)
+                'detection.min_line_length': 15,
+                'detection.max_line_gap': 25,
+                'detection.canny_low': 60,
+                'detection.canny_high': 180,
+                'detection.hough_threshold': 60,
+                'detection.line_thickness': 2,
+                
+                # Grass removal
+                'detection.remove_grass': True,
+                'detection.grass_h_low': 35,
+                'detection.grass_h_high': 85,
+                'detection.grass_s_low': 40,
+                
+                # ===== POINT CLOUD PARAMETERS =====
+                'point_cloud.spacing': 12,           # Dense sampling
+                'point_cloud.max_distance': 5.5,
+                'point_cloud.min_points': 5,
+                
+                # ===== PUBLISHING =====
+                'publish.debug_image': True,
+                'publish.point_cloud': True,
             }
         ],
         remappings=[
@@ -63,7 +96,7 @@ def generate_launch_description():
         ]
     )
     
-    # Simple PointCloud to LaserScan Converter (PROVEN WORKING)
+    # Simple PointCloud to LaserScan Converter
     simple_pc2scan_node = Node(
         package='soccer_object_localization',
         executable='simple_pc2scan',
@@ -106,28 +139,28 @@ def generate_launch_description():
         }]
     )
     
-    # AMCL - CORRECT CONFIGURATION WITH PARTICLE PUBLISHING
+    # AMCL - CORRECTED CONFIGURATION
     amcl_node = Node(
         package='nav2_amcl',
         executable='amcl',
         name='amcl',
         output='screen',
-        remappings=[
-            ('scan', '/field_scan'),
-        ],
         parameters=[{
-            # Frame IDs - cam_link to match scan!
+            # ===== FRAME IDS (CRITICAL FIX!) =====
             'odom_frame_id': 'odom',
-            'base_frame_id': 'cam_link',  # MUST match scan frame!
+            'base_frame_id': 'base_link',      # FIXED: was cam_link!
             'global_frame_id': 'map',
             
-            # Particle filter
+            # ===== SCAN TOPIC (EXPLICIT!) =====
+            'scan_topic': 'field_scan',        # ADDED: explicit topic name
+            
+            # ===== PARTICLE FILTER =====
             'min_particles': 1000,
             'max_particles': 3000,
             'recovery_alpha_slow': 0.001,
             'recovery_alpha_fast': 0.1,
             
-            # Motion model - ignore odometry
+            # ===== MOTION MODEL (ignore odometry) =====
             'robot_model_type': 'nav2_amcl::DifferentialMotionModel',
             'alpha1': 0.000001,
             'alpha2': 0.000001,
@@ -135,12 +168,12 @@ def generate_launch_description():
             'alpha4': 0.000001,
             'alpha5': 0.000001,
             
-            # Update thresholds - VERY SENSITIVE
-            'update_min_d': 0.01,  # 1cm
-            'update_min_a': 0.01,  # 0.5°
+            # ===== UPDATE THRESHOLDS =====
+            'update_min_d': 0.01,
+            'update_min_a': 0.01,
             'resample_interval': 1,
             
-            # Laser model - forgiving
+            # ===== LASER MODEL =====
             'laser_model_type': 'likelihood_field',
             'laser_likelihood_max_dist': 0.5,
             'laser_max_range': 5.0,
@@ -150,25 +183,21 @@ def generate_launch_description():
             'laser_z_rand': 0.5,
             'laser_sigma_hit': 0.2,
             
-            # Initial pose
+            # ===== INITIAL POSE =====
             'set_initial_pose': True,
             'initial_pose.x': 0.0,
             'initial_pose.y': 0.0,
             'initial_pose.z': 0.0,
             'initial_pose.yaw': 0.0,
             
-            # Transform
+            # ===== TRANSFORM =====
             'transform_tolerance': 1.0,
             'tf_broadcast': True,
             'always_reset_initial_pose': False,
             'first_map_only': False,
             
-            # ===== PARTICLE CLOUD PUBLISHING (NEW!) =====
-            # Enable particle cloud publishing at reasonable rate
-            'save_pose_rate': 2.0,  # Hz - pose saving rate
-            
-            # Note: Nav2 AMCL publishes ParticleCloud by default
-            # We'll use converter node to make it RViz-compatible
+            # ===== PARTICLE CLOUD PUBLISHING =====
+            'save_pose_rate': 2.0,
         }]
     )
     
@@ -184,12 +213,25 @@ def generate_launch_description():
         }]
     )
     
-    # ===== PARTICLE CLOUD CONVERTER (NEW!) =====
-    # Converts nav2_msgs/ParticleCloud → geometry_msgs/PoseArray for RViz
+    # Particle Cloud Converter (for RViz visualization)
     particle_converter_node = Node(
         package='soccer_object_localization',
         executable='particle_converter',
         name='particle_converter',
+        output='screen',
+    )
+
+    gt_odom_to_amcl_node = Node(
+        package='gt_localization',
+        executable='gt_odom_to_amcl',
+        name='gt_odom_to_amcl',
+        output='screen',
+    )
+
+    gt_odom_node = Node(
+        package='gt_localization',
+        executable='gt_odom_node',
+        name='gt_odom_node',
         output='screen',
     )
     
@@ -202,5 +244,7 @@ def generate_launch_description():
         lifecycle_manager_map,
         amcl_node,
         lifecycle_manager_amcl,
-        particle_converter_node,  # Add converter to launch
+        particle_converter_node,
+        gt_odom_to_amcl_node,
+        gt_odom_node,
     ])
