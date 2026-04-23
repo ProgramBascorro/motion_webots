@@ -1,8 +1,12 @@
-COMPONENTS=(webots manager_sim manager_real offset_tuner demo teleop action_web vision_lab rqt_image_view yolo_vision localization ball_localizer action_editor foxglove tools)
+COMPONENTS=(webots manager_sim manager_real offset_tuner demo teleop action_web vision_lab rqt_image_view yolo_vision localization ball_head_tracking ball_localizer action_editor foxglove tools)
 MENU_ACTION=""
 SELECTION_CANCELLED="__CANCEL__"
 MANAGER_MODE=""
 MANAGER_CONFLICT=0
+
+demo_launches_manager() {
+  [[ "${DEMO_CMD:-}" != *"with_manager:=false"* ]]
+}
 
 component_label() {
   case "$1" in
@@ -17,6 +21,7 @@ component_label() {
     rqt_image_view) echo "RQT Image View" ;;
     yolo_vision) echo "YOLO Vision" ;;
     localization) echo "Localization" ;;
+    ball_head_tracking) echo "Ball Head Tracking" ;;
     ball_localizer) echo "Ball Localizer" ;;
     action_editor) echo "Action Editor" ;;
     foxglove) echo "Foxglove" ;;
@@ -38,6 +43,7 @@ component_id() {
     "RQT Image View") echo "rqt_image_view" ;;
     "YOLO Vision") echo "yolo_vision" ;;
     "Localization") echo "localization" ;;
+    "Ball Head Tracking") echo "ball_head_tracking" ;;
     "Ball Localizer") echo "ball_localizer" ;;
     "Action Editor") echo "action_editor" ;;
     "Foxglove") echo "foxglove" ;;
@@ -189,15 +195,21 @@ validate_selection() {
   local has_manager=0
   local has_teleop=0
   local has_foxglove=0
+  local has_demo=0
 
   local item
   for item in "$@"; do
     case "$item" in
       manager|manager_sim|manager_real) has_manager=1 ;;
+      demo) has_demo=1 ;;
       teleop) has_teleop=1 ;;
       foxglove) has_foxglove=1 ;;
     esac
   done
+
+  if [[ "$has_demo" -eq 1 ]] && demo_launches_manager; then
+    has_manager=1
+  fi
 
   if [[ ("$has_teleop" -eq 1 || "$has_foxglove" -eq 1) && "$has_manager" -eq 0 ]]; then
     echo "${YLW}Warning:${RST} teleop/foxglove selected without manager; proceeding anyway."
@@ -213,6 +225,7 @@ apply_selection_flags() {
   WITH_RQT=0
   WITH_YOLO_VISION=0
   WITH_LOCALIZATION=0
+  WITH_BALL_HEAD_TRACKING=0
   WITH_BALL_LOCALIZER=0
   WITH_ACTION_EDITOR=0
   WITH_ACTION_WEB=0
@@ -247,6 +260,7 @@ apply_selection_flags() {
       rqt_image_view) WITH_RQT=1 ;;
       yolo_vision) WITH_YOLO_VISION=1 ;;
       localization) WITH_LOCALIZATION=1 ;;
+      ball_head_tracking) WITH_BALL_HEAD_TRACKING=1 ;;
       ball_localizer) WITH_BALL_LOCALIZER=1 ;;
       action_editor) WITH_ACTION_EDITOR=1 ;;
       action_web) WITH_ACTION_WEB=1 ;;
@@ -268,10 +282,15 @@ resolve_selection() {
       selected+=(offset_tuner)
     else
       local needs_base_stack=0
-      if [[ "$WITH_TELEOP" -eq 1 || "$WITH_FOXGLOVE" -eq 1 || "$WITH_TOOLS" -eq 1 || "$WITH_YOLO_VISION" -eq 1 || "$WITH_LOCALIZATION" -eq 1 || "$WITH_BALL_LOCALIZER" -eq 1 || "$WITH_ACTION_EDITOR" -eq 1 || "$WITH_ACTION_WEB" -eq 1 || "$WITH_DEMO" -eq 1 ]]; then
+      if [[ "$WITH_TELEOP" -eq 1 || "$WITH_FOXGLOVE" -eq 1 || "$WITH_TOOLS" -eq 1 || "$WITH_YOLO_VISION" -eq 1 || "$WITH_LOCALIZATION" -eq 1 || "$WITH_BALL_HEAD_TRACKING" -eq 1 || "$WITH_BALL_LOCALIZER" -eq 1 || "$WITH_ACTION_EDITOR" -eq 1 || "$WITH_ACTION_WEB" -eq 1 ]]; then
         needs_base_stack=1
       fi
-      if [[ "$WITH_VISION_LAB" -eq 0 || "$needs_base_stack" -eq 1 ]]; then
+
+      if [[ "$WITH_DEMO" -eq 1 ]]; then
+        if [[ "$needs_base_stack" -eq 1 ]]; then
+          selected+=(webots)
+        fi
+      elif [[ "$WITH_VISION_LAB" -eq 0 || "$needs_base_stack" -eq 1 ]]; then
         selected+=(webots manager)
       fi
       [[ "$WITH_DEMO" -eq 1 ]] && selected+=(demo)
@@ -280,6 +299,7 @@ resolve_selection() {
       [[ "$WITH_TOOLS" -eq 1 ]] && selected+=(tools)
       [[ "$WITH_YOLO_VISION" -eq 1 ]] && selected+=(yolo_vision)
       [[ "$WITH_LOCALIZATION" -eq 1 ]] && selected+=(localization)
+      [[ "$WITH_BALL_HEAD_TRACKING" -eq 1 ]] && selected+=(ball_head_tracking)
       [[ "$WITH_BALL_LOCALIZER" -eq 1 ]] && selected+=(ball_localizer)
       [[ "$WITH_ACTION_EDITOR" -eq 1 ]] && selected+=(action_editor)
       [[ "$WITH_ACTION_WEB" -eq 1 ]] && selected+=(action_web)
@@ -314,15 +334,20 @@ resolve_selection() {
   fi
 
   local has_demo=0
-  local has_manager=0
   for item in "${selected[@]}"; do
     case "$item" in
       demo) has_demo=1 ;;
-      manager|manager_sim|manager_real) has_manager=1 ;;
     esac
   done
-  if [[ "$has_demo" -eq 1 && "$has_manager" -eq 0 ]]; then
-    selected+=(manager)
+  if [[ "$has_demo" -eq 1 ]] && demo_launches_manager; then
+    local -a filtered=()
+    for item in "${selected[@]}"; do
+      case "$item" in
+        manager|manager_sim|manager_real) ;;
+        *) filtered+=("$item") ;;
+      esac
+    done
+    selected=("${filtered[@]}")
   fi
 
   validate_selection "${selected[@]}"

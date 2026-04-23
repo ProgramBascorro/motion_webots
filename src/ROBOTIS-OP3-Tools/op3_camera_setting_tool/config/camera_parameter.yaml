@@ -5,9 +5,9 @@
     saturation: 128
     sharpness: 128
     gain: 0
-    focus_automatic_continuous: false
+    focus_automatic_continuous: true
     focus_absolute: 0
-    auto_exposure: 1
+    auto_exposure: 3
     exposure_time_absolute: 250
-    white_balance_automatic: false
+    white_balance_automatic: true
     white_balance_temperature: 4000

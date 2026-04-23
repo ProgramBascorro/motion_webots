@@ -55,6 +55,7 @@ public:
   void stopTracking();
 
   void setUsingHeadScan(bool use_scan);
+  void setUsingHeadControl(bool use_head_control);
   void goInit();
 
   double getPanOfBall()
@@ -106,6 +107,7 @@ protected:
 
   int tracking_status_;
   bool use_head_scan_;
+  bool use_head_control_;
   int count_not_found_;
   bool on_tracking_;
   double current_ball_pan_, current_ball_tilt_;

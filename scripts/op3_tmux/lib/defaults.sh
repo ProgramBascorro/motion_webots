@@ -33,6 +33,7 @@ RQT_CMD="${OP3_RQT_CMD:-ros2 run rqt_image_view rqt_image_view}"
 # Vision/localization stack
 YOLO_VISION_CMD="${OP3_YOLO_VISION_CMD:-ros2 launch op3_yolo_vision yolo.launch.py}"
 LOCALIZATION_CMD="${OP3_LOCALIZATION_CMD:-ros2 launch soccer_localization localization.launch.py use_rviz:=false}"
+BALL_HEAD_TRACKING_CMD="${OP3_BALL_HEAD_TRACKING_CMD:-ros2 launch op3_ball_localization yolo_scan_only.launch.py}"
 BALL_LOCALIZER_CMD="${OP3_BALL_LOCALIZER_CMD:-ros2 launch op3_ball_localization ball_localizer.launch.py}"
 
 # Offset tuner
@@ -49,7 +50,7 @@ ACTION_WEB_CMD="${OP3_ACTION_WEB_CMD:-${OP3_STUDIO_CMD:-$WS/scripts/bascorro_stu
 VISION_LAB_CMD="${OP3_VISION_LAB_CMD:-$WS/scripts/vision_lab.sh}"
 
 # Demo
-DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo.launch.xml with_manager:=false}"
+DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo_yolo.launch.xml}"
 DEMO_MODE="${OP3_DEMO_MODE:-}"
 DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-0.5}"
 DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-40}"

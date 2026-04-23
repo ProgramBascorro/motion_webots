@@ -10,21 +10,39 @@ import {
   LayoutDashboard,
   Menu,
   Settings,
+  SlidersHorizontal,
   StopCircle,
   Terminal,
   Video,
   Wifi,
   X,
   ScrollText,
-  BicepsFlexed
+  BicepsFlexed,
+  Footprints,
+  Gamepad2,
+  Info,
+  Play,
+  RefreshCw,
+  Save,
+  Send,
+  Square,
+  Trash2
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
+import {
+  computeDefaultRosbridgeUrl,
+  normalizeRosbridgeUrl,
+  rewriteLoopbackToCurrentHost,
+} from "./net/rosbridge.js";
 
-const DEFAULT_ROSBRIDGE =
-  import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
+const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
+const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
+const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
+const TELEOP_COMMAND_TOPIC = "/op3_joy_teleop/command";
+const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
 const DEFAULT_OVERLAY_TOPIC =
   import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
 
@@ -40,6 +58,312 @@ const YOLO_PARAM_KEYS = [
   "goalpost_confidence_threshold",
   "robot_confidence_threshold",
 ];
+
+const WALKING_DEFAULT_PARAMS = {
+  init_x_offset: -0.015,
+  init_y_offset: 0.015,
+  init_z_offset: 0.075,
+  init_roll_offset: 0,
+  init_pitch_offset: 0.069813,
+  init_yaw_offset: 0,
+  period_time: 0.78,
+  dsp_ratio: 0.3,
+  step_fb_ratio: 0.25,
+  x_move_amplitude: 0,
+  y_move_amplitude: 0,
+  z_move_amplitude: 0.033,
+  angle_move_amplitude: 0,
+  move_aim_on: false,
+  balance_enable: true,
+  balance_hip_roll_gain: 0.35,
+  balance_knee_gain: 0.4,
+  balance_ankle_roll_gain: 0.7,
+  balance_ankle_pitch_gain: 0.9,
+  y_swap_amplitude: 0.002,
+  z_swap_amplitude: 0.006,
+  arm_swing_gain: 0.2,
+  pelvis_offset: 0.008727,
+  hip_pitch_offset: 0.139626,
+  p_gain: 0,
+  i_gain: 0,
+  d_gain: 0,
+};
+
+const WALKING_PARAM_HELP = {
+  init_x_offset: {
+    artinya: "Offset posisi badan maju-mundur saat robot masuk posture walking.",
+    fungsi: "Menggeser titik awal badan terhadap kaki supaya center of mass tidak terlalu maju atau mundur.",
+    tuning: "Ubah kecil-kecil sekitar 0.001 m. Jika robot cenderung jatuh ke depan, coba lebih negatif; jika ke belakang, coba lebih positif.",
+    risk: "Terlalu besar bisa bikin lutut/ankle bekerja keras dan robot langsung condong."
+  },
+  init_y_offset: {
+    artinya: "Offset posisi badan kiri-kanan saat walking.",
+    fungsi: "Memberi bias berat badan ke salah satu sisi untuk kompensasi mekanik atau offset servo.",
+    tuning: "Pakai untuk koreksi robot yang selalu miring ke kiri/kanan. Naikkan atau turunkan 0.001 m per test.",
+    risk: "Bias terlalu jauh bikin satu kaki lebih berat dan langkah jadi pincang."
+  },
+  init_z_offset: {
+    artinya: "Tinggi badan dasar saat gait walking dihitung.",
+    fungsi: "Menentukan seberapa jongkok/tinggi postur robot ketika berjalan.",
+    tuning: "Lebih rendah biasanya lebih stabil tapi servo lebih berat. Lebih tinggi terasa ringan tapi mudah goyang.",
+    risk: "Terlalu rendah bisa membebani lutut; terlalu tinggi bisa membuat kaki kehilangan clearance."
+  },
+  init_roll_offset: {
+    artinya: "Offset sudut roll badan pada posture awal walking.",
+    fungsi: "Memiringkan badan sedikit ke kiri/kanan untuk kompensasi mounting atau offset mekanik.",
+    tuning: "Biarkan 0 kecuali robot selalu miring. Ubah sangat kecil, misalnya 0.001 rad.",
+    risk: "Roll offset salah arah bisa memperparah jatuh samping."
+  },
+  init_pitch_offset: {
+    artinya: "Offset sudut pitch badan pada posture awal walking.",
+    fungsi: "Mengatur bias condong depan-belakang badan sebelum langkah berjalan.",
+    tuning: "Jika jatuh ke depan, kurangi sedikit. Jika jatuh ke belakang, tambah sedikit.",
+    risk: "Pitch sangat sensitif; perubahan besar bisa langsung membuat robot tersungkur."
+  },
+  init_yaw_offset: {
+    artinya: "Offset sudut yaw badan pada posture awal walking.",
+    fungsi: "Memberi bias putaran badan terhadap kaki, biasanya untuk kompensasi mekanik.",
+    tuning: "Biasanya tetap 0. Ubah hanya jika robot punya twist tetap saat berdiri/jalan.",
+    risk: "Yaw offset dapat membuat langkah tidak simetris."
+  },
+  period_time: {
+    artinya: "Durasi satu siklus langkah dalam detik.",
+    fungsi: "Mengatur cepat-lambat gait. Nilai besar berarti langkah lebih lambat dan biasanya lebih aman.",
+    tuning: "Mulai dari 0.85 untuk test aman, lalu turun perlahan ke 0.78 atau 0.70 kalau sudah stabil.",
+    risk: "Terlalu kecil membuat langkah agresif dan robot mudah jatuh."
+  },
+  dsp_ratio: {
+    artinya: "Rasio double support phase, yaitu fase dua kaki sama-sama menyentuh lantai.",
+    fungsi: "Menentukan berapa lama robot berada di fase paling stabil dalam setiap langkah.",
+    tuning: "Naikkan untuk stabilitas, turunkan untuk langkah lebih dinamis. Range aman awal sekitar 0.30-0.35.",
+    risk: "Terlalu kecil bisa kehilangan balance; terlalu besar membuat jalan kaku."
+  },
+  step_fb_ratio: {
+    artinya: "Rasio timing gerakan kaki maju-mundur di dalam siklus langkah.",
+    fungsi: "Mengatur pembagian fase ayunan kaki forward/backward.",
+    tuning: "Biasanya jangan disentuh dulu. Pakai default 0.25 sampai gait dasar sudah stabil.",
+    risk: "Timing yang salah bisa membuat kaki nyeret atau hentakan langkah."
+  },
+  x_move_amplitude: {
+    artinya: "Besar langkah maju-mundur per siklus.",
+    fungsi: "Ini command utama untuk robot bergerak maju atau mundur.",
+    tuning: "Test awal gunakan 0.003 sampai 0.005 m. Naikkan pelan setelah robot stabil.",
+    risk: "Nilai terlalu besar adalah penyebab paling umum robot jatuh saat mulai jalan."
+  },
+  y_move_amplitude: {
+    artinya: "Besar langkah geser kiri-kanan.",
+    fungsi: "Dipakai untuk strafing atau koreksi lateral.",
+    tuning: "Untuk test awal biarkan 0. Pakai nilai kecil jika perlu geser samping.",
+    risk: "Gerak lateral lebih sulit dari maju; jangan agresif di robot asli."
+  },
+  z_move_amplitude: {
+    artinya: "Tinggi kaki diangkat saat melangkah, sering disebut foot height.",
+    fungsi: "Membantu kaki tidak nyeret lantai atau rumput.",
+    tuning: "Jika kaki nyeret, naikkan sedikit. Jika badan goyang, turunkan sedikit.",
+    risk: "Kaki terlalu tinggi membuat robot memantul; terlalu rendah membuat ujung kaki tersangkut."
+  },
+  angle_move_amplitude: {
+    artinya: "Besar putaran yaw per langkah.",
+    fungsi: "Dipakai untuk robot belok kiri/kanan saat walking.",
+    tuning: "Mulai kecil, misalnya 0.05 rad. Naikkan hanya kalau belok terlalu lambat.",
+    risk: "Turn besar bisa membuat kaki silang dan balance hilang."
+  },
+  move_aim_on: {
+    artinya: "Flag mode aim/move pada message walking.",
+    fungsi: "Disediakan oleh WalkingParam untuk mode gerak tertentu, tapi pada setup ini biasanya tidak perlu aktif.",
+    tuning: "Biarkan off kecuali kamu tahu module yang dipakai membutuhkan flag ini.",
+    risk: "Mengaktifkan tanpa kebutuhan bisa membuat perilaku sulit dibaca saat tuning."
+  },
+  balance_enable: {
+    artinya: "Mengaktifkan koreksi balance dari feedback gyro/IMU.",
+    fungsi: "Walking module memakai gyro untuk koreksi hip, knee, dan ankle saat robot goyang.",
+    tuning: "Untuk robot asli biasanya on. Untuk membandingkan efek gain, boleh off sebentar sambil robot dipegang.",
+    risk: "Balance off di hardware bisa membuat robot lebih mudah jatuh."
+  },
+  balance_hip_roll_gain: {
+    artinya: "Gain koreksi roll di joint hip.",
+    fungsi: "Membantu mengoreksi miring kiri-kanan lewat panggul.",
+    tuning: "Naikkan sedikit jika robot lambat melawan miring samping. Turunkan jika pinggul bergetar.",
+    risk: "Gain terlalu besar bisa membuat osilasi kiri-kanan."
+  },
+  balance_knee_gain: {
+    artinya: "Gain koreksi pitch lewat lutut.",
+    fungsi: "Membantu robot menahan goyangan depan-belakang dengan bending knee.",
+    tuning: "Naikkan sedikit jika koreksi depan-belakang kurang. Turunkan jika lutut terlihat pumping.",
+    risk: "Terlalu besar bisa membuat lutut kerja keras dan jalan memantul."
+  },
+  balance_ankle_roll_gain: {
+    artinya: "Gain koreksi roll di ankle.",
+    fungsi: "Mengoreksi miring kiri-kanan langsung dari pergelangan kaki.",
+    tuning: "Efektif untuk jatuh samping. Ubah 0.05-0.10 per test.",
+    risk: "Gain besar bisa membuat ankle bergetar dan telapak tidak stabil."
+  },
+  balance_ankle_pitch_gain: {
+    artinya: "Gain koreksi pitch di ankle.",
+    fungsi: "Mengoreksi condong depan-belakang lewat pergelangan kaki.",
+    tuning: "Jika robot jatuh pelan ke depan/belakang, ini parameter penting untuk dicoba.",
+    risk: "Terlalu besar bisa membuat robot seperti menendang lantai saat koreksi."
+  },
+  y_swap_amplitude: {
+    artinya: "Amplitudo sway badan kiri-kanan saat pindah berat badan.",
+    fungsi: "Membantu robot memindahkan center of mass ke kaki tumpuan.",
+    tuning: "Jika kaki sulit terangkat atau berat tidak pindah, naikkan sedikit.",
+    risk: "Sway terlalu besar membuat robot bergoyang samping berlebihan."
+  },
+  z_swap_amplitude: {
+    artinya: "Amplitudo naik-turun badan selama walking.",
+    fungsi: "Memberi ritme vertikal agar langkah lebih natural dan kaki punya clearance.",
+    tuning: "Turunkan jika robot memantul. Naikkan sedikit jika kaki kurang bebas.",
+    risk: "Terlalu besar meningkatkan hentakan dan beban servo."
+  },
+  arm_swing_gain: {
+    artinya: "Gain ayunan tangan saat berjalan.",
+    fungsi: "Ayunan tangan membantu counterbalance terhadap gerakan kaki.",
+    tuning: "Naikkan jika badan terlalu kaku. Turunkan jika ayunan tangan justru mengganggu balance.",
+    risk: "Ayunan besar bisa mengganggu vision/kamera dan menambah goyangan."
+  },
+  pelvis_offset: {
+    artinya: "Offset tetap pada orientasi pelvis saat walking.",
+    fungsi: "Dipakai buat bias postur panggul supaya gait lebih cocok dengan mekanik robot.",
+    tuning: "Ubah kecil-kecil karena efeknya terasa ke pinggul dan kaki. Default repo sekitar 0.5 derajat atau 0.0087 rad.",
+    risk: "Pelvis offset terlalu besar bisa membuat langkah asimetris."
+  },
+  hip_pitch_offset: {
+    artinya: "Offset sudut hip pitch saat walking.",
+    fungsi: "Mengatur bias kaki/pinggul ke depan-belakang agar posture walking cocok dengan OP3.",
+    tuning: "Sangat berpengaruh. Ubah sedikit, misalnya 0.005 rad per test.",
+    risk: "Salah tuning bisa membuat robot terlalu membungkuk atau jatuh ke belakang."
+  },
+  p_gain: {
+    artinya: "Field gain P integer yang ikut dibawa message WalkingParam.",
+    fungsi: "Disiapkan untuk gain kontrol tambahan, tapi setup repo saat ini default 0.",
+    tuning: "Biarkan 0 kecuali kamu sudah memastikan module memakai field ini.",
+    risk: "Mengubah tanpa kebutuhan bisa bikin hasil test membingungkan."
+  },
+  i_gain: {
+    artinya: "Field gain I integer yang ikut dibawa message WalkingParam.",
+    fungsi: "Disiapkan untuk komponen integral kontrol tambahan, default repo 0.",
+    tuning: "Biarkan 0 untuk tuning gait dasar.",
+    risk: "Integral yang tidak tepat bisa menumpuk error dan memicu gerakan aneh."
+  },
+  d_gain: {
+    artinya: "Field gain D integer yang ikut dibawa message WalkingParam.",
+    fungsi: "Disiapkan untuk damping tambahan, default repo 0.",
+    tuning: "Biarkan 0 kecuali ada alasan jelas untuk tuning kontrol level bawah.",
+    risk: "D gain salah bisa membuat respons terlalu kasar atau noise-sensitive."
+  },
+};
+
+const WALKING_PARAM_GROUPS = [
+  {
+    title: "Init Pose",
+    description: "Body pose offsets used by the gait generator.",
+    fields: [
+      { key: "init_x_offset", label: "X offset", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.init_x_offset },
+      { key: "init_y_offset", label: "Y offset", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.init_y_offset },
+      { key: "init_z_offset", label: "Z offset", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.init_z_offset },
+      { key: "init_roll_offset", label: "Roll offset", unit: "rad", step: 0.001, ...WALKING_PARAM_HELP.init_roll_offset },
+      { key: "init_pitch_offset", label: "Pitch offset", unit: "rad", step: 0.001, ...WALKING_PARAM_HELP.init_pitch_offset },
+      { key: "init_yaw_offset", label: "Yaw offset", unit: "rad", step: 0.001, ...WALKING_PARAM_HELP.init_yaw_offset },
+    ],
+  },
+  {
+    title: "Timing",
+    description: "Step cadence and support timing. Runtime units use seconds.",
+    fields: [
+      { key: "period_time", label: "Period time", unit: "s", step: 0.01, ...WALKING_PARAM_HELP.period_time },
+      { key: "dsp_ratio", label: "DSP ratio", unit: "ratio", step: 0.01, ...WALKING_PARAM_HELP.dsp_ratio },
+      { key: "step_fb_ratio", label: "Step FB ratio", unit: "ratio", step: 0.01, ...WALKING_PARAM_HELP.step_fb_ratio },
+    ],
+  },
+  {
+    title: "Movement",
+    description: "Forward, lateral, lift, and turn amplitudes.",
+    fields: [
+      { key: "x_move_amplitude", label: "X move amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.x_move_amplitude },
+      { key: "y_move_amplitude", label: "Y move amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.y_move_amplitude },
+      { key: "z_move_amplitude", label: "Z move amplitude / foot height", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_move_amplitude },
+      { key: "angle_move_amplitude", label: "Angle move amplitude", unit: "rad", step: 0.005, ...WALKING_PARAM_HELP.angle_move_amplitude },
+      { key: "move_aim_on", label: "Move aim on", type: "bool", ...WALKING_PARAM_HELP.move_aim_on },
+    ],
+  },
+  {
+    title: "Balance",
+    description: "IMU feedback gains and body sway.",
+    fields: [
+      { key: "balance_enable", label: "Balance enable", type: "bool", ...WALKING_PARAM_HELP.balance_enable },
+      { key: "balance_hip_roll_gain", label: "Hip roll gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_hip_roll_gain },
+      { key: "balance_knee_gain", label: "Knee gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_knee_gain },
+      { key: "balance_ankle_roll_gain", label: "Ankle roll gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_ankle_roll_gain },
+      { key: "balance_ankle_pitch_gain", label: "Ankle pitch gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_ankle_pitch_gain },
+      { key: "y_swap_amplitude", label: "Y swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.y_swap_amplitude },
+      { key: "z_swap_amplitude", label: "Z swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_swap_amplitude },
+      { key: "arm_swing_gain", label: "Arm swing gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.arm_swing_gain },
+      { key: "pelvis_offset", label: "Pelvis offset", unit: "rad", step: 0.001, ...WALKING_PARAM_HELP.pelvis_offset },
+      { key: "hip_pitch_offset", label: "Hip pitch offset", unit: "rad", step: 0.001, ...WALKING_PARAM_HELP.hip_pitch_offset },
+    ],
+  },
+  {
+    title: "Motor Gains",
+    description: "Integer gain fields carried by WalkingParam.",
+    fields: [
+      { key: "p_gain", label: "P gain", type: "int", step: 1, ...WALKING_PARAM_HELP.p_gain },
+      { key: "i_gain", label: "I gain", type: "int", step: 1, ...WALKING_PARAM_HELP.i_gain },
+      { key: "d_gain", label: "D gain", type: "int", step: 1, ...WALKING_PARAM_HELP.d_gain },
+    ],
+  },
+];
+
+const WALKING_INT_FIELDS = new Set(["p_gain", "i_gain", "d_gain"]);
+const WALKING_BOOL_FIELDS = new Set(["move_aim_on", "balance_enable"]);
+
+function normalizeWalkingParams(params = {}) {
+  const next = { ...WALKING_DEFAULT_PARAMS, ...params };
+  Object.keys(WALKING_DEFAULT_PARAMS).forEach((key) => {
+    if (WALKING_BOOL_FIELDS.has(key)) {
+      next[key] = Boolean(next[key]);
+      return;
+    }
+    const numeric = Number(next[key]);
+    next[key] = Number.isFinite(numeric)
+      ? (WALKING_INT_FIELDS.has(key) ? Math.round(numeric) : numeric)
+      : WALKING_DEFAULT_PARAMS[key];
+  });
+  return next;
+}
+
+function formatWalkingValue(value, field) {
+  if (field.type === "bool") return value ? "true" : "false";
+  if (field.type === "int") return String(Math.round(Number(value) || 0));
+  return formatNumber(value, 5);
+}
+
+function readWalkingVersions() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(WALKING_VERSION_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item?.id && item?.params)
+      .map((item) => ({
+        id: String(item.id),
+        name: String(item.name || "Untitled"),
+        createdAt: Number(item.createdAt || Date.now()),
+        updatedAt: Number(item.updatedAt || item.createdAt || Date.now()),
+        params: normalizeWalkingParams(item.params),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function makeWalkingVersionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `walking-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 // --- Utilities ---
 
@@ -164,10 +488,26 @@ const SectionHeader = ({ title, children }) => (
   </div>
 );
 
+function resolveInitialRosUrl() {
+  const envDefault = computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL);
+  if (typeof window === "undefined") return envDefault;
+  try {
+    const shared = localStorage.getItem(SHARED_ROS_URL_KEY);
+    if (shared) return rewriteLoopbackToCurrentHost(shared, window.location);
+    const legacy = localStorage.getItem(LEGACY_ACTION_ROS_URL_KEY);
+    if (legacy) return rewriteLoopbackToCurrentHost(legacy, window.location);
+  } catch {
+    return envDefault;
+  }
+  return envDefault;
+}
+
 export default function App() {
+  const initialRosUrl = useMemo(() => resolveInitialRosUrl(), []);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [rosUrl, setRosUrl] = useState(DEFAULT_ROSBRIDGE);
+  const [rosUrl, setRosUrl] = useState(initialRosUrl);
+  const [rosUrlDraft, setRosUrlDraft] = useState(initialRosUrl);
   const [rosState, setRosState] = useState("disconnected");
   
   // Data State
@@ -182,6 +522,17 @@ export default function App() {
   const [demoMode, setDemoMode] = useState("");
   const [demoCommand, setDemoCommand] = useState("");
   const [demoCommandAt, setDemoCommandAt] = useState(null);
+  const [walkingParams, setWalkingParams] = useState(() => normalizeWalkingParams());
+  const [walkingCurrentParams, setWalkingCurrentParams] = useState(null);
+  const [walkingLoaded, setWalkingLoaded] = useState(false);
+  const [walkingDirty, setWalkingDirty] = useState(false);
+  const [walkingLastAppliedAt, setWalkingLastAppliedAt] = useState(null);
+  const [walkingError, setWalkingError] = useState("");
+  const [walkingVersions, setWalkingVersions] = useState(() => readWalkingVersions());
+  const [walkingVersionName, setWalkingVersionName] = useState("");
+  const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
+  const [teleopStatus, setTeleopStatus] = useState(null);
+  const [teleopStatusAt, setTeleopStatusAt] = useState(null);
   
   // Vision
   const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
@@ -225,10 +576,15 @@ export default function App() {
   const overlaySubRef = useRef(null);
   const joySubRef = useRef(null);
   const joyPubRef = useRef(null);
+  const teleopCommandPubRef = useRef(null);
+  const teleopStatusSubRef = useRef(null);
   const initPosePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
+  const walkingParamPubRef = useRef(null);
+  const walkingGetServiceRef = useRef(null);
   const torquePubRef = useRef(null);
   const headModulePubRef = useRef(null);
+  const walkingModulePubRef = useRef(null);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
@@ -242,8 +598,29 @@ export default function App() {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
   useEffect(() => {
+    setRosUrlDraft(rosUrl);
+  }, [rosUrl]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SHARED_ROS_URL_KEY, rosUrl);
+      localStorage.removeItem(LEGACY_ACTION_ROS_URL_KEY);
+    } catch {
+      // Ignore storage failures in restrictive browser contexts.
+    }
+  }, [rosUrl]);
+
+  useEffect(() => {
     showOverlayRef.current = showOverlay;
   }, [showOverlay]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WALKING_VERSION_STORAGE_KEY, JSON.stringify(walkingVersions));
+    } catch {
+      // Browser storage can fail in private or restricted contexts.
+    }
+  }, [walkingVersions]);
 
   useEffect(() => {
     if (!rosUrl) return;
@@ -286,11 +663,31 @@ export default function App() {
     });
     joySubRef.current.subscribe(setJoyState);
 
+    teleopStatusSubRef.current = new ROSLIB.Topic({
+      ros,
+      name: TELEOP_STATUS_TOPIC,
+      messageType: "std_msgs/String",
+    });
+    teleopStatusSubRef.current.subscribe((msg) => {
+      try {
+        setTeleopStatus(JSON.parse(msg.data));
+        setTeleopStatusAt(Date.now());
+      } catch (e) {
+        setTeleopStatus({ raw: msg.data });
+        setTeleopStatusAt(Date.now());
+      }
+    });
+
     // Publishers & Services
     joyPubRef.current = new ROSLIB.Topic({
       ros,
       name: "/joy",
       messageType: "sensor_msgs/Joy",
+    });
+    teleopCommandPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: TELEOP_COMMAND_TOPIC,
+      messageType: "std_msgs/String",
     });
     initPosePubRef.current = new ROSLIB.Topic({
       ros,
@@ -302,12 +699,22 @@ export default function App() {
       name: "/robotis/walking/command",
       messageType: "std_msgs/String",
     });
+    walkingParamPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/walking/set_params",
+      messageType: "op3_walking_module_msgs/WalkingParam",
+    });
     torquePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/sync_write_item",
       messageType: "robotis_controller_msgs/SyncWriteItem",
     });
     headModulePubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/enable_ctrl_module",
+      messageType: "std_msgs/String",
+    });
+    walkingModulePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/enable_ctrl_module",
       messageType: "std_msgs/String",
@@ -332,6 +739,11 @@ export default function App() {
       ros,
       name: "/robotis/health_check",
       serviceType: "std_srvs/srv/Trigger",
+    });
+    walkingGetServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/robotis/walking/get_params",
+      serviceType: "op3_walking_module_msgs/srv/GetWalkingParam",
     });
     demoModePubRef.current = new ROSLIB.Topic({
       ros,
@@ -364,6 +776,7 @@ export default function App() {
       metricsSubRef.current?.unsubscribe();
       eventsSubRef.current?.unsubscribe();
       joySubRef.current?.unsubscribe();
+      teleopStatusSubRef.current?.unsubscribe();
       ros.close();
     };
   }, [rosUrl]);
@@ -412,6 +825,23 @@ export default function App() {
     setTimeout(() => { if(studioStatus === msg) setStudioStatus(""); }, 3000);
   };
 
+  const applyRosUrlDraft = () => {
+    const next = rewriteLoopbackToCurrentHost(
+      normalizeRosbridgeUrl(rosUrlDraft, rosUrl),
+      window.location
+    );
+    setRosUrl(next);
+    setRosUrlDraft(next);
+    sendStatus(`ROS bridge: ${next}`);
+  };
+
+  const resetRosUrlAuto = () => {
+    const next = computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL, window.location);
+    setRosUrl(next);
+    setRosUrlDraft(next);
+    sendStatus(`ROS bridge reset: ${next}`);
+  };
+
   const sendWalkingCommand = (command, label) => {
     if (!walkingCommandPubRef.current || rosState !== "connected") {
       sendStatus("Walking command unavailable", true);
@@ -419,6 +849,188 @@ export default function App() {
     }
     walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
     sendStatus(label || `Walking command: ${command}`);
+  };
+
+  const sendTeleopCommand = (command, label) => {
+    if (!teleopCommandPubRef.current || rosState !== "connected") {
+      sendStatus("Teleop command unavailable", true);
+      return false;
+    }
+    teleopCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
+    sendStatus(label || `Teleop command: ${command}`);
+    return true;
+  };
+
+  const applyWalkingAndRefreshTeleop = () => {
+    if (!applyWalkingParams()) return;
+    window.setTimeout(() => {
+      sendTeleopCommand("refresh_params", "Walking applied; teleop baseline refresh requested");
+    }, 150);
+  };
+
+  const updateWalkingParam = (key, value) => {
+    setWalkingParams((prev) => ({
+      ...prev,
+      [key]: WALKING_BOOL_FIELDS.has(key) ? Boolean(value) : value,
+    }));
+    setWalkingDirty(true);
+    setWalkingError("");
+  };
+
+  const loadWalkingParams = () => {
+    if (!walkingGetServiceRef.current || rosState !== "connected") {
+      const message = "Walking params unavailable";
+      setWalkingError(message);
+      sendStatus(message, true);
+      return;
+    }
+
+    setWalkingError("");
+    walkingGetServiceRef.current.callService(
+      new ROSLIB.ServiceRequest({ get_param: true }),
+      (res) => {
+        if (!res?.parameters) {
+          const message = "No walking params returned";
+          setWalkingError(message);
+          sendStatus(message, true);
+          return;
+        }
+        const normalized = normalizeWalkingParams(res.parameters);
+        setWalkingParams(normalized);
+        setWalkingCurrentParams(normalized);
+        setWalkingLoaded(true);
+        setWalkingDirty(false);
+        sendStatus("Walking params loaded");
+      },
+      (err) => {
+        const message = err?.message || "Failed to load walking params";
+        setWalkingError(message);
+        sendStatus(message, true);
+      }
+    );
+  };
+
+  const applyWalkingParams = () => {
+    if (!walkingParamPubRef.current || rosState !== "connected") {
+      const message = "Walking param publisher unavailable";
+      setWalkingError(message);
+      sendStatus(message, true);
+      return false;
+    }
+
+    const payload = normalizeWalkingParams(walkingParams);
+    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
+    setWalkingParams(payload);
+    setWalkingCurrentParams(payload);
+    setWalkingLoaded(true);
+    setWalkingDirty(false);
+    setWalkingLastAppliedAt(Date.now());
+    setWalkingError("");
+    sendStatus("Walking params applied");
+    return true;
+  };
+
+  const applyWalkingAndStart = () => {
+    if (applyWalkingParams()) {
+      sendWalkingCommand("start", "Walking params applied and started");
+    }
+  };
+
+  const enableWalkingModule = () => {
+    if (!walkingModulePubRef.current || rosState !== "connected") {
+      sendStatus("Walking module command unavailable", true);
+      return;
+    }
+    walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+    sendStatus("Walking module enabled");
+  };
+
+  const applyWalkingPreset = (preset) => {
+    const presetParams = {
+      tiny: {
+        x_move_amplitude: 0.003,
+        y_move_amplitude: 0,
+        angle_move_amplitude: 0,
+        period_time: 0.85,
+        z_move_amplitude: 0.03,
+        dsp_ratio: 0.35,
+        balance_enable: true,
+      },
+      stop: {
+        x_move_amplitude: 0,
+        y_move_amplitude: 0,
+        angle_move_amplitude: 0,
+      },
+      balance: {
+        balance_enable: true,
+        balance_hip_roll_gain: 0.35,
+        balance_knee_gain: 0.4,
+        balance_ankle_roll_gain: 0.7,
+        balance_ankle_pitch_gain: 0.9,
+      },
+    }[preset];
+
+    if (!presetParams) return;
+    setWalkingParams((prev) => normalizeWalkingParams({ ...prev, ...presetParams }));
+    setWalkingDirty(true);
+    setWalkingError("");
+  };
+
+  const saveWalkingVersion = () => {
+    const now = Date.now();
+    const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
+    const name = walkingVersionName.trim() || selected?.name || `Walking ${new Date(now).toLocaleString()}`;
+    const params = normalizeWalkingParams(walkingParams);
+
+    if (selected) {
+      setWalkingVersions((versions) =>
+        versions.map((version) =>
+          version.id === selected.id
+            ? { ...version, name, params, updatedAt: now }
+            : version
+        )
+      );
+      setWalkingVersionName(name);
+      sendStatus(`Walking version updated: ${name}`);
+      return;
+    }
+
+    const next = {
+      id: makeWalkingVersionId(),
+      name,
+      createdAt: now,
+      updatedAt: now,
+      params,
+    };
+    setWalkingVersions((versions) => [next, ...versions]);
+    setActiveWalkingVersionId(next.id);
+    setWalkingVersionName(name);
+    sendStatus(`Walking version saved: ${name}`);
+  };
+
+  const loadWalkingVersion = () => {
+    const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
+    if (!selected) {
+      sendStatus("Select a walking version first", true);
+      return;
+    }
+    setWalkingParams(normalizeWalkingParams(selected.params));
+    setWalkingVersionName(selected.name);
+    setWalkingDirty(true);
+    setWalkingError("");
+    sendStatus(`Walking version loaded: ${selected.name}`);
+  };
+
+  const deleteWalkingVersion = () => {
+    const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
+    if (!selected) {
+      sendStatus("Select a walking version first", true);
+      return;
+    }
+    setWalkingVersions((versions) => versions.filter((version) => version.id !== selected.id));
+    setActiveWalkingVersionId("");
+    setWalkingVersionName("");
+    sendStatus(`Walking version deleted: ${selected.name}`);
   };
 
   const refreshCameraTopics = () => {
@@ -644,6 +1256,20 @@ export default function App() {
             <span>Tuning</span>
           </button>
           <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "walking" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("walking"); setSidebarOpen(false); }}
+          >
+            <Footprints size={20} className={activeTab === "walking" ? "text-accent-yellow" : ""} />
+            <span>Walking</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "teleop" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("teleop"); setSidebarOpen(false); }}
+          >
+            <Gamepad2 size={20} className={activeTab === "teleop" ? "text-accent-yellow" : ""} />
+            <span>Teleop</span>
+          </button>
+          <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("action"); setSidebarOpen(false); }}
           >
@@ -665,6 +1291,33 @@ export default function App() {
             <span>Terminal</span>
           </button>
         </div>
+        <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+            ROS Bridge
+          </label>
+          <input
+            type="text"
+            value={rosUrlDraft}
+            onChange={(e) => setRosUrlDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") applyRosUrlDraft(); }}
+            className="w-full px-2 py-1.5 rounded-md border border-white/10 bg-black/20 text-[11px] font-mono text-gray-200 focus:outline-none focus:border-accent-yellow/60"
+            placeholder="ws://<robot-ip>:9090"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={applyRosUrlDraft}
+              className="flex-1 px-2 py-1.5 text-[10px] font-bold rounded-md bg-undip-blue text-white hover:bg-opacity-90"
+            >
+              Apply
+            </button>
+            <button
+              onClick={resetRosUrlAuto}
+              className="flex-1 px-2 py-1.5 text-[10px] font-bold rounded-md border border-white/10 text-gray-300 hover:bg-white/10"
+            >
+              Auto
+            </button>
+          </div>
+        </div>
         <div className="pt-6 border-t border-white/10">
           <div className={`flex items-center gap-2 px-2 text-sm font-medium ${rosState === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
             <div className={`w-2 h-2 rounded-full ${rosState === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`}></div>
@@ -674,6 +1327,466 @@ export default function App() {
       </nav>
     </>
   );
+
+  const renderWalking = () => {
+    const rosConnected = rosState === "connected";
+    const walkingButtonBase = "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+    const currentValue = (field) => {
+      if (!walkingCurrentParams) return "not loaded";
+      return formatWalkingValue(walkingCurrentParams[field.key], field);
+    };
+    const isFieldDirty = (field) => {
+      if (!walkingCurrentParams) return walkingLoaded;
+      if (field.type === "bool") return Boolean(walkingParams[field.key]) !== Boolean(walkingCurrentParams[field.key]);
+      return Number(walkingParams[field.key]) !== Number(walkingCurrentParams[field.key]);
+    };
+    const selectedWalkingVersion = walkingVersions.find((version) => version.id === activeWalkingVersionId);
+    const renderWalkingHelp = (field) => (
+      <div className="absolute left-4 right-4 top-[calc(100%-4px)] z-30 hidden rounded-xl border border-undip-blue/20 bg-white p-4 text-xs shadow-xl group-hover/param:block group-focus-within/param:block lg:left-5 lg:right-auto lg:w-[380px]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-bold text-gray-900">{field.label}</div>
+            <div className="mt-1 font-mono text-[11px] text-gray-400">
+              {field.key}{field.unit ? ` | ${field.unit}` : ""} | current {currentValue(field)} | edited {formatWalkingValue(walkingParams[field.key], field)}
+            </div>
+          </div>
+          <Info size={16} className="mt-0.5 flex-shrink-0 text-undip-blue" />
+        </div>
+        <div className="mt-3 space-y-2 leading-relaxed text-gray-600">
+          <p><span className="font-bold text-gray-800">Artinya:</span> {field.artinya}</p>
+          <p><span className="font-bold text-gray-800">Fungsi:</span> {field.fungsi}</p>
+          <p><span className="font-bold text-gray-800">Tuning:</span> {field.tuning}</p>
+          <p className="text-yellow-700"><span className="font-bold">Risiko:</span> {field.risk}</p>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="h-full p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-7xl mx-auto flex flex-col gap-6">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-bold font-display text-gray-900">OP3 Walking Parameters</h2>
+                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}>
+                    {walkingDirty ? "Dirty" : "Synced"}
+                  </span>
+                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}>
+                    {walkingLoaded ? "Runtime Loaded" : "Defaults"}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-gray-500">
+                  Runtime units: seconds, meters, radians. Apply always publishes a complete WalkingParam message.
+                </p>
+                {walkingLastAppliedAt && (
+                  <p className="mt-1 text-xs text-gray-400 font-mono">
+                    Last applied: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
+                  </p>
+                )}
+                {walkingError && (
+                  <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                  onClick={loadWalkingParams}
+                  disabled={!rosConnected}
+                >
+                  <RefreshCw size={14} /> Load
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                  onClick={applyWalkingParams}
+                  disabled={!rosConnected}
+                >
+                  <Send size={14} /> Apply
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-50`}
+                  onClick={applyWalkingAndRefreshTeleop}
+                  disabled={!rosConnected}
+                >
+                  <Gamepad2 size={14} /> Apply + Teleop Refresh
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`}
+                  onClick={applyWalkingAndStart}
+                  disabled={!rosConnected}
+                >
+                  <Play size={14} /> Apply & Start
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`}
+                  onClick={enableWalkingModule}
+                  disabled={!rosConnected}
+                >
+                  <Cpu size={14} /> Enable Walking Module
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2">
+              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={() => sendWalkingCommand("start")} disabled={!rosConnected}>
+                <Play size={14} /> Start
+              </button>
+              <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
+                <Square size={14} /> Stop
+              </button>
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected}>
+                Balance On
+              </button>
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected}>
+                Balance Off
+              </button>
+              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>
+                <Save size={14} /> Save
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-bold text-gray-900">Walking Versions</h3>
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase text-gray-500">
+                    Browser local
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Saved versions are browser-local only. Loading a version updates the UI and waits for Apply before publishing to ROS.
+                </p>
+              </div>
+              <div className="grid w-full grid-cols-1 gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto_auto_auto] xl:max-w-4xl">
+                <input
+                  type="text"
+                  value={walkingVersionName}
+                  onChange={(e) => setWalkingVersionName(e.target.value)}
+                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
+                  placeholder="Version name"
+                />
+                <select
+                  value={activeWalkingVersionId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    const version = walkingVersions.find((item) => item.id === id);
+                    setActiveWalkingVersionId(id);
+                    setWalkingVersionName(version?.name || "");
+                  }}
+                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
+                >
+                  <option value="">Select version</option>
+                  {walkingVersions.map((version) => (
+                    <option key={version.id} value={version.id}>
+                      {version.name} - {new Date(version.updatedAt).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                  onClick={saveWalkingVersion}
+                >
+                  <Save size={14} /> Save Version
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                  onClick={loadWalkingVersion}
+                  disabled={!selectedWalkingVersion}
+                >
+                  Load Version
+                </button>
+                <button
+                  className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
+                  onClick={deleteWalkingVersion}
+                  disabled={!selectedWalkingVersion}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <button
+              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
+              onClick={() => applyWalkingPreset("tiny")}
+            >
+              <div className="text-sm font-bold text-gray-900">Tiny Test</div>
+              <div className="mt-1 text-xs text-gray-500">Slow 0.85s period, 3mm forward, balance on.</div>
+            </button>
+            <button
+              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
+              onClick={() => applyWalkingPreset("stop")}
+            >
+              <div className="text-sm font-bold text-gray-900">Stop Motion</div>
+              <div className="mt-1 text-xs text-gray-500">Zero x/y/turn amplitudes while keeping posture and gains.</div>
+            </button>
+            <button
+              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
+              onClick={() => applyWalkingPreset("balance")}
+            >
+              <div className="text-sm font-bold text-gray-900">Balance Defaults</div>
+              <div className="mt-1 text-xs text-gray-500">Restore repo balance gains: hip 0.35, knee 0.4, ankle 0.7/0.9.</div>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {WALKING_PARAM_GROUPS.map((group) => (
+              <div key={group.title} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
+                <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal size={18} className="text-undip-blue" />
+                      <h3 className="font-bold text-gray-900">{group.title}</h3>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">{group.description}</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {group.fields.map((field) => {
+                    const dirty = isFieldDirty(field);
+                    return (
+                      <div key={field.key} className="group/param relative grid grid-cols-1 gap-3 p-4 md:grid-cols-[minmax(170px,1fr)_minmax(180px,220px)_minmax(150px,180px)] md:items-center">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm font-bold text-gray-800">{field.label}</label>
+                            <Info size={13} className="text-gray-300 transition-colors group-hover/param:text-undip-blue group-focus-within/param:text-undip-blue" />
+                            {dirty && <span className="w-2 h-2 rounded-full bg-yellow-400" title="Changed" />}
+                          </div>
+                          <div className="mt-1 text-[11px] text-gray-400 font-mono break-all">{field.key}{field.unit ? ` (${field.unit})` : ""}</div>
+                        </div>
+
+                        {field.type === "bool" ? (
+                          <button
+                            type="button"
+                            className={`w-full px-3 py-2 rounded-lg border text-sm font-bold transition-colors ${
+                              walkingParams[field.key]
+                                ? "bg-green-50 text-green-700 border-green-100 hover:bg-green-100"
+                                : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                            }`}
+                            onClick={() => updateWalkingParam(field.key, !walkingParams[field.key])}
+                          >
+                            {walkingParams[field.key] ? "Enabled" : "Disabled"}
+                          </button>
+                        ) : (
+                          <input
+                            type="number"
+                            value={walkingParams[field.key]}
+                            step={field.step || 0.001}
+                            onChange={(e) => updateWalkingParam(field.key, e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
+                          />
+                        )}
+
+                        <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase text-gray-400">Current</div>
+                          <div className="text-xs font-mono text-gray-700 truncate">{currentValue(field)}</div>
+                        </div>
+                        {renderWalkingHelp(field)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTeleop = () => {
+    const rosConnected = rosState === "connected";
+    const now = Date.now();
+    const statusAgeSec = teleopStatusAt ? Math.max(0, (now - teleopStatusAt) / 1000) : null;
+    const statusFresh = statusAgeSec !== null && statusAgeSec < 3;
+    const joyAge = teleopStatus?.last_joy_age_sec;
+    const baselineAge = teleopStatus?.baseline_age_sec;
+    const joyActive = Array.isArray(joyState?.buttons)
+      ? joyState.buttons.some((button) => Number(button) > 0.5)
+      : false;
+    const axisActive = Array.isArray(joyState?.axes)
+      ? joyState.axes.some((axis) => Math.abs(Number(axis) || 0) > 0.05)
+      : false;
+
+    const fmt = (value, digits = 3, suffix = "") => {
+      if (typeof value !== "number" || Number.isNaN(value)) return "--";
+      return `${value.toFixed(digits)}${suffix}`;
+    };
+    const fmtAge = (value) => {
+      if (typeof value !== "number" || Number.isNaN(value)) return "--";
+      if (value < 10) return `${value.toFixed(1)}s`;
+      return `${Math.round(value)}s`;
+    };
+    const commandButton = (command, label, className = "") => (
+      <button
+        className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className || "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+        onClick={() => sendTeleopCommand(command, `Teleop: ${label}`)}
+        disabled={!rosConnected}
+      >
+        {label}
+      </button>
+    );
+
+    return (
+      <div className="h-full p-4 md:p-8 overflow-y-auto">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-lg font-bold text-gray-900">OP3 Joy Teleop</h2>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${statusFresh ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {statusFresh ? "Status Live" : "No Teleop Status"}
+                  </span>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${teleopStatus?.baseline_loaded ? "bg-blue-50 text-undip-blue" : "bg-yellow-100 text-yellow-700"}`}>
+                    {teleopStatus?.baseline_loaded ? `Baseline v${teleopStatus.baseline_version || 0}` : "Baseline Missing"}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-gray-500">
+                  Tune Walking, apply it to runtime, then refresh teleop baseline so joystick commands inherit the same gait.
+                </p>
+                <p className="mt-1 text-xs font-mono text-gray-400">
+                  command {TELEOP_COMMAND_TOPIC} | status {TELEOP_STATUS_TOPIC}
+                </p>
+                {teleopStatus?.baseline_error && (
+                  <p className="mt-2 text-xs font-mono text-red-600">{teleopStatus.baseline_error}</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap">
+                {commandButton("refresh_params", "Refresh Baseline", "bg-undip-blue text-white hover:bg-opacity-90")}
+                <button
+                  className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-bold text-gray-700 border border-gray-200 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={applyWalkingAndRefreshTeleop}
+                  disabled={!rosConnected}
+                >
+                  <Send size={14} /> Apply Walking + Refresh
+                </button>
+                {commandButton("start", "Enable + Start", "bg-green-600 text-white hover:bg-green-700")}
+                {commandButton("stop", "Stop + Zero", "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100")}
+                {commandButton("zero_params", "Zero Motion")}
+                {commandButton("status", "Poll Status")}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 p-5">
+                <div className="flex items-center gap-2">
+                  <Gamepad2 size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Runtime State</h3>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 p-5 md:grid-cols-3">
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Deadman</div>
+                  <div className={`mt-1 text-sm font-bold ${teleopStatus?.deadman_active ? "text-green-700" : "text-gray-700"}`}>
+                    {teleopStatus?.deadman_active ? "Active" : "Released"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Joy</div>
+                  <div className={`mt-1 text-sm font-bold ${(joyActive || axisActive) ? "text-green-700" : "text-gray-700"}`}>
+                    {(joyActive || axisActive) ? "Input Moving" : "Idle"}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-mono text-gray-400">{fmtAge(joyAge)}</div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Gear</div>
+                  <div className="mt-1 text-sm font-bold text-gray-800">
+                    {teleopStatus?.gear || "--"} x{fmt(teleopStatus?.gear_scale, 2)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Heading Hold</div>
+                  <div className={`mt-1 text-sm font-bold ${teleopStatus?.heading_hold ? "text-undip-blue" : "text-gray-700"}`}>
+                    {teleopStatus?.heading_hold ? "On" : "Off"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Baseline Age</div>
+                  <div className="mt-1 text-sm font-bold text-gray-800">{fmtAge(baselineAge)}</div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">Status Age</div>
+                  <div className="mt-1 text-sm font-bold text-gray-800">{fmtAge(statusAgeSec)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 p-5">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Teleop Commands</h3>
+                </div>
+              </div>
+              <div className="space-y-4 p-5">
+                <div>
+                  <div className="mb-2 text-[10px] font-bold uppercase text-gray-400">Gear</div>
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {commandButton("gear_slow", "Slow")}
+                    {commandButton("gear_normal", "Normal")}
+                    {commandButton("gear_fast", "Fast")}
+                    {commandButton("gear_next", "Next")}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-2 text-[10px] font-bold uppercase text-gray-400">Heading Hold</div>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    {commandButton("heading_hold_on", "Hold On")}
+                    {commandButton("heading_hold_off", "Hold Off")}
+                    {commandButton("heading_hold_toggle", "Toggle")}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs leading-relaxed text-blue-800">
+                  Browser walking versions stay local. Use Walking: Load Version, Apply, then Teleop: Refresh Baseline so joystick publishes from that saved gait.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 p-5">
+                <h3 className="font-bold text-gray-900">Current Command</h3>
+              </div>
+              <div className="grid grid-cols-3 gap-3 p-5">
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">x</div>
+                  <div className="mt-1 font-mono text-sm text-gray-800">{fmt(teleopStatus?.smoothed_x, 4)} m</div>
+                  <div className="mt-0.5 text-[11px] text-gray-400">max {fmt(teleopStatus?.max_x, 4)}</div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">y</div>
+                  <div className="mt-1 font-mono text-sm text-gray-800">{fmt(teleopStatus?.smoothed_y, 4)} m</div>
+                  <div className="mt-0.5 text-[11px] text-gray-400">max {fmt(teleopStatus?.max_y, 4)}</div>
+                </div>
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">yaw</div>
+                  <div className="mt-1 font-mono text-sm text-gray-800">{fmt(teleopStatus?.smoothed_yaw, 4)} rad</div>
+                  <div className="mt-0.5 text-[11px] text-gray-400">target {fmt(teleopStatus?.yaw_target, 4)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 p-5">
+                <h3 className="font-bold text-gray-900">Joy Input</h3>
+              </div>
+              <div className="p-5">
+                <GamepadVisualizer joy={joyState} rosConnected={rosConnected} publishJoy={publishJoy} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderDashboard = () => (
     <div className="flex flex-col lg:grid lg:grid-cols-[3fr_1fr] gap-6 h-full p-4 md:p-8 overflow-y-auto">
@@ -1077,6 +2190,12 @@ export default function App() {
           <div className={activeTab === "tuning" ? "h-full" : "hidden"}>
             <TuningPage ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus} />
           </div>
+          <div className={activeTab === "walking" ? "h-full" : "hidden"}>
+            {renderWalking()}
+          </div>
+          <div className={activeTab === "teleop" ? "h-full" : "hidden"}>
+            {renderTeleop()}
+          </div>
           <div className={activeTab === "logs" ? "h-full" : "hidden"}>
             {renderLogs()}
           </div>
@@ -1085,7 +2204,7 @@ export default function App() {
           </div>
           <div className={`absolute inset-0 p-4 ${activeTab === "action" ? "" : "hidden"}`}>
              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm h-full overflow-hidden">
-               <ActionEditor isActive={activeTab === "action"} />
+               <ActionEditor isActive={activeTab === "action"} rosUrl={rosUrl} />
              </div>
           </div>
         </div>

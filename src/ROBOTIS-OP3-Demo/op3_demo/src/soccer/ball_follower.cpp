@@ -29,15 +29,15 @@ BallFollower::BallFollower()
     count_to_kick_(0),
     on_tracking_(false),
     approach_ball_position_(NotFound),
-    kick_motion_index_(83),
-    CAMERA_HEIGHT(0.46),
+    kick_motion_index_(40),
+    CAMERA_HEIGHT(0.56),
     NOT_FOUND_THRESHOLD(50),
-    MAX_FB_STEP(35.0 * 0.001),
+    MAX_FB_STEP(12.0 * 0.001),
     MAX_RL_TURN(15.0 * M_PI / 180),
     IN_PLACE_FB_STEP(-3.0 * 0.001),
     MIN_FB_STEP(5.0 * 0.001),
     MIN_RL_TURN(5.0 * M_PI / 180),
-    UNIT_FB_STEP(1.0 * 0.001),
+    UNIT_FB_STEP(0.3 * 0.001),
     UNIT_RL_TURN(0.5 * M_PI / 180),
     SPOT_FB_OFFSET(0.0 * 0.001),
     SPOT_RL_OFFSET(0.0 * 0.001),
@@ -45,9 +45,9 @@ BallFollower::BallFollower()
     hip_pitch_offset_(7.0),
     current_pan_(-10),
     current_tilt_(-10),
-    current_x_move_(0.005),
+    current_x_move_(0.003),
     current_r_angle_(0),
-    curr_period_time_(0.6),
+    curr_period_time_(0.8),
     accum_period_time_(0.0),
     DEBUG_PRINT(false)
 {
@@ -217,8 +217,8 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   if (distance_to_ball < 0)
     distance_to_ball *= (-1);
 
-  //double distance_to_kick = 0.25;
-  double distance_to_kick = 0.22;
+  //double distance_to_kick = 0.25; Bagus :0.235
+  double distance_to_kick = 0.23;
 
   // check whether ball is correct position.
   if ((distance_to_ball < distance_to_kick) && (fabs(ball_x_angle) < 25.0))
@@ -241,7 +241,7 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
 //    ball_position_queue_.push_back((ball_x_angle > 0) ? 1 : -1);
 
 
-    if (count_to_kick_ > 20)
+    if (count_to_kick_ > 10)
     {
       setWalkingCommand("stop");
       on_tracking_ = false;
@@ -250,7 +250,7 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
 //      accum_ball_position_ = std::accumulate(ball_position_queue_.begin(), ball_position_queue_.end(), 0);
 
 //      if (accum_ball_position_ > 0)
-      if (ball_x_angle > 0)
+      if (ball_x_angle > 0.02)
       {
         if (DEBUG_PRINT)
           RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Ready to kick : left");  // left
@@ -265,7 +265,7 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
 
       return true;
     }
-    else if (count_to_kick_ > 15)
+    else if (count_to_kick_ > 5)
     {
       //      if (ball_x_angle > 0)
       //        accum_ball_position_ += 1;
@@ -308,7 +308,7 @@ void BallFollower::decideBallPositin(double x_angle, double y_angle)
 
   double ball_x_angle = current_pan_ + x_angle;
 
-  if (ball_x_angle > 0)
+  if (ball_x_angle > 0.05)
     approach_ball_position_ = OnLeft;
   else
     approach_ball_position_ = OnRight;
@@ -398,4 +398,3 @@ bool BallFollower::getWalkingParam()
 }
 
 }
-

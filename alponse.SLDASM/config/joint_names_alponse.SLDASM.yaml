@@ -1,0 +1,1 @@
+controller_joint_names: ['', '19 head pan', '20 head tilt', '1 r sho pitch', '3 r sho roll', '5 r elbow', '2 l sho pitch', '4 l sho roll', '6 l elbow', '7 r hip yaw', '9 r hip roll', '11 r hip pitch', '13 r kne', '15 r ankle pitch', '17 r ankle roll', '8 l hip yaw', '10 l hip roll', '12 l hip pitch', '14 l knee', '16 l ankle pitch', '18 l ankle roll', ]

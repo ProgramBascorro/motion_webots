@@ -5,6 +5,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=/tmp/.Xauthority
+      - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=0
     volumes:
       - ./src:/ros2_ws/src:rw

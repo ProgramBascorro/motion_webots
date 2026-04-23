@@ -85,6 +85,15 @@ Thumbs.db
 *.orig
 *.rej
 
+# Local camera/video captures
+webcam_*.avi
+webcam_*.mkv
+webcam_*.mp4
+recording_*.mp4
+output*.mkv
+output*.mp4
+tes_infer*.mp4
+
 # WEBDEV
 
 

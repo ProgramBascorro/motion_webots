@@ -1,0 +1,1207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="alponse.SLDASM">
+  <link
+    name="torso">
+    <inertial>
+      <origin
+        xyz="1.84464307992472E-07 0.0602091673197047 -0.00756677633620508"
+        rpy="0 0 0" />
+      <mass
+        value="0.861828234635404" />
+      <inertia
+        ixx="0.00175828937858155"
+        ixy="-7.17209452041362E-06"
+        ixz="-1.04810950865216E-07"
+        iyy="0.00243043017741996"
+        iyz="-8.18116613198071E-06"
+        izz="0.0020629884254432" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/torso.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/torso.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="head pan">
+    <inertial>
+      <origin
+        xyz="6.90709722113199E-17 0.0126296408654393 -3.7470027081099E-16"
+        rpy="0 0 0" />
+      <mass
+        value="0.00603166260725153" />
+      <inertia
+        ixx="1.28487529589188E-06"
+        ixy="-3.20968370537383E-22"
+        ixz="-4.84676140167786E-23"
+        iyy="2.50970050357347E-06"
+        iyz="-1.27311287363795E-21"
+        izz="2.95992463677993E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/head pan.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/head pan.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="19 head pan"
+    type="continuous">
+    <origin
+      xyz="0 0.05315 0.1003"
+      rpy="1.5708 0 0" />
+    <parent
+      link="torso" />
+    <child
+      link="head pan" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="head tilt">
+    <inertial>
+      <origin
+        xyz="-6.3143E-05 0.0026149 -0.019471"
+        rpy="0 0 0" />
+      <mass
+        value="0.055955" />
+      <inertia
+        ixx="1.6754E-05"
+        ixy="-2.7692E-08"
+        ixz="-1.8059E-07"
+        iyy="1.4999E-05"
+        iyz="1.9449E-08"
+        izz="1.2538E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/head tilt.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/head tilt.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="20 head tilt"
+    type="continuous">
+    <origin
+      xyz="0 0.0360000000000001 0"
+      rpy="1.5707963267949 0 0" />
+    <parent
+      link="head pan" />
+    <child
+      link="head tilt" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r sho pitch">
+    <inertial>
+      <origin
+        xyz="0.000435755988573185 0.00457383163193556 -0.00875981055551797"
+        rpy="0 0 0" />
+      <mass
+        value="0.0229412691742223" />
+      <inertia
+        ixx="6.25301332255445E-06"
+        ixy="4.98987758199403E-07"
+        ixz="1.17595201407971E-07"
+        iyy="1.14452898800645E-05"
+        iyz="1.23520764424902E-06"
+        izz="1.33315119424215E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r sho pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.666666666666667 0.698039215686274 0.768627450980392 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r sho pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="1 r sho pitch"
+    type="continuous">
+    <origin
+      xyz="-0.0765999999999994 0.0531502873090934 0.0821000000000016"
+      rpy="-1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="torso" />
+    <child
+      link="r sho pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r sho roll">
+    <inertial>
+      <origin
+        xyz="0.0143715754849901 -0.06618082704026 0.0110310629088879"
+        rpy="0 0 0" />
+      <mass
+        value="0.175572539814928" />
+      <inertia
+        ixx="5.33752340165936E-05"
+        ixy="-5.06922563651449E-07"
+        ixz="2.10034146894803E-07"
+        iyy="5.58997427187548E-05"
+        iyz="1.63445036483274E-06"
+        izz="6.52968731046064E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r sho roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r sho roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="3 r sho roll"
+    type="continuous">
+    <origin
+      xyz="0 0.0240195526217003 -0.0285195526217007"
+      rpy="3.14159265358979 0 0" />
+    <parent
+      link="r sho pitch" />
+    <child
+      link="r sho roll" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r elbow">
+    <inertial>
+      <origin
+        xyz="0.133895780395251 0.00585875101988114 0.0969303569129149"
+        rpy="0 0 0" />
+      <mass
+        value="0.022941269269816" />
+      <inertia
+        ixx="1.30977406506396E-05"
+        ixy="-1.23519658242711E-06"
+        ixz="-1.16909872510286E-06"
+        iyy="1.15269853150239E-05"
+        iyz="2.90501401989279E-07"
+        izz="6.40508902193517E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r elbow.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r elbow.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="5 r elbow"
+    type="continuous">
+    <origin
+      xyz="0.0289 0 0.119"
+      rpy="3.1416 0 -1.5708" />
+    <parent
+      link="r sho roll" />
+    <child
+      link="r elbow" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l sho pitch">
+    <inertial>
+      <origin
+        xyz="0.00259197322914158 -0.00379361022526298 0.0087598106765613"
+        rpy="0 0 0" />
+      <mass
+        value="0.0229412689261394" />
+      <inertia
+        ixx="7.88801316365583E-06"
+        ixy="-2.46274955980338E-06"
+        ixz="-6.99913370118233E-07"
+        iyy="9.81029015753613E-06"
+        iyz="1.02454283078454E-06"
+        izz="1.33315121034302E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l sho pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.666666666666667 0.698039215686274 0.768627450980392 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l sho pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="2 l sho pitch"
+    type="continuous">
+    <origin
+      xyz="0.0765999999999993 0.0531502873090933 0.082100000000001"
+      rpy="1.5707963267949 0 1.5707963267949" />
+    <parent
+      link="torso" />
+    <child
+      link="l sho pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l sho roll">
+    <inertial>
+      <origin
+        xyz="-0.0465341729722751 0.0542977462025218 0.0124014874128724"
+        rpy="0 0 0" />
+      <mass
+        value="0.175572535116807" />
+      <inertia
+        ixx="5.38246081719085E-05"
+        ixy="-1.13228677137868E-06"
+        ixz="7.70763846940199E-07"
+        iyy="5.54977956505916E-05"
+        iyz="-1.57912719383411E-06"
+        izz="6.52494415397862E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l sho roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l sho roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="4 l sho roll"
+    type="continuous">
+    <origin
+      xyz="0 -0.02402 0.02852"
+      rpy="0 0 3.1416" />
+    <parent
+      link="l sho pitch" />
+    <child
+      link="l sho roll" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l elbow">
+    <inertial>
+      <origin
+        xyz="-0.135883459145391 0.0876054094315431 0.0926849227021877"
+        rpy="0 0 0" />
+      <mass
+        value="0.0229412950721974" />
+      <inertia
+        ixx="1.13444607438914E-05"
+        ixy="1.27427486690144E-06"
+        ixz="6.41901431915635E-07"
+        iyy="1.33278631142042E-05"
+        iyz="-5.40165788757393E-07"
+        izz="6.35752647318397E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l elbow.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l elbow.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="6 l elbow"
+    type="continuous">
+    <origin
+      xyz="0.0289 0 0.119"
+      rpy="3.1416 0 -1.5708" />
+    <parent
+      link="l sho roll" />
+    <child
+      link="l elbow" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r hip yaw">
+    <inertial>
+      <origin
+        xyz="-6.93889390390723E-17 0.0112854851813117 -5.55111512312578E-17"
+        rpy="0 0 0" />
+      <mass
+        value="0.0286733564050867" />
+      <inertia
+        ixx="6.18735974650268E-06"
+        ixy="-6.17982714155809E-20"
+        ixz="1.99498299543965E-06"
+        iyy="2.19139376393687E-05"
+        iyz="-4.58111949120683E-21"
+        izz="2.37112326172567E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip yaw.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="7 r hip yaw"
+    type="continuous">
+    <origin
+      xyz="-0.0545 0.0585 -0.108"
+      rpy="-1.5708 0 1.5708" />
+    <parent
+      link="torso" />
+    <child
+      link="r hip yaw" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r hip roll">
+    <inertial>
+      <origin
+        xyz="0.0172887784862737 -0.0163913840448249 0.00133125379744741"
+        rpy="0 0 0" />
+      <mass
+        value="0.234684154368509" />
+      <inertia
+        ixx="0.000100382621788236"
+        ixy="3.3220766861433E-07"
+        ixz="9.9339730755696E-07"
+        iyy="6.53466233485296E-05"
+        iyz="-1.50816206123311E-06"
+        izz="9.17325544285405E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="9 r hip roll"
+    type="continuous">
+    <origin
+      xyz="0 0.0370000000000001 0"
+      rpy="3.14159265358979 0 0" />
+    <parent
+      link="r hip yaw" />
+    <child
+      link="r hip roll" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r hip pitch">
+    <inertial>
+      <origin
+        xyz="0.0177546520949722 -0.0818398070709357 0.00584044362493659"
+        rpy="0 0 0" />
+      <mass
+        value="0.129830811613135" />
+      <inertia
+        ixx="7.01972792492562E-05"
+        ixy="1.0869507677297E-05"
+        ixz="-8.4211364081418E-07"
+        iyy="3.12123117115005E-05"
+        iyz="3.25087811690054E-06"
+        izz="7.26762957697497E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r hip pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="11 r hip pitch"
+    type="continuous">
+    <origin
+      xyz="0 0 0"
+      rpy="3.14159265358979 0 3.14159265358979" />
+    <parent
+      link="r hip roll" />
+    <child
+      link="r hip pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r knee">
+    <inertial>
+      <origin
+        xyz="-0.0147074651615296 -0.0586465883106588 0.045855469182339"
+        rpy="0 0 0" />
+      <mass
+        value="0.0823991655329362" />
+      <inertia
+        ixx="0.000174195434706357"
+        ixy="-1.25863657408667E-05"
+        ixz="4.48085492368649E-06"
+        iyy="2.62992433303829E-05"
+        iyz="4.24232317826817E-05"
+        izz="0.000155290085944721" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r knee.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r knee.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="13 r kne"
+    type="continuous">
+    <origin
+      xyz="0 -0.1235 0"
+      rpy="0 1.5707963267949 0" />
+    <parent
+      link="r hip pitch" />
+    <child
+      link="r knee" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r ankle pitch">
+    <inertial>
+      <origin
+        xyz="-0.0495141069498481 -0.0276369503863025 0.0178164443329261"
+        rpy="0 0 0" />
+      <mass
+        value="0.234684156298427" />
+      <inertia
+        ixx="9.9770235169258E-05"
+        ixy="-4.56394454460395E-06"
+        ixz="-1.16778180726298E-06"
+        iyy="6.59103709200738E-05"
+        iyz="-1.00151488804084E-06"
+        izz="9.17811943639859E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r ankle pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r ankle pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="15 r ankle pitch"
+    type="continuous">
+    <origin
+      xyz="0 -0.133000000000001 0"
+      rpy="3.14159265358979 1.5707963267949 0" />
+    <parent
+      link="r knee" />
+    <child
+      link="r ankle pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="r ankle roll">
+    <inertial>
+      <origin
+        xyz="-0.0371560046565665 -0.0315081981189933 0.0761263560711846"
+        rpy="0 0 0" />
+      <mass
+        value="0.26498278659695" />
+      <inertia
+        ixx="0.000404608416229014"
+        ixy="-1.69666547556798E-06"
+        ixz="2.81345245354218E-05"
+        iyy="0.000556646440802067"
+        iyz="5.18970799441111E-05"
+        izz="0.000175838569771407" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r ankle roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/r ankle roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="17 r ankle roll"
+    type="continuous">
+    <origin
+      xyz="0 0 0"
+      rpy="3.14159265358979 1.5707963267949 0" />
+    <parent
+      link="r ankle pitch" />
+    <child
+      link="r ankle roll" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l hip yaw">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0" />
+      <inertia
+        ixx="0"
+        ixy="0"
+        ixz="0"
+        iyy="0"
+        iyz="0"
+        izz="0" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip yaw.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="8 l hip yaw"
+    type="continuous">
+    <origin
+      xyz="0.0545 0.0584999999999997 -0.108"
+      rpy="-1.5707963267949 0 1.5707963267949" />
+    <parent
+      link="torso" />
+    <child
+      link="l hip yaw" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l hip roll">
+    <inertial>
+      <origin
+        xyz="0.0152963545689618 -0.015676227165286 0.00946726008488216"
+        rpy="0 0 0" />
+      <mass
+        value="0.234684157802193" />
+      <inertia
+        ixx="9.96821701935693E-05"
+        ixy="-1.79457840782649E-06"
+        ixz="2.84604125336047E-06"
+        iyy="6.72441485116727E-05"
+        iyz="6.73914600661316E-06"
+        izz="9.05354824166921E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="10 l hip roll"
+    type="continuous">
+    <origin
+      xyz="0 0.0370000000000001 0"
+      rpy="3.14159265358979 0 0" />
+    <parent
+      link="l hip yaw" />
+    <child
+      link="l hip roll" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l hip pitch">
+    <inertial>
+      <origin
+        xyz="0.0136337696253211 0.0801653041369191 0.0212570941263205"
+        rpy="0 0 0" />
+      <mass
+        value="0.129830811986938" />
+      <inertia
+        ixx="7.12103590619204E-05"
+        ixy="-8.555920759347E-06"
+        ixz="-2.1708605572469E-06"
+        iyy="3.24977473893264E-05"
+        iyz="-1.01654780461482E-05"
+        izz="7.03777804474885E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l hip pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="12 l hip pitch"
+    type="continuous">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 -3.12726104154159" />
+    <parent
+      link="l hip roll" />
+    <child
+      link="l hip pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l knee">
+    <inertial>
+      <origin
+        xyz="0.0291523875992457 -0.037054622664713 0.0694061486619598"
+        rpy="0 0 0" />
+      <mass
+        value="0.0823991655329362" />
+      <inertia
+        ixx="0.000174209901099024"
+        ixy="3.7765836835714E-07"
+        ixz="3.56803445903914E-06"
+        iyy="0.000100001377367777"
+        iyz="7.77104090026475E-05"
+        izz="8.15734855146594E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l knee.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l knee.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="14 l knee"
+    type="continuous">
+    <origin
+      xyz="0 0.123500000000001 0"
+      rpy="0.0131308900407669 -1.5707963267949 0" />
+    <parent
+      link="l hip pitch" />
+    <child
+      link="l knee" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l ankle pitch">
+    <inertial>
+      <origin
+        xyz="-0.112007186197388 -0.0714174454881373 -0.0239747272952857"
+        rpy="0 0 0" />
+      <mass
+        value="0.234684157965976" />
+      <inertia
+        ixx="9.31273174493655E-05"
+        ixy="-1.32845060701185E-05"
+        ixz="3.54472724909469E-06"
+        iyy="7.61512180606739E-05"
+        iyz="8.43733533303E-06"
+        izz="8.81832656840968E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l ankle pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l ankle pitch.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="16 l ankle pitch"
+    type="continuous">
+    <origin
+      xyz="0 -0.133 0"
+      rpy="1.5707963267949 1.56959560478744 -1.5707963267949" />
+    <parent
+      link="l knee" />
+    <child
+      link="l ankle pitch" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="l ankle roll">
+    <inertial>
+      <origin
+        xyz="-0.115349614908942 0.00407682623695138 0.0315951600650265"
+        rpy="0 0 0" />
+      <mass
+        value="0.26498278659695" />
+      <inertia
+        ixx="0.000270894335417588"
+        ixy="-0.000171068998762055"
+        ixz="-3.87419347428941E-05"
+        iyy="0.000451894787417168"
+        iyz="1.85220332351138E-05"
+        izz="0.000414304303967732" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l ankle roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://alponse.SLDASM/meshes/l ankle roll.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="18 l ankle roll"
+    type="continuous">
+    <origin
+      xyz="0 0 0"
+      rpy="3.14159265358979 0 0" />
+    <parent
+      link="l ankle pitch" />
+    <child
+      link="l ankle roll" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

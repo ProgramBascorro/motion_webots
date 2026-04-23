@@ -14,6 +14,16 @@ class ActionEditorExecutor(Node):
         super().__init__('op3_action_editor_executor')
 
 
+def has_ros_package(package_name: str) -> bool:
+    result = subprocess.run(
+        ['ros2', 'pkg', 'prefix', package_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def ensure_action_file(action_file_path: str, default_path: str) -> None:
     if os.path.isfile(action_file_path):
         return
@@ -59,35 +69,39 @@ def main(args=None):
         '-p', f'device_name:={device_name_default}'
     ]
 
-    try:
-        proc_player = subprocess.Popen(['ros2', 'run', 'ros_mpg321_player', 'ros_mpg321_player'],
-                      stdout=subprocess.DEVNULL,  # Redirect standard output
-                      stderr=subprocess.DEVNULL   # Redirect standard error
-        )
-    except Exception as e:
-      print(f"Failed to run ros_mpg321_player: {e}")
-      return 1
+    proc_player = None
+    if has_ros_package('ros_mpg321_player'):
+        try:
+            proc_player = subprocess.Popen(
+                ['ros2', 'run', 'ros_mpg321_player', 'ros_mpg321_player'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            print(f"Failed to run ros_mpg321_player: {e}", file=sys.stderr)
+    else:
+        print("ros_mpg321_player is not installed; starting without sound support.", file=sys.stderr)
 
     try:
         # Run the node in the same terminal
         proc_editor = subprocess.Popen(['ros2', 'run', package, executable] + params)
     except subprocess.CalledProcessError as e:
         print(f"Error while running op3_action_editor: {e}")
-        proc_player.kill()
+        if proc_player is not None and proc_player.poll() is None:
+            proc_player.kill()
         return 1
 
     while True:
-        if proc_player.poll() is not None:
-            break
-
         if proc_editor.poll() is not None:
             break
-    
-        time.sleep(1) 
-        
 
-    proc_player.kill()
-    proc_editor.kill()
+        time.sleep(1)
+
+    if proc_player is not None and proc_player.poll() is None:
+        proc_player.kill()
+
+    if proc_editor.poll() is None:
+        proc_editor.kill()
 
     rclpy.shutdown()
 

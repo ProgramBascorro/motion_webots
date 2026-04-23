@@ -19,7 +19,8 @@ import {
   Download,
   Upload,
   RefreshCw,
-  Plus
+  Plus,
+  Copy
 } from "lucide-react";
 
 // --- Constants & Helpers ---
@@ -88,6 +89,18 @@ const JOINT_GROUPS = {
   ],
 };
 
+const LEFT_RIGHT_MIRROR_PAIRS = [
+  { right: "r_sho_pitch", left: "l_sho_pitch", invert: true },
+  { right: "r_sho_roll", left: "l_sho_roll", invert: true },
+  { right: "r_el", left: "l_el", invert: true },
+  { right: "r_hip_yaw", left: "l_hip_yaw", invert: true },
+  { right: "r_hip_roll", left: "l_hip_roll", invert: true },
+  { right: "r_hip_pitch", left: "l_hip_pitch", invert: true },
+  { right: "r_knee", left: "l_knee", invert: true },
+  { right: "r_ank_pitch", left: "l_ank_pitch", invert: true },
+  { right: "r_ank_roll", left: "l_ank_roll", invert: true },
+];
+
 const JOINT_ID = Object.fromEntries(
   Object.entries(JOINT_META).map(([name, meta]) => [name, meta.id])
 );
@@ -100,13 +113,19 @@ const JOINT_LABELS_ID = Object.fromEntries(
 
 const RAW_CENTER = 2048;
 const RAW_RANGE = 2048;
-const HISTORY_LIMIT = 60;
+const ACTION_MAX_STEPS = 7;
 const PRESET_STORAGE_KEY = "op3PosePresets";
+const ACTION_DRAFT_KEY = "op3ActionEditorDraftYaml";
+const ACTION_DRAFT_META_KEY = "op3ActionEditorDraftMeta";
+const HISTORY_STORAGE_KEY = "op3ActionEditorHistoryV2";
+const SNAPSHOT_STORAGE_KEY = "op3ActionEditorSnapshotsV1";
+const DOC_HISTORY_LIMIT = 120;
+const SNAPSHOT_LIMIT = 40;
+const COALESCE_WINDOW_MS = 300;
 const JOINT_SOURCE_TIMEOUT_MS = 1500;
 const TICK_SECONDS = 0.008;
 
 const DEFAULT_ASSETS = import.meta.env.VITE_ASSETS_URL || "http://localhost:8001";
-const DEFAULT_ROSBRIDGE = import.meta.env.VITE_ROSBRIDGE_URL || "ws://localhost:9090";
 
 function toRadians(raw) { return ((raw - RAW_CENTER) * Math.PI) / RAW_RANGE; }
 function toDegrees(raw) { return ((raw - RAW_CENTER) * 180) / RAW_RANGE; }
@@ -208,11 +227,43 @@ function lookupRawPosition(positions, name, idMap) {
 function setRawPosition(positions, name, idMap, value) {
   if (!positions) return;
   const id = idMap[name];
+  if (value === undefined) {
+    if (Array.isArray(positions)) {
+      if (id !== undefined) delete positions[id];
+      return;
+    }
+    if (typeof positions === "object") {
+      delete positions[name];
+      if (id) delete positions[`id_${id}`];
+    }
+    return;
+  }
   if (Array.isArray(positions)) {
     if (id !== undefined) positions[id] = value;
     return;
   }
   if (typeof positions === "object") positions[name] = value;
+}
+
+function mirrorRawValue(rawValue, invertSign) {
+  if (rawValue === undefined) return undefined;
+  const normalized = normalizeRaw(rawValue);
+  if (normalized === null) return rawValue;
+  if (!invertSign) return clampRaw(normalized);
+  return clampRaw(2 * RAW_CENTER - normalized);
+}
+
+function mirrorStepPositions(positions, idMap, availableNames = null) {
+  const source = (positions && typeof positions === "object") ? positions : {};
+  const target = Array.isArray(source) ? [...source] : { ...source };
+  LEFT_RIGHT_MIRROR_PAIRS.forEach(({ right, left, invert }) => {
+    if (availableNames && (!availableNames.has(right) || !availableNames.has(left))) return;
+    const rightRaw = lookupRawPosition(source, right, idMap);
+    const leftRaw = lookupRawPosition(source, left, idMap);
+    setRawPosition(target, right, idMap, mirrorRawValue(leftRaw, invert));
+    setRawPosition(target, left, idMap, mirrorRawValue(rightRaw, invert));
+  });
+  return target;
 }
 
 const SectionHeader = ({ title, children }) => (
@@ -251,9 +302,64 @@ function buildPose(positions, livePose) {
   return pose;
 }
 
+function normalizePageStepsInPlace(page) {
+  if (!page || typeof page !== "object") return;
+  if (!Array.isArray(page.steps)) page.steps = [];
+  if (page.steps.length > ACTION_MAX_STEPS) {
+    page.steps = page.steps.slice(0, ACTION_MAX_STEPS);
+  }
+  page.steps.forEach((step, idx) => {
+    if (!step || typeof step !== "object") page.steps[idx] = { index: idx, pause: 0, time: 0, positions: {} };
+    page.steps[idx].index = idx;
+  });
+  if (!page.header || typeof page.header !== "object") page.header = {};
+  page.header.stepnum = page.steps.length;
+  const speed = Number(page.header.speed);
+  if (!Number.isFinite(speed) || speed <= 0) page.header.speed = 32;
+}
+
+function findStepByIndex(page, stepIndex) {
+  if (!page || !Array.isArray(page.steps)) return null;
+  const byIndex = page.steps.find(step => Number(step?.index) === Number(stepIndex));
+  if (byIndex) return byIndex;
+  return page.steps[stepIndex] || null;
+}
+
+function normalizeSelection(selection) {
+  return {
+    pageIndex: selection?.pageIndex ?? null,
+    stepIndex: selection?.stepIndex ?? null,
+  };
+}
+
+function sameSelection(a, b) {
+  return (a?.pageIndex ?? null) === (b?.pageIndex ?? null)
+    && (a?.stepIndex ?? null) === (b?.stepIndex ?? null);
+}
+
+function makeHistoryEntry(label, yaml, selection) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ts: Date.now(),
+    label,
+    yamlText: String(yaml ?? ""),
+    selection: normalizeSelection(selection),
+  };
+}
+
+function parseYamlSafe(text) {
+  if (!String(text || "").trim()) return { data: null, error: "" };
+  try {
+    const parsed = YAML.load(text);
+    return { data: parsed || null, error: "" };
+  } catch (err) {
+    return { data: null, error: err?.message || "Invalid YAML" };
+  }
+}
+
 // --- Component ---
 
-export default function ActionEditor({ isActive = true }) {
+export default function ActionEditor({ isActive = true, rosUrl = "" }) {
   const [yamlText, setYamlText] = useState("");
   const [yamlData, setYamlData] = useState(null);
   const [parseError, setParseError] = useState("");
@@ -294,6 +400,10 @@ export default function ActionEditor({ isActive = true }) {
   const [scratchPageIndex, setScratchPageIndex] = useState(250);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
+  const [copySourcePageIndex, setCopySourcePageIndex] = useState("");
+  const [copySourceStepIndex, setCopySourceStepIndex] = useState("");
+  const [copyTargetPageIndex, setCopyTargetPageIndex] = useState("");
+  const [copyTargetStepIndex, setCopyTargetStepIndex] = useState("");
   const [presetName, setPresetName] = useState("");
   const [posePresets, setPosePresets] = useState(() => {
     try {
@@ -309,13 +419,26 @@ export default function ActionEditor({ isActive = true }) {
   const [exportPages, setExportPages] = useState("used");
   const [pageFilter, setPageFilter] = useState("");
   const [jointDrafts, setJointDrafts] = useState({});
+  const [manualOffJoints, setManualOffJoints] = useState(() => new Set());
+  const [hasLocalDraft, setHasLocalDraft] = useState(false);
   const [historyTick, setHistoryTick] = useState(0);
+  const [lastHistoryLabel, setLastHistoryLabel] = useState("");
+  const [snapshotName, setSnapshotName] = useState("");
+  const [snapshots, setSnapshots] = useState(() => {
+    try {
+      const raw = localStorage.getItem(SNAPSHOT_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.slice(0, SNAPSHOT_LIMIT) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const [assetsUrl, setAssetsUrl] = useState(() => localStorage.getItem("op3AssetsUrl") || DEFAULT_ASSETS);
-  const [rosUrl, setRosUrl] = useState(() => localStorage.getItem("op3RosUrl") || DEFAULT_ROSBRIDGE);
   const [rosState, setRosState] = useState("disconnected");
 
   const jointPubRef = useRef(null);
+  const torquePubRef = useRef(null);
   const actionPagePubRef = useRef(null);
   const enableModulePubRef = useRef(null);
   const requestRef = useRef(null);
@@ -325,7 +448,17 @@ export default function ActionEditor({ isActive = true }) {
   const lastJointSourceRef = useRef({ hardware: 0, sim: 0 });
   const livePoseRef = useRef({});
   const pendingRunRef = useRef(null);
-  const historyRef = useRef({});
+  const historyRef = useRef({
+    undo: [],
+    redo: [],
+    lastCommitted: {
+      yamlText: "",
+      selection: { pageIndex: null, stepIndex: null },
+    },
+  });
+  const historyCoalesceRef = useRef({ key: "", ts: 0 });
+  const suppressYamlHistoryRef = useRef(false);
+  const yamlDirtyRef = useRef(false);
   const recordRef = useRef({ lastTime: null, lastStepIndex: null, lastPageIndex: null });
   const timelineRef = useRef({ lastTime: null });
 
@@ -345,12 +478,20 @@ export default function ActionEditor({ isActive = true }) {
     return { names, nameToId };
   }, [yamlData]);
   const jointIdMap = useMemo(() => Object.keys(jointMeta.nameToId).length ? jointMeta.nameToId : JOINT_ID, [jointMeta]);
+  const editableJointNames = useMemo(
+    () => (jointMeta.names.length ? jointMeta.names : JOINT_ORDER),
+    [jointMeta]
+  );
   const jointNames = useMemo(() => showAllJoints && jointMeta.names.length ? jointMeta.names : JOINT_ORDER, [showAllJoints, jointMeta]);
   const visiblePages = useMemo(() => {
     const filter = pageFilter.trim().toLowerCase();
     if (!filter) return pages;
     return pages.filter(p => (p.name || "").toLowerCase().includes(filter) || String(p.index).includes(filter));
   }, [pages, pageFilter]);
+  const sortedPages = useMemo(
+    () => [...pages].sort((a, b) => Number(a.index) - Number(b.index)),
+    [pages]
+  );
   
   const activePage = useMemo(() => selectedPageIndex === null ? null : pages.find(p => p.index === selectedPageIndex) || null, [pages, selectedPageIndex]);
   
@@ -412,12 +553,186 @@ export default function ActionEditor({ isActive = true }) {
     controlsRef.current.update();
   };
 
+  const cloneData = (data) => JSON.parse(JSON.stringify(data));
+
+  const currentSelection = () => normalizeSelection({
+    pageIndex: selectedPageIndex,
+    stepIndex: selectedStepIndex,
+  });
+
+  const updateCommittedState = (yamlValue, selectionValue) => {
+    historyRef.current.lastCommitted = {
+      yamlText: String(yamlValue ?? ""),
+      selection: normalizeSelection(selectionValue),
+    };
+  };
+
+  const applyDocumentState = (state, options = {}) => {
+    const nextYamlText = String(state?.yamlText ?? "");
+    const nextSelection = normalizeSelection(state?.selection);
+    const parsed = options.parsed || parseYamlSafe(nextYamlText);
+    suppressYamlHistoryRef.current = true;
+    setYamlText(nextYamlText);
+    setYamlData(parsed.data);
+    setParseError(parsed.error);
+    setSelectedPageIndex(nextSelection.pageIndex);
+    setSelectedStepIndex(nextSelection.stepIndex);
+    setJointDrafts({});
+    updateCommittedState(nextYamlText, nextSelection);
+  };
+
+  const pushUndoState = (label, state, options = {}) => {
+    const snapshot = {
+      yamlText: String(state?.yamlText ?? ""),
+      selection: normalizeSelection(state?.selection),
+    };
+    const top = historyRef.current.undo[historyRef.current.undo.length - 1];
+    if (top && top.yamlText === snapshot.yamlText && sameSelection(top.selection, snapshot.selection)) return;
+
+    const now = Date.now();
+    const coalesceKey = options.coalesceKey || "";
+    const recent = historyCoalesceRef.current;
+    const canCoalesce = Boolean(
+      coalesceKey
+      && recent.key === coalesceKey
+      && (now - recent.ts) <= COALESCE_WINDOW_MS
+    );
+
+    if (!canCoalesce) {
+      historyRef.current.undo.push(makeHistoryEntry(label, snapshot.yamlText, snapshot.selection));
+      if (historyRef.current.undo.length > DOC_HISTORY_LIMIT) historyRef.current.undo.shift();
+    }
+
+    historyCoalesceRef.current = { key: coalesceKey, ts: now };
+  };
+
+  const commitDocumentState = (label, nextState, options = {}) => {
+    const nextYamlText = String(nextState?.yamlText ?? "");
+    const nextSelection = normalizeSelection(nextState?.selection ?? currentSelection());
+    const currSelection = currentSelection();
+    const currYamlText = String(yamlText ?? "");
+    const unchanged = currYamlText === nextYamlText && sameSelection(currSelection, nextSelection);
+    if (unchanged) return false;
+
+    pushUndoState(label, { yamlText: currYamlText, selection: currSelection }, { coalesceKey: options.coalesceKey });
+    historyRef.current.redo = [];
+    applyDocumentState({ yamlText: nextYamlText, selection: nextSelection }, { parsed: options.parsed });
+    setLastHistoryLabel(label);
+    setHistoryTick((t) => t + 1);
+    return true;
+  };
+
+  const mutateYaml = (label, updater, options = {}) => {
+    if (!yamlData) return false;
+    const next = cloneData(yamlData);
+    updater(next);
+    if (Array.isArray(next.pages)) next.pages.forEach(normalizePageStepsInPlace);
+    const nextYamlText = YAML.dump(next, { sortKeys: false, lineWidth: -1 });
+    const nextSelection = options.nextSelection || currentSelection();
+    return commitDocumentState(label, { yamlText: nextYamlText, selection: nextSelection }, {
+      coalesceKey: options.coalesceKey,
+      parsed: { data: next, error: "" },
+    });
+  };
+
   // --- Effects ---
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(ACTION_DRAFT_KEY);
+      if (!saved || !saved.trim()) return;
+      setYamlText(saved);
+      updateCommittedState(saved, { pageIndex: null, stepIndex: null });
+      setHasLocalDraft(true);
+      setStatus("Restored local draft");
+      setStatusError(false);
+    } catch {
+      // Ignore localStorage read errors in restrictive browser contexts.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const sanitizeEntries = (entries) => (
+        Array.isArray(entries)
+          ? entries
+            .filter((entry) => entry && typeof entry.yamlText === "string")
+            .map((entry) => ({
+              ...entry,
+              selection: normalizeSelection(entry.selection),
+            }))
+            .slice(-DOC_HISTORY_LIMIT)
+          : []
+      );
+
+      historyRef.current.undo = sanitizeEntries(parsed?.undo);
+      historyRef.current.redo = sanitizeEntries(parsed?.redo);
+      const current = parsed?.current && typeof parsed.current.yamlText === "string"
+        ? {
+          yamlText: parsed.current.yamlText,
+          selection: normalizeSelection(parsed.current.selection),
+        }
+        : null;
+
+      if (current) {
+        applyDocumentState(current);
+      }
+      if (typeof parsed?.lastHistoryLabel === "string") {
+        setLastHistoryLabel(parsed.lastHistoryLabel);
+      }
+      setHistoryTick((t) => t + 1);
+    } catch {
+      // Ignore history restore issues.
+    }
+  }, []);
+
   useEffect(() => { localStorage.setItem("op3AssetsUrl", assetsUrl); }, [assetsUrl]);
-  useEffect(() => { localStorage.setItem("op3RosUrl", rosUrl); }, [rosUrl, autoEnableAction]);
   useEffect(() => { localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(posePresets)); }, [posePresets]);
   useEffect(() => { localStorage.setItem("op3SendStepToWebots", sendStepToWebots ? "1" : "0"); }, [sendStepToWebots]);
   useEffect(() => { localStorage.setItem("op3JointGridColumns", String(jointGridColumns)); }, [jointGridColumns]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots.slice(0, SNAPSHOT_LIMIT)));
+    } catch {
+      // Ignore snapshot persistence failures.
+    }
+  }, [snapshots]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify({
+        undo: historyRef.current.undo.slice(-DOC_HISTORY_LIMIT),
+        redo: historyRef.current.redo.slice(-DOC_HISTORY_LIMIT),
+        current: historyRef.current.lastCommitted,
+        lastHistoryLabel,
+      }));
+    } catch {
+      // Ignore history persistence failures.
+    }
+  }, [historyTick, lastHistoryLabel]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      try {
+        if (!yamlText.trim()) {
+          localStorage.removeItem(ACTION_DRAFT_KEY);
+          localStorage.removeItem(ACTION_DRAFT_META_KEY);
+          setHasLocalDraft(false);
+          return;
+        }
+        localStorage.setItem(ACTION_DRAFT_KEY, yamlText);
+        localStorage.setItem(
+          ACTION_DRAFT_META_KEY,
+          JSON.stringify({ saved_at: Date.now(), source: "autosave" })
+        );
+        setHasLocalDraft(true);
+      } catch {
+        // Ignore localStorage write errors.
+      }
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [yamlText]);
   
   useEffect(() => {
     if (!yamlText.trim()) { setYamlData(null); setParseError(""); return; }
@@ -433,6 +748,39 @@ export default function ActionEditor({ isActive = true }) {
     }, 250);
     return () => window.clearTimeout(handle);
   }, [yamlText]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (suppressYamlHistoryRef.current) {
+        suppressYamlHistoryRef.current = false;
+        return;
+      }
+      if (!yamlDirtyRef.current) return;
+      if (parseError) return;
+      const committed = historyRef.current.lastCommitted;
+      const selection = currentSelection();
+      if (committed.yamlText === yamlText && sameSelection(committed.selection, selection)) {
+        yamlDirtyRef.current = false;
+        return;
+      }
+      pushUndoState("Edit YAML", committed, { coalesceKey: "yaml-edit" });
+      historyRef.current.redo = [];
+      updateCommittedState(yamlText, selection);
+      setLastHistoryLabel("Edit YAML");
+      setHistoryTick((t) => t + 1);
+      yamlDirtyRef.current = false;
+    }, 500);
+    return () => window.clearTimeout(handle);
+  }, [yamlText, parseError, selectedPageIndex, selectedStepIndex]);
+
+  useEffect(() => {
+    if (suppressYamlHistoryRef.current || yamlDirtyRef.current || parseError) return;
+    const selection = currentSelection();
+    const committed = historyRef.current.lastCommitted;
+    if (committed.yamlText === yamlText && sameSelection(committed.selection, selection)) return;
+    updateCommittedState(yamlText, selection);
+    setHistoryTick((t) => t + 1);
+  }, [yamlText, parseError, selectedPageIndex, selectedStepIndex]);
 
   useEffect(() => {
     if (pages.length && !pages.find(p => p.index === selectedPageIndex)) {
@@ -458,6 +806,18 @@ export default function ActionEditor({ isActive = true }) {
   }, [activeStep, selectedStepIndex]);
 
   useEffect(() => {
+    if (selectedPageIndex === null || selectedPageIndex === undefined) return;
+    setCopySourcePageIndex(prev => (prev === "" ? String(selectedPageIndex) : prev));
+    setCopyTargetPageIndex(prev => (prev === "" ? String(selectedPageIndex) : prev));
+  }, [selectedPageIndex]);
+
+  useEffect(() => {
+    if (selectedStepIndex === null || selectedStepIndex === undefined) return;
+    setCopySourceStepIndex(prev => (prev === "" ? String(selectedStepIndex) : prev));
+    setCopyTargetStepIndex(prev => (prev === "" ? String(selectedStepIndex) : prev));
+  }, [selectedStepIndex]);
+
+  useEffect(() => {
     recordRef.current = { lastTime: null, lastStepIndex: null, lastPageIndex: selectedPageIndex };
     setRecordElapsed(0); setRecordLastDelta(null); setRecordLastTicks(null);
   }, [recordEnabled, selectedPageIndex]);
@@ -481,6 +841,7 @@ export default function ActionEditor({ isActive = true }) {
     ros.on("close", () => setRosState("disconnected"));
 
     jointPubRef.current = new ROSLIB.Topic({ ros, name: "/webots/joint_positions", messageType: "std_msgs/Float64MultiArray" });
+    torquePubRef.current = new ROSLIB.Topic({ ros, name: "/robotis/sync_write_item", messageType: "robotis_controller_msgs/SyncWriteItem" });
     actionPagePubRef.current = new ROSLIB.Topic({ ros, name: "/robotis/action/page_num", messageType: "std_msgs/Int32" });
     enableModulePubRef.current = new ROSLIB.Topic({ ros, name: "/robotis/enable_ctrl_module", messageType: "std_msgs/String" });
     requestRef.current = new ROSLIB.Topic({ ros, name: "/bascorro_studio/request", messageType: "std_msgs/String" });
@@ -493,6 +854,15 @@ export default function ActionEditor({ isActive = true }) {
         setStatus(msgText);
         setStatusError(!payload.ok);
         if (payload.action === "export" && payload.yaml) setYamlText(payload.yaml);
+        if (payload.action === "apply" && payload.ok) {
+          try {
+            localStorage.removeItem(ACTION_DRAFT_KEY);
+            localStorage.removeItem(ACTION_DRAFT_META_KEY);
+          } catch {
+            // Ignore localStorage clear errors.
+          }
+          setHasLocalDraft(false);
+        }
         
         const pending = pendingRunRef.current;
         if (pending && payload.request_id === pending.requestId) {
@@ -701,28 +1071,21 @@ export default function ActionEditor({ isActive = true }) {
   const handleApply = () => { sendRequest({ action: "apply", yaml: yamlText }); setStatus("Applying..."); setStatusError(false); };
   const handleExport = () => { sendRequest({ action: "export", pages: exportPages }); setStatus("Exporting..."); setStatusError(false); };
 
-  const cloneData = (data) => JSON.parse(JSON.stringify(data));
-  const updateYamlData = (updater) => {
-    if (!yamlData) return;
-    const next = cloneData(yamlData);
-    updater(next);
-    setYamlData(next);
-    setYamlText(YAML.dump(next, { sortKeys: false, lineWidth: -1 }));
-  };
+  const updateYamlData = (label, updater, options = {}) => mutateYaml(label, updater, options);
 
-  const updateActivePage = (updater) => updateYamlData(draft => {
-    const p = draft.pages?.find(i => i.index === activePage.index);
-    if(p) updater(p);
-  });
+  const updateActivePage = (updater, options = {}) => updateYamlData(options.label || "Edit page", (draft) => {
+    const p = draft.pages?.find((i) => i.index === activePage?.index);
+    if (p) updater(p);
+  }, { coalesceKey: options.coalesceKey || "active-page" });
 
-  const updateActiveStep = (updater) => {
+  const updateActiveStep = (updater, options = {}) => {
     if (!activePage || selectedStepIndex === null) return;
-    updateYamlData(draft => {
+    updateYamlData(options.label || "Edit step", (draft) => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if(!p?.steps) return;
       const step = p.steps.find(s => Number(s.index) === Number(selectedStepIndex)) || p.steps[selectedStepIndex];
       if(step) updater(step, p);
-    });
+    }, { coalesceKey: options.coalesceKey || "active-step" });
   };
 
   const findNextPageIndex = (existingPages) => {
@@ -747,16 +1110,75 @@ export default function ActionEditor({ isActive = true }) {
       return;
     }
     const name = `Page ${nextIndex}`;
-    const header = { repeat: 1, schedule: 0, speed: 0, accel: 0, next: 0, exit: 0 };
-    updateYamlData(draft => {
+    const header = { repeat: 1, schedule: 0, stepnum: 0, speed: 32, accel: 0, next: 0, exit: 0 };
+    updateYamlData("Add page", (draft) => {
       if (!Array.isArray(draft.pages)) draft.pages = [];
       draft.pages.push({ index: nextIndex, name, header, steps: [] });
       draft.pages.sort((a, b) => Number(a.index) - Number(b.index));
+    }, {
+      nextSelection: { pageIndex: nextIndex, stepIndex: null },
     });
-    setSelectedPageIndex(nextIndex);
-    setSelectedStepIndex(null);
     setPreviewPose(null);
     setStatus(`Added ${name}`);
+    setStatusError(false);
+  };
+
+  const handleDuplicatePage = () => {
+    if (!activePage || editorDisabled) return;
+    const nextIndex = findNextPageIndex(pages);
+    if (nextIndex === null) {
+      setStatus("No free page index (1-255)");
+      setStatusError(true);
+      return;
+    }
+
+    const sourceIndex = activePage.index;
+    const sourceName = typeof activePage.name === "string" && activePage.name.trim()
+      ? activePage.name.trim()
+      : `Page ${sourceIndex}`;
+
+    updateYamlData("Duplicate page", (draft) => {
+      const sourcePage = draft.pages?.find(p => p.index === sourceIndex);
+      if (!sourcePage) return;
+      if (!Array.isArray(draft.pages)) draft.pages = [];
+
+      const duplicatePage = cloneData(sourcePage);
+      duplicatePage.index = nextIndex;
+      duplicatePage.name = `${sourceName} (copy)`;
+      if (!Array.isArray(duplicatePage.steps)) duplicatePage.steps = [];
+      duplicatePage.steps.forEach((step, idx) => { step.index = idx; });
+
+      draft.pages.push(duplicatePage);
+      draft.pages.sort((a, b) => Number(a.index) - Number(b.index));
+    }, {
+      nextSelection: { pageIndex: nextIndex, stepIndex: null },
+    });
+
+    setPreviewPose(null);
+    setJointDrafts({});
+    setStatus(`Duplicated page ${sourceIndex} -> ${nextIndex}`);
+    setStatusError(false);
+  };
+
+  const handleMirrorPage = () => {
+    if (!activePage || editorDisabled) return;
+    const names = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
+    const availableNames = new Set(names);
+    const mirroredActive = activeStep
+      ? mirrorStepPositions(activeStep.positions || {}, jointIdMap, availableNames)
+      : null;
+    updateYamlData("Mirror page", (draft) => {
+      const page = draft.pages?.find(p => p.index === activePage.index);
+      if (!page || !Array.isArray(page.steps)) return;
+      page.steps.forEach((step, idx) => {
+        const sourcePositions = step?.positions || {};
+        step.positions = mirrorStepPositions(sourcePositions, jointIdMap, availableNames);
+        step.index = idx;
+      });
+    });
+    setJointDrafts({});
+    setPreviewPose(mirroredActive ? buildPose(mirroredActive, livePoseRef.current) : null);
+    setStatus(`Mirrored page ${activePage.index} L/R`);
     setStatusError(false);
   };
 
@@ -775,16 +1197,22 @@ export default function ActionEditor({ isActive = true }) {
 
   const handleAddStep = () => {
     if (!activePage || editorDisabled) return;
+    if ((activePage.steps?.length || 0) >= ACTION_MAX_STEPS) {
+      setStatus(`Max ${ACTION_MAX_STEPS} steps per page`);
+      setStatusError(true);
+      return;
+    }
     const insertAt = getInsertStepIndex();
-    updateYamlData(draft => {
+    updateYamlData("Add step", (draft) => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if (!p) return;
       if (!Array.isArray(p.steps)) p.steps = [];
       const newStep = { index: 0, pause: 0, time: 0, positions: {} };
       p.steps.splice(insertAt, 0, newStep);
       p.steps.forEach((step, idx) => { step.index = idx; });
+    }, {
+      nextSelection: { pageIndex: activePage.index, stepIndex: insertAt },
     });
-    setSelectedStepIndex(insertAt);
     setPreviewPose(buildPose({}, livePoseRef.current));
     setStatus(`Added step ${insertAt}`);
     setStatusError(false);
@@ -792,34 +1220,151 @@ export default function ActionEditor({ isActive = true }) {
 
   const handleDuplicateStep = () => {
     if (!activePage || !activeStep || editorDisabled) return;
+    if ((activePage.steps?.length || 0) >= ACTION_MAX_STEPS) {
+      setStatus(`Max ${ACTION_MAX_STEPS} steps per page`);
+      setStatusError(true);
+      return;
+    }
     const insertAt = getInsertStepIndex();
     const stepCopy = cloneData(activeStep.positions || {});
-    updateYamlData(draft => {
+    updateYamlData("Duplicate step", (draft) => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if (!p) return;
       if (!Array.isArray(p.steps)) p.steps = [];
       const newStep = { index: 0, pause: activeStep.pause ?? 0, time: activeStep.time ?? 0, positions: stepCopy };
       p.steps.splice(insertAt, 0, newStep);
       p.steps.forEach((step, idx) => { step.index = idx; });
+    }, {
+      nextSelection: { pageIndex: activePage.index, stepIndex: insertAt },
     });
-    setSelectedStepIndex(insertAt);
     setPreviewPose(buildPose(stepCopy, livePoseRef.current));
     setStatus(`Duplicated step ${activeStep.index ?? selectedStepIndex}`);
+    setStatusError(false);
+  };
+
+  const handleCopyStepToTarget = () => {
+    if (editorDisabled || !yamlData) return;
+    const sourcePage = Number(copySourcePageIndex);
+    const sourceStep = Number(copySourceStepIndex);
+    const targetPage = Number(copyTargetPageIndex);
+    const targetStep = Number(copyTargetStepIndex);
+
+    if (!Number.isInteger(sourcePage) || sourcePage < 1 || sourcePage > 255) {
+      setStatus("Invalid source page (1-255)");
+      setStatusError(true);
+      return;
+    }
+    if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > 255) {
+      setStatus("Invalid target page (1-255)");
+      setStatusError(true);
+      return;
+    }
+    if (!Number.isInteger(sourceStep) || sourceStep < 0 || sourceStep >= ACTION_MAX_STEPS) {
+      setStatus(`Invalid source step (0-${ACTION_MAX_STEPS - 1})`);
+      setStatusError(true);
+      return;
+    }
+    if (!Number.isInteger(targetStep) || targetStep < 0 || targetStep >= ACTION_MAX_STEPS) {
+      setStatus(`Invalid target step (0-${ACTION_MAX_STEPS - 1})`);
+      setStatusError(true);
+      return;
+    }
+    if (sourcePage === targetPage && sourceStep === targetStep) {
+      setStatus("Source and target are same step");
+      setStatusError(false);
+      return;
+    }
+
+    const sourcePageData = pages.find(p => Number(p.index) === sourcePage);
+    const targetPageData = pages.find(p => Number(p.index) === targetPage);
+    if (!sourcePageData) {
+      setStatus(`Source page ${sourcePage} not found`);
+      setStatusError(true);
+      return;
+    }
+    if (!targetPageData) {
+      setStatus(`Target page ${targetPage} not found`);
+      setStatusError(true);
+      return;
+    }
+    const sourceStepData = findStepByIndex(sourcePageData, sourceStep);
+    if (!sourceStepData) {
+      setStatus(`Source step ${sourceStep} not found in page ${sourcePage}`);
+      setStatusError(true);
+      return;
+    }
+
+    const sourcePositions = sourceStepData.positions;
+    const copiedStep = {
+      positions: cloneData(sourcePositions || (Array.isArray(sourcePositions) ? [] : {})),
+      time: sourceStepData.time ?? 0,
+      pause: sourceStepData.pause ?? 0,
+    };
+
+    let copied = false;
+    updateYamlData("Copy step", (draft) => {
+      const targetPageDraft = draft.pages?.find(p => Number(p.index) === targetPage);
+      if (!targetPageDraft) return;
+      if (!Array.isArray(targetPageDraft.steps)) targetPageDraft.steps = [];
+      while (targetPageDraft.steps.length <= targetStep) {
+        if (targetPageDraft.steps.length >= ACTION_MAX_STEPS) return;
+        targetPageDraft.steps.push({ index: targetPageDraft.steps.length, pause: 0, time: 0, positions: {} });
+      }
+      if (!targetPageDraft.steps[targetStep] || typeof targetPageDraft.steps[targetStep] !== "object") {
+        targetPageDraft.steps[targetStep] = { index: targetStep, pause: 0, time: 0, positions: {} };
+      }
+      const targetStepDraft = targetPageDraft.steps[targetStep];
+      targetStepDraft.positions = cloneData(copiedStep.positions);
+      targetStepDraft.time = copiedStep.time;
+      targetStepDraft.pause = copiedStep.pause;
+      copied = true;
+    }, {
+      nextSelection: Number(selectedPageIndex) === targetPage && Number(selectedStepIndex) === targetStep
+        ? { pageIndex: targetPage, stepIndex: targetStep }
+        : currentSelection(),
+    });
+
+    if (!copied) {
+      setStatus("Copy failed: target step unavailable");
+      setStatusError(true);
+      return;
+    }
+
+    if (Number(selectedPageIndex) === targetPage && Number(selectedStepIndex) === targetStep) {
+      setPreviewPose(buildPose(copiedStep.positions || {}, livePoseRef.current));
+      setJointDrafts({});
+    }
+    setStatus(`Copied P${sourcePage}S${sourceStep} -> P${targetPage}S${targetStep}`);
     setStatusError(false);
   };
 
   const handleCapturePose = () => {
     if (!activeStep || editorDisabled) return;
     const live = livePoseRef.current || {};
-    const captureNames = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
-    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
-    if (!hasLive) {
-      setStatus("No live pose available");
+    const captureNames = editableJointNames.filter(name => manualOffJoints.has(name));
+    if (!captureNames.length) {
+      setStatus("No OFF joints selected");
       setStatusError(true);
       return;
     }
-    pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
-    updateActiveStep(s => {
+    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
+    if (!hasLive) {
+      setStatus("No live pose available for OFF joints");
+      setStatusError(true);
+      return;
+    }
+    const captured = [];
+    const previewPositions = cloneData(
+      activeStep.positions || (Array.isArray(activeStep.positions) ? [] : {})
+    );
+    captureNames.forEach(name => {
+      const rad = live[name];
+      if (!Number.isFinite(rad)) return;
+      const raw = toRawDegrees((rad * 180) / Math.PI);
+      captured.push({ name, raw });
+      setRawPosition(previewPositions, name, jointIdMap, raw);
+    });
+    updateActiveStep((s) => {
       if (!s.positions || typeof s.positions !== "object") s.positions = {};
       captureNames.forEach(name => {
         const rad = live[name];
@@ -827,78 +1372,108 @@ export default function ActionEditor({ isActive = true }) {
         const raw = toRawDegrees((rad * 180) / Math.PI);
         setRawPosition(s.positions, name, jointIdMap, raw);
       });
-    });
+    }, { label: "Capture OFF joints", coalesceKey: "capture-off-joints" });
     setJointDrafts({});
-    setPreviewPose({ ...live });
-    setStatus("Captured live pose");
+    setPreviewPose(buildPose(previewPositions, livePoseRef.current));
+
+    const capturedNames = captured.map(item => item.name);
+    const capturedValues = captured.map(item => item.raw);
+    const turnedOn = applyCapturedTargetsToRobot(capturedNames, capturedValues);
+
+    if (turnedOn) {
+      setManualOffJoints(prev => {
+        const next = new Set(prev);
+        capturedNames.forEach(name => next.delete(name));
+        return next;
+      });
+      setStatus(`Captured ${captured.length} OFF joint(s) and auto ON`);
+    } else if (captured.length) {
+      setStatus(`Captured ${captured.length} OFF joint(s), auto ON skipped`);
+    } else {
+      setStatus("No OFF joints had live pose");
+      setStatusError(true);
+      return;
+    }
     setStatusError(false);
   };
 
   const handleCapturePoseToNewStep = () => {
     if (!activePage || !activeStep || editorDisabled) return;
-    const live = livePoseRef.current || {};
-    const captureNames = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
-    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
-    if (!hasLive) {
-      setStatus("No live pose available");
+    if ((activePage.steps?.length || 0) >= ACTION_MAX_STEPS) {
+      setStatus(`Max ${ACTION_MAX_STEPS} steps per page`);
       setStatusError(true);
       return;
     }
-    const positions = Array.isArray(activeStep.positions) ? [] : {};
+    const live = livePoseRef.current || {};
+    const captureNames = editableJointNames.filter(name => manualOffJoints.has(name));
+    if (!captureNames.length) {
+      setStatus("No OFF joints selected");
+      setStatusError(true);
+      return;
+    }
+    const hasLive = captureNames.some(name => Number.isFinite(live[name]));
+    if (!hasLive) {
+      setStatus("No live pose available for OFF joints");
+      setStatusError(true);
+      return;
+    }
+    const captured = [];
+    const positions = cloneData(
+      activeStep.positions || (Array.isArray(activeStep.positions) ? [] : {})
+    );
     captureNames.forEach(name => {
       const rad = live[name];
       if (!Number.isFinite(rad)) return;
       const raw = toRawDegrees((rad * 180) / Math.PI);
+      captured.push({ name, raw });
       setRawPosition(positions, name, jointIdMap, raw);
     });
     const insertAt = getInsertStepIndex();
-    updateYamlData(draft => {
+    updateYamlData("Capture OFF joints to new step", (draft) => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if (!p) return;
       if (!Array.isArray(p.steps)) p.steps = [];
       const newStep = { index: 0, pause: activeStep.pause ?? 0, time: activeStep.time ?? 0, positions };
       p.steps.splice(insertAt, 0, newStep);
       p.steps.forEach((step, idx) => { step.index = idx; });
+    }, {
+      nextSelection: { pageIndex: activePage.index, stepIndex: insertAt },
     });
-    setSelectedStepIndex(insertAt);
-    setPreviewPose({ ...live });
+    setPreviewPose(buildPose(positions, livePoseRef.current));
     setJointDrafts({});
-    setStatus("Captured pose to new step");
+
+    const capturedNames = captured.map(item => item.name);
+    const capturedValues = captured.map(item => item.raw);
+    const turnedOn = applyCapturedTargetsToRobot(capturedNames, capturedValues);
+
+    if (turnedOn) {
+      setManualOffJoints(prev => {
+        const next = new Set(prev);
+        capturedNames.forEach(name => next.delete(name));
+        return next;
+      });
+      setStatus(`Captured ${captured.length} OFF joint(s) to new step and auto ON`);
+    } else if (captured.length) {
+      setStatus(`Captured ${captured.length} OFF joint(s) to new step, auto ON skipped`);
+    } else {
+      setStatus("No OFF joints had live pose");
+      setStatusError(true);
+      return;
+    }
     setStatusError(false);
   };
 
   const handleSwapLeftRight = () => {
     if (!activeStep || editorDisabled) return;
     const names = jointMeta.names.length ? jointMeta.names : JOINT_ORDER;
-    const nameSet = new Set(names);
-    const current = {};
-    names.forEach(name => {
-      current[name] = lookupRawPosition(activeStep.positions || {}, name, jointIdMap);
-    });
-    pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
-    updateActiveStep(s => {
-      if (!s.positions || typeof s.positions !== "object") {
-        s.positions = Array.isArray(activeStep.positions) ? [] : {};
-      }
-      names.forEach(name => {
-        if (!name.startsWith("r_")) return;
-        const other = `l_${name.slice(2)}`;
-        if (!nameSet.has(other)) return;
-        setRawPosition(s.positions, name, jointIdMap, current[other]);
-        setRawPosition(s.positions, other, jointIdMap, current[name]);
-      });
-    });
-    const previewPositions = cloneData(activeStep.positions || {});
-    names.forEach(name => {
-      if (!name.startsWith("r_")) return;
-      const other = `l_${name.slice(2)}`;
-      if (!nameSet.has(other)) return;
-      setRawPosition(previewPositions, name, jointIdMap, current[other]);
-      setRawPosition(previewPositions, other, jointIdMap, current[name]);
-    });
+    const availableNames = new Set(names);
+    const mirrored = mirrorStepPositions(activeStep.positions || {}, jointIdMap, availableNames);
+    updateActiveStep((s) => {
+      s.positions = cloneData(mirrored);
+    }, { label: "Mirror step L/R", coalesceKey: "mirror-step" });
     setJointDrafts({});
-    setPreviewPose(buildPose(previewPositions, livePoseRef.current));
-    setStatus("Swapped left/right joints");
+    setPreviewPose(buildPose(mirrored, livePoseRef.current));
+    setStatus("Mirrored step L/R");
     setStatusError(false);
   };
 
@@ -927,13 +1502,12 @@ export default function ActionEditor({ isActive = true }) {
     const sortedPages = [...pages].sort((a, b) => Number(a.index) - Number(b.index));
     const currentIdx = sortedPages.findIndex(p => p.index === pageIndex);
     const nextPage = sortedPages[currentIdx + 1] || sortedPages[currentIdx - 1] || null;
-    updateYamlData(draft => {
+    updateYamlData("Delete page", (draft) => {
       if (!Array.isArray(draft.pages)) return;
       draft.pages = draft.pages.filter(p => p.index !== pageIndex);
+    }, {
+      nextSelection: { pageIndex: nextPage ? nextPage.index : null, stepIndex: null },
     });
-    clearPageStepHistory(pageIndex);
-    setSelectedPageIndex(nextPage ? nextPage.index : null);
-    setSelectedStepIndex(null);
     setPreviewPose(null);
     setJointDrafts({});
     setStatus(`Deleted page ${pageIndex}`);
@@ -952,7 +1526,7 @@ export default function ActionEditor({ isActive = true }) {
     const remaining = steps.filter((_, idx) => idx !== removeIndex);
     const nextSelected = remaining.length ? Math.min(removeIndex, remaining.length - 1) : null;
     const nextStep = nextSelected !== null ? remaining[nextSelected] : null;
-    updateYamlData(draft => {
+    updateYamlData("Delete step", (draft) => {
       const p = draft.pages?.find(i => i.index === activePage.index);
       if (!p?.steps) return;
       const byIdx = p.steps.findIndex(s => Number(s.index) === Number(selectedStepIndex));
@@ -960,111 +1534,210 @@ export default function ActionEditor({ isActive = true }) {
       if (removeAt < 0 || removeAt >= p.steps.length) return;
       p.steps.splice(removeAt, 1);
       p.steps.forEach((step, idx) => { step.index = idx; });
+    }, {
+      nextSelection: { pageIndex: activePage.index, stepIndex: nextSelected },
     });
-    clearPageStepHistory(activePage.index);
-    setSelectedStepIndex(nextSelected);
     setPreviewPose(nextStep ? buildPose(nextStep.positions || {}, livePoseRef.current) : null);
     setJointDrafts({});
     setStatus(`Deleted step ${stepLabel}`);
     setStatusError(false);
   };
 
-  const stepHistoryKey = (pi=selectedPageIndex, si=selectedStepIndex) => (pi !== null && si !== null) ? `${pi}:${si}` : null;
-  const snapshotStep = (s) => ({ positions: cloneData(s?.positions||{}), time: s?.time??0, pause: s?.pause??0 });
-  const pushStepHistory = (key, snap) => {
-    if(!key) return;
-    const h = historyRef.current[key] || { undo: [], redo: [] };
-    const last = h.undo[h.undo.length-1];
-    if(last && JSON.stringify(last) === JSON.stringify(snap)) return;
-    h.undo.push(cloneData(snap));
-    if(h.undo.length > HISTORY_LIMIT) h.undo.shift();
-    h.redo = [];
-    historyRef.current[key] = h;
-    setHistoryTick(t => t+1);
-  };
-
-  const clearPageStepHistory = (pageIndex) => {
-    if (pageIndex === null || pageIndex === undefined) return;
-    const prefix = `${pageIndex}:`;
-    const next = {};
-    Object.entries(historyRef.current).forEach(([key, value]) => {
-      if (!key.startsWith(prefix)) next[key] = value;
+  const handleUndoDocument = () => {
+    if (!historyRef.current.undo.length) return;
+    const previous = historyRef.current.undo.pop();
+    historyRef.current.redo.push(makeHistoryEntry(
+      lastHistoryLabel || "Current",
+      yamlText,
+      currentSelection(),
+    ));
+    if (historyRef.current.redo.length > DOC_HISTORY_LIMIT) historyRef.current.redo.shift();
+    historyCoalesceRef.current = { key: "", ts: 0 };
+    applyDocumentState({
+      yamlText: previous.yamlText,
+      selection: previous.selection,
     });
-    historyRef.current = next;
-    setHistoryTick(t => t+1);
+    setLastHistoryLabel(previous.label || "Undo");
+    setStatus(`Undo: ${previous.label || "Change"}`);
+    setStatusError(false);
+    setHistoryTick((t) => t + 1);
   };
 
-  const handleUndoStep = () => {
-    const key = stepHistoryKey();
-    if(!key || !activeStep) return;
-    const h = historyRef.current[key];
-    if(!h?.undo.length) return;
-    const curr = snapshotStep(activeStep);
-    const prev = h.undo.pop();
-    h.redo.push(curr);
-    updateActiveStep(s => { s.positions = prev.positions; s.time = prev.time; s.pause = prev.pause; });
-    setHistoryTick(t => t+1); setJointDrafts({});
+  const handleRedoDocument = () => {
+    if (!historyRef.current.redo.length) return;
+    const next = historyRef.current.redo.pop();
+    historyRef.current.undo.push(makeHistoryEntry(
+      lastHistoryLabel || "Current",
+      yamlText,
+      currentSelection(),
+    ));
+    if (historyRef.current.undo.length > DOC_HISTORY_LIMIT) historyRef.current.undo.shift();
+    historyCoalesceRef.current = { key: "", ts: 0 };
+    applyDocumentState({
+      yamlText: next.yamlText,
+      selection: next.selection,
+    });
+    setLastHistoryLabel(next.label || "Redo");
+    setStatus(`Redo: ${next.label || "Change"}`);
+    setStatusError(false);
+    setHistoryTick((t) => t + 1);
   };
 
-  const handleRedoStep = () => {
-    const key = stepHistoryKey();
-    if(!key || !activeStep) return;
-    const h = historyRef.current[key];
-    if(!h?.redo.length) return;
-    const curr = snapshotStep(activeStep);
-    const next = h.redo.pop();
-    h.undo.push(curr);
-    updateActiveStep(s => { s.positions = next.positions; s.time = next.time; s.pause = next.pause; });
-    setHistoryTick(t => t+1); setJointDrafts({});
+  const canUndo = useMemo(() => historyRef.current.undo.length > 0, [historyTick]);
+  const canRedo = useMemo(() => historyRef.current.redo.length > 0, [historyTick]);
+
+  const handleCreateSnapshot = () => {
+    const trimmed = snapshotName.trim();
+    const generated = `Snapshot ${new Date().toLocaleTimeString()}`;
+    const name = trimmed || generated;
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      ts: Date.now(),
+      yamlText,
+      selection: currentSelection(),
+    };
+    setSnapshots((prev) => [entry, ...prev].slice(0, SNAPSHOT_LIMIT));
+    setSnapshotName("");
+    setStatus(`Snapshot saved: ${name}`);
+    setStatusError(false);
   };
 
-  const canUndo = useMemo(() => {
-    const key = stepHistoryKey();
-    if (!key) return false;
-    const h = historyRef.current[key];
-    return Boolean(h && h.undo.length);
-  }, [activePage, selectedStepIndex, historyTick]);
+  const handleRestoreSnapshot = (snapshot) => {
+    if (!snapshot || typeof snapshot.yamlText !== "string") return;
+    if (!window.confirm(`Restore snapshot "${snapshot.name}"?`)) return;
+    commitDocumentState(
+      `Restore snapshot: ${snapshot.name}`,
+      { yamlText: snapshot.yamlText, selection: normalizeSelection(snapshot.selection) },
+    );
+    setStatus(`Restored snapshot: ${snapshot.name}`);
+    setStatusError(false);
+  };
 
-  const canRedo = useMemo(() => {
-    const key = stepHistoryKey();
-    if (!key) return false;
-    const h = historyRef.current[key];
-    return Boolean(h && h.redo.length);
-  }, [activePage, selectedStepIndex, historyTick]);
+  const handleDeleteSnapshot = (snapshotId) => {
+    setSnapshots((prev) => prev.filter((item) => item.id !== snapshotId));
+  };
+
+  const handleRenameSnapshot = (snapshot) => {
+    const nextName = window.prompt("Rename snapshot", snapshot?.name || "");
+    if (!nextName || !nextName.trim()) return;
+    const clean = nextName.trim();
+    setSnapshots((prev) => prev.map((item) => (
+      item.id === snapshot.id ? { ...item, name: clean } : item
+    )));
+  };
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKey = (e) => {
-      if (!activeStep || editorDisabled) return;
-      if (e.target.tagName.match(/INPUT|TEXTAREA|SELECT/)) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault(); e.shiftKey ? handleRedoStep() : handleUndoStep();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault(); handleRedoStep();
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+
+      const tagName = e.target?.tagName || "";
+      if (tagName === "INPUT" || tagName === "SELECT") return;
+      if (tagName === "TEXTAREA" && yamlDirtyRef.current) return;
+
+      e.preventDefault();
+      if (key === "z") {
+        e.shiftKey ? handleRedoDocument() : handleUndoDocument();
+      } else {
+        handleRedoDocument();
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [activeStep, editorDisabled, historyTick]); // Dependencies important for closure capture
+  }, [historyTick, yamlText, selectedPageIndex, selectedStepIndex, lastHistoryLabel]);
 
   // --- Joint Logic ---
   const handleJointDraftChange = (name, value) => {
     setJointDrafts(prev => ({ ...prev, [jointDraftKey(name)]: value }));
   };
 
+  const publishSyncWriteItem = (itemName, jointNameList, values, setErrorStatus = true) => {
+    const targets = Array.from(new Set((jointNameList || []).filter(Boolean)));
+    if (!targets.length) return false;
+    if (rosState !== "connected" || !torquePubRef.current) {
+      if (setErrorStatus) {
+        setStatus("ROS not connected");
+        setStatusError(true);
+      }
+      return false;
+    }
+    if (!itemName) return false;
+    if (!Array.isArray(values) || values.length !== targets.length) return false;
+    torquePubRef.current.publish(new ROSLIB.Message({
+      item_name: itemName,
+      joint_name: targets,
+      value: values,
+    }));
+    return true;
+  };
+
+  const publishTorqueEnable = (jointNameList, enable, setErrorStatus = true) => {
+    const targets = Array.from(new Set((jointNameList || []).filter(Boolean)));
+    return publishSyncWriteItem(
+      "torque_enable",
+      targets,
+      targets.map(() => (enable ? 1 : 0)),
+      setErrorStatus
+    );
+  };
+
+  const applyCapturedTargetsToRobot = (jointNames, rawValues) => {
+    const targets = Array.from(new Set((jointNames || []).filter(Boolean)));
+    if (!targets.length) return false;
+    if (rosState !== "connected" || !torquePubRef.current) return false;
+    if (!Array.isArray(rawValues) || rawValues.length !== targets.length) return false;
+
+    // Prevent active modules from overriding manual captured joint goals.
+    enableModulePubRef.current?.publish(new ROSLIB.Message({ data: "none" }));
+
+    const wroteGoal = publishSyncWriteItem("goal_position", targets, rawValues, false);
+    const turnedOn = wroteGoal && publishTorqueEnable(targets, true, false);
+    if (turnedOn) {
+      // Reinforce once after torque ON to hold exact captured value.
+      window.setTimeout(() => {
+        publishSyncWriteItem("goal_position", targets, rawValues, false);
+      }, 120);
+    }
+    return turnedOn;
+  };
+
   const commitJointDraft = (name, value) => {
     if(value === "" || value === null) { setJointDrafts(p => { const n={...p}; delete n[jointDraftKey(name)]; return n; }); return; }
     const num = Number(value);
     if(!Number.isFinite(num)) return;
-    if(activeStep) pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
-    updateActiveStep(s => { if(!s.positions) s.positions={}; setRawPosition(s.positions, name, jointIdMap, toRawDegrees(num)); });
+    updateActiveStep((s) => {
+      if(!s.positions) s.positions = {};
+      setRawPosition(s.positions, name, jointIdMap, toRawDegrees(num));
+    }, {
+      label: `Adjust ${name}`,
+      coalesceKey: `joint-${name}`,
+    });
     setJointDrafts(p => { const n={...p}; delete n[jointDraftKey(name)]; return n; });
   };
 
-  const handleJointToggleOff = (name, currentRaw) => {
-    const nextVal = isTorqueOff(currentRaw) ? RAW_CENTER : "torque_off";
-    if(activeStep) pushStepHistory(stepHistoryKey(), snapshotStep(activeStep));
-    updateActiveStep(s => { if(!s.positions) s.positions={}; setRawPosition(s.positions, name, jointIdMap, nextVal); });
+  const handleJointToggleOff = (name) => {
+    const currentlyOff = manualOffJoints.has(name);
+    const nextEnable = currentlyOff;
+    if (!publishTorqueEnable([name], nextEnable)) return;
+    setManualOffJoints(prev => {
+      const next = new Set(prev);
+      if (nextEnable) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+    setStatus(`Torque ${nextEnable ? "ON" : "OFF"}: ${name}`);
+    setStatusError(false);
+  };
+
+  const handleTorqueOnAllEditor = () => {
+    const targets = editableJointNames.length ? editableJointNames : JOINT_ORDER;
+    if (!publishTorqueEnable(targets, true)) return;
+    setManualOffJoints(new Set());
+    setStatus("Torque ON all (editor)");
+    setStatusError(false);
   };
 
   const sendStepPoseToWebots = (step) => {
@@ -1179,11 +1852,11 @@ export default function ActionEditor({ isActive = true }) {
         const ticks = recordMode === "time" ? secondsToTimeTicks(delta, speed) : secondsToPauseTicks(delta, speed);
         const targetLabel = recordMode === "time" ? "time" : "pause";
         // Update previous step
-        updateYamlData(draft => {
+        updateYamlData("Record step timing", (draft) => {
           const p = draft.pages.find(i => i.index === page.index);
           const s = p.steps.find(x => Number(x.index) === Number(rec.lastStepIndex)) || p.steps[rec.lastStepIndex];
           if(s) s[targetLabel] = Math.max(1, ticks);
-        });
+        }, { coalesceKey: "record-step-timing" });
         setRecordLastDelta(delta); setRecordLastTicks(ticks);
       }
       rec.lastTime = now; rec.lastStepIndex = index; rec.lastPageIndex = page.index;
@@ -1209,6 +1882,9 @@ export default function ActionEditor({ isActive = true }) {
   const timelineLabel = timelineMax > 0 && (activePage?.steps?.length || 0) > 1
     ? `${timelineLeft}→${timelineRight} (${timelinePct}%)`
     : `Step ${timelineLeft}`;
+  const undoCount = historyRef.current.undo.length;
+  const redoCount = historyRef.current.redo.length;
+  const recentSnapshots = snapshots.slice(0, 6);
 
   return (
     <div className="flex flex-col lg:flex-row h-full gap-6 p-2 overflow-y-auto lg:overflow-hidden bg-[#f8fafc]">
@@ -1225,6 +1901,22 @@ export default function ActionEditor({ isActive = true }) {
                 title="Add new page"
               >
                 <Plus size={12} /> Add Page
+              </button>
+              <button
+                className="text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleDuplicatePage}
+                disabled={editorDisabled || !activePage}
+                title="Duplicate selected page with all steps"
+              >
+                Duplicate
+              </button>
+              <button
+                className="text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleMirrorPage}
+                disabled={editorDisabled || !activePage}
+                title="Mirror all steps in selected page (true left/right)"
+              >
+                Mirror Page
               </button>
               <button
                 className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"
@@ -1329,11 +2021,78 @@ export default function ActionEditor({ isActive = true }) {
           </div>
         </div>
 
+        {/* Snapshot Lab */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Snapshot Lab</h3>
+            <span className="text-[10px] font-mono text-gray-400">{snapshots.length}/{SNAPSHOT_LIMIT}</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              type="text"
+              placeholder="Snapshot name"
+              value={snapshotName}
+              onChange={(e) => setSnapshotName(e.target.value)}
+              className="flex-1 px-2 py-1.5 bg-gray-50 border border-gray-200 rounded text-xs font-mono focus:outline-none focus:border-undip-blue"
+            />
+            <button
+              onClick={handleCreateSnapshot}
+              className="px-2.5 py-1.5 bg-undip-blue text-white rounded text-xs font-bold flex items-center gap-1 hover:bg-opacity-90"
+              title="Save current document as snapshot"
+            >
+              <Save size={12} />
+              Save
+            </button>
+          </div>
+          <div className="space-y-1 max-h-[150px] overflow-y-auto custom-scrollbar pr-1">
+            {recentSnapshots.length === 0 && (
+              <div className="text-[11px] text-gray-400 py-1">No snapshots yet.</div>
+            )}
+            {recentSnapshots.map((snapshot) => (
+              <div key={snapshot.id} className="border border-gray-200 rounded-md px-2 py-1.5 bg-gray-50">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-gray-700 truncate">{snapshot.name}</div>
+                    <div className="text-[10px] font-mono text-gray-400">
+                      {new Date(snapshot.ts).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleRestoreSnapshot(snapshot)}
+                      className="px-1.5 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:border-undip-blue hover:text-undip-blue"
+                    >
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => handleRenameSnapshot(snapshot)}
+                      className="px-1.5 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:border-gray-500"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSnapshot(snapshot.id)}
+                      className="px-1.5 py-0.5 text-[10px] font-semibold bg-red-50 border border-red-200 text-red-600 rounded hover:bg-red-100"
+                    >
+                      Del
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* YAML Editor Toggle */}
         <div className={`bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col transition-all ${showYaml ? 'h-[300px]' : 'h-auto'}`}>
           <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-2xl">
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-gray-700">YAML</span>
+              {hasLocalDraft && (
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  Draft Saved
+                </span>
+              )}
               <button onClick={() => setShowYaml(!showYaml)} className="text-xs text-undip-blue hover:underline">
                 {showYaml ? "Hide" : "Show"}
               </button>
@@ -1348,11 +2107,14 @@ export default function ActionEditor({ isActive = true }) {
               <textarea 
                 className="w-full h-full resize-none p-3 text-xs font-mono bg-[#1e1e1e] text-gray-300 focus:outline-none"
                 value={yamlText}
-                onChange={e => setYamlText(e.target.value)}
+                onChange={(e) => {
+                  yamlDirtyRef.current = true;
+                  setYamlText(e.target.value);
+                }}
                 spellCheck="false"
               />
               <div className={`absolute bottom-0 left-0 right-0 px-2 py-1 text-[10px] font-mono border-t border-white/10 ${statusError ? "bg-red-900/80 text-red-200" : "bg-black/50 text-green-400"}`}>
-                {status || "Ready"} {parseError && `| ${parseError}`}
+                {status || "Ready"} {lastHistoryLabel && `| Last: ${lastHistoryLabel}`} {parseError && `| ${parseError}`}
               </div>
             </div>
           )}
@@ -1383,24 +2145,24 @@ export default function ActionEditor({ isActive = true }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Name</label>
-                <input type="text" value={activePage.name || ""} onChange={e => updateActivePage(p => p.name = e.target.value)} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 focus:border-undip-blue focus:ring-2 focus:ring-undip-blue/10 outline-none transition-all" />
+                <input type="text" value={activePage.name || ""} onChange={e => updateActivePage(p => p.name = e.target.value, { label: "Rename page", coalesceKey: "page-name" })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 focus:border-undip-blue focus:ring-2 focus:ring-undip-blue/10 outline-none transition-all" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Schedule</label>
-                <select value={scheduleMode} onChange={e => updateActivePage(p => { p.header = p.header||{}; p.header.schedule = e.target.value === "time" ? 10 : 0; })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none">
+                <select value={scheduleMode} onChange={e => updateActivePage(p => { p.header = p.header||{}; p.header.schedule = e.target.value === "time" ? 10 : 0; }, { label: "Change schedule", coalesceKey: "page-schedule" })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none">
                   <option value="speed">Speed</option>
                   <option value="time">Time</option>
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Repeat</label>
-                <input type="number" value={activePage.header?.repeat ?? 0} onChange={e => updateActivePage(p => { p.header=p.header||{}; p.header.repeat = Number(e.target.value); })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none" />
+                <input type="number" value={activePage.header?.repeat ?? 0} onChange={e => updateActivePage(p => { p.header=p.header||{}; p.header.repeat = Number(e.target.value); }, { label: "Change repeat", coalesceKey: "page-repeat" })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none" />
               </div>
               {/* Other header fields simplified for brevity, assume similar pattern */}
               {["speed", "accel", "next", "exit"].map(f => (
                 <div key={f}>
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{f}</label>
-                  <input type="number" value={activePage.header?.[f] ?? 0} onChange={e => updateActivePage(p => { p.header=p.header||{}; p.header[f] = Number(e.target.value); })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none" />
+                  <input type="number" value={activePage.header?.[f] ?? 0} onChange={e => updateActivePage(p => { p.header=p.header||{}; p.header[f] = Number(e.target.value); }, { label: `Change ${f}`, coalesceKey: `page-${f}` })} disabled={editorDisabled} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-700 outline-none" />
                 </div>
               ))}
             </div>
@@ -1412,8 +2174,24 @@ export default function ActionEditor({ isActive = true }) {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold font-display text-gray-800">Step Editor <span className="text-gray-400 font-mono text-sm ml-2">{activeStepLabel !== "" ? `Step ${activeStepLabel}` : ""}</span></h2>
             <div className="flex gap-2">
-              <button onClick={handleUndoStep} disabled={!canUndo} className="p-1.5 text-gray-500 hover:text-undip-blue disabled:opacity-30"><Undo size={16}/></button>
-              <button onClick={handleRedoStep} disabled={!canRedo} className="p-1.5 text-gray-500 hover:text-undip-blue disabled:opacity-30"><Redo size={16}/></button>
+              <button
+                onClick={handleUndoDocument}
+                disabled={!canUndo}
+                className="px-2 py-1.5 text-gray-500 hover:text-undip-blue disabled:opacity-30 text-xs font-semibold flex items-center gap-1"
+                title={`Undo (${undoCount})`}
+              >
+                <Undo size={16}/>
+                {undoCount > 0 ? `(${undoCount})` : ""}
+              </button>
+              <button
+                onClick={handleRedoDocument}
+                disabled={!canRedo}
+                className="px-2 py-1.5 text-gray-500 hover:text-undip-blue disabled:opacity-30 text-xs font-semibold flex items-center gap-1"
+                title={`Redo (${redoCount})`}
+              >
+                <Redo size={16}/>
+                {redoCount > 0 ? `(${redoCount})` : ""}
+              </button>
               <div className="h-4 w-px bg-gray-300 mx-1 self-center"></div>
               <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded cursor-pointer hover:bg-gray-200">
                 <input type="checkbox" checked={recordEnabled} onChange={e => setRecordEnabled(e.target.checked)} className="accent-red-500"/>
@@ -1454,18 +2232,84 @@ export default function ActionEditor({ isActive = true }) {
               <div className="flex gap-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Time</label>
-                  <input type="number" value={activeStep.time ?? 0} onChange={e => updateActiveStep(s => s.time = Number(e.target.value))} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-mono outline-none focus:border-undip-blue" />
+                  <input type="number" value={activeStep.time ?? 0} onChange={e => updateActiveStep(s => s.time = Number(e.target.value), { label: "Edit step time", coalesceKey: "step-time" })} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-mono outline-none focus:border-undip-blue" />
                 </div>
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Pause</label>
-                  <input type="number" value={activeStep.pause ?? 0} onChange={e => updateActiveStep(s => s.pause = Number(e.target.value))} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-mono outline-none focus:border-undip-blue" />
+                  <input type="number" value={activeStep.pause ?? 0} onChange={e => updateActiveStep(s => s.pause = Number(e.target.value), { label: "Edit step pause", coalesceKey: "step-pause" })} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-mono outline-none focus:border-undip-blue" />
                 </div>
                 <div className="flex items-end gap-2">
                   <button onClick={() => sendStepPoseToWebots(activeStep)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-undip-blue hover:text-undip-blue rounded-lg text-xs font-bold flex items-center gap-1 transition-all"><Send size={14}/> Send</button>
                   <button onClick={handleCapturePose} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-green-500 hover:text-green-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Capture</button>
                   <button onClick={handleCapturePoseToNewStep} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-green-500 hover:text-green-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Capture New</button>
-                  <button onClick={handleSwapLeftRight} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-amber-500 hover:text-amber-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Swap L/R</button>
+                  <button onClick={handleTorqueOnAllEditor} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-blue-500 hover:text-blue-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Torque ON All</button>
+                  <button title="Mirror selected step (true left/right)" onClick={handleSwapLeftRight} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-amber-500 hover:text-amber-600 rounded-lg text-xs font-bold flex items-center gap-1 transition-all">Swap L/R</button>
                 </div>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="min-w-[110px]">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Src Page</label>
+                  <select
+                    value={copySourcePageIndex}
+                    onChange={e => setCopySourcePageIndex(e.target.value)}
+                    className="w-full px-2 py-2 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700 outline-none focus:border-undip-blue"
+                  >
+                    <option value="">-</option>
+                    {sortedPages.map(page => (
+                      <option key={`src-page-${page.index}`} value={String(page.index)}>
+                        {page.index}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-[90px]">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Src Step</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={ACTION_MAX_STEPS - 1}
+                    value={copySourceStepIndex}
+                    onChange={e => setCopySourceStepIndex(e.target.value)}
+                    className="w-full px-2 py-2 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700 outline-none focus:border-undip-blue"
+                  />
+                </div>
+                <div className="text-xs font-semibold text-gray-400 pb-2">to</div>
+                <div className="min-w-[110px]">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Target Page</label>
+                  <select
+                    value={copyTargetPageIndex}
+                    onChange={e => setCopyTargetPageIndex(e.target.value)}
+                    className="w-full px-2 py-2 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700 outline-none focus:border-undip-blue"
+                  >
+                    <option value="">-</option>
+                    {sortedPages.map(page => (
+                      <option key={`target-page-${page.index}`} value={String(page.index)}>
+                        {page.index}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-[90px]">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Target Step</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={ACTION_MAX_STEPS - 1}
+                    value={copyTargetStepIndex}
+                    onChange={e => setCopyTargetStepIndex(e.target.value)}
+                    className="w-full px-2 py-2 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700 outline-none focus:border-undip-blue"
+                  />
+                </div>
+                <button
+                  onClick={handleCopyStepToTarget}
+                  disabled={editorDisabled || !sortedPages.length}
+                  className="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-undip-blue hover:text-undip-blue rounded-lg text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-50"
+                  title="Copy full step (positions + time + pause) from source to target"
+                >
+                  <Copy size={14} />
+                  Copy Full Step
+                </button>
               </div>
 
               <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl border border-gray-100">
@@ -1525,7 +2369,8 @@ export default function ActionEditor({ isActive = true }) {
                   {jointNames.map(name => {
                     const raw = lookupRawPosition(activeStep.positions||{}, name, jointIdMap);
                     const norm = normalizeRaw(raw);
-                    const isOff = isTorqueOff(raw);
+                    const legacyOff = isTorqueOff(raw);
+                    const isOff = manualOffJoints.has(name);
                     const deg = norm === null ? 0 : toDegrees(norm);
                     const key = jointDraftKey(name);
                     const draft = jointDrafts[key] ?? (norm===null ? "" : deg.toFixed(1));
@@ -1535,6 +2380,8 @@ export default function ActionEditor({ isActive = true }) {
                     const outOfRange = Boolean(limit && !isOff && norm !== null && (deg < limit.min || deg > limit.max));
                     const rowClass = isOff
                       ? "bg-red-50 border-red-100 opacity-70"
+                      : legacyOff
+                        ? "bg-orange-50 border-orange-100"
                       : outOfRange
                         ? "bg-amber-50 border-amber-200"
                         : "bg-white border-gray-100 hover:border-gray-300";
@@ -1571,7 +2418,7 @@ export default function ActionEditor({ isActive = true }) {
                           className="col-span-6 sm:col-span-2 w-full px-2 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-mono text-right focus:outline-none focus:border-undip-blue"
                         />
                         <button
-                          onClick={() => handleJointToggleOff(name, raw)}
+                          onClick={() => handleJointToggleOff(name)}
                           className={`col-span-6 sm:col-span-1 w-full px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors ${isOff ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
                         >
                           {isOff ? "OFF" : "ON"}

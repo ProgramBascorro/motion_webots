@@ -1,4 +1,4 @@
-# Quick Start: YOLO + OP3 Demo
+# Quick Start: YOLO + OP3 Tracking
 
 ## Two-Step Launch
 
@@ -21,7 +21,34 @@ This starts:
 
 ---
 
-### Step 2: Launch YOLO + Demo
+### Step 2A: Launch YOLO + Head-Only Tracking
+
+In a **new terminal**:
+
+```bash
+source install/setup.bash
+ros2 launch op3_ball_localization yolo_scan_only.launch.py
+```
+
+Or via script.sh:
+```bash
+./script.sh
+# Select "Launch picker"
+# Choose "yolo_scan_only.launch.py"
+```
+
+This starts:
+- YOLO detector
+- YOLO-to-Demo bridge
+- Head tracking node
+
+The robot will:
+- scan for the ball using the head only
+- keep the ball centered with pan/tilt tracking
+- not walk
+- not kick
+
+### Step 2B: Launch Full Demo
 
 In a **new terminal**:
 
@@ -54,6 +81,13 @@ This starts:
 ✓ /usb_cam/image_raw
 ```
 
+### Terminal 2: YOLO + Head-Only Tracking
+```
+✓ yolo_detector
+✓ yolo_to_demo_bridge
+✓ head_tracking_node
+```
+
 ### Terminal 2: YOLO + Demo
 ```
 ✓ yolo_detector
@@ -65,14 +99,27 @@ This starts:
 
 ## Usage Flow
 
+### Head-Only Test
+
+1. **Launch manager + camera** (Terminal 1)
+2. Wait for "Manager initialized"
+3. **Launch YOLO + head-only tracking** (Terminal 2)
+4. Place ball in front of robot
+5. Robot will:
+   - scan with the head when the ball is missing
+   - track the ball with the head when it appears
+   - keep legs/body stationary
+
+### Full Demo
+
 1. **Launch manager + camera** (Terminal 1)
 2. Wait for "Manager initialized"
 3. **Launch YOLO + demo** (Terminal 2)
 4. Place ball in front of robot
 5. Robot will:
-   - Track ball with head
-   - Walk toward ball
-   - Kick when close
+   - track ball with head
+   - walk toward ball
+   - kick when close
 
 ---
 
@@ -90,6 +137,9 @@ ros2 topic hz /vision/yolo/detections
 
 # Is bridge working?
 ros2 topic echo /ball_detector_node/circle_set
+
+# Is head tracking publishing commands?
+ros2 topic echo /robotis/head_control/set_joint_states
 
 # Is demo running?
 ros2 node list | grep demo

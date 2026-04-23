@@ -24,6 +24,8 @@ ros2 topic list | grep robotis
 ros2 topic echo /robotis/walking/command
 ros2 topic echo /robotis/head_control/set_joint_states_offset
 ros2 topic echo /robotis/walking/set_params | grep angle_move_amplitude -n
+ros2 topic pub --once /op3_joy_teleop/command std_msgs/msg/String "{data: refresh_params}"
+ros2 topic echo /op3_joy_teleop/status
 ros2 topic info /robotis/action/page_num
 ros2 topic echo /robotis/movement_done
 ```
@@ -71,6 +73,26 @@ With `stop_button` disabled, release the deadman or wait for `joy_timeout` to st
 Direct control is not used for turning; yaw always goes through `angle_move_amplitude`.
 If you need head direct control in a special sim, set `allow_direct_control_fallback: true`
 and ensure the `op3_direct_control_module` is enabled.
+
+## Runtime Teleop Commands
+
+The node accepts simple string commands on `/op3_joy_teleop/command` and publishes
+JSON status snapshots on `/op3_joy_teleop/status`. This lets Bascorro Studio refresh
+the teleop walking baseline after you tune or load a Walking version.
+
+Useful commands:
+
+- `refresh_params`: reload the baseline from `/robotis/walking/get_params`
+- `start`: enable `walking_module` and publish walking `start`
+- `stop`: publish walking `stop` and zero x/y/yaw amplitudes
+- `zero_params`: publish zero x/y/yaw amplitudes while keeping the current baseline
+- `heading_hold_toggle`, `heading_hold_on`, `heading_hold_off`
+- `gear_next`, or `gear_slow`, `gear_normal`, `gear_fast`
+
+Optional config:
+
+- `auto_refresh_baseline_sec`: periodically reload baseline params; `0.0` disables it
+- `refresh_baseline_button`: joystick button index for manual baseline reload; `-1` disables it
 
 ## Kick Mode
 

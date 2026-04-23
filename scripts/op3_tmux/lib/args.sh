@@ -8,14 +8,15 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --foxglove${RST}      Start: webots + manager + foxglove
   ${BOLD}./$(basename "$0") --all${RST}           Start: webots + manager + teleop + foxglove
   ${BOLD}./$(basename "$0") --vision${RST}        Start: webots + manager + yolo_vision
+  ${BOLD}./$(basename "$0") --ball-head${RST}     Start: webots + manager + head-only ball tracking
   ${BOLD}./$(basename "$0") --ball${RST}          Start: webots + manager + yolo_vision + ball_localizer
   ${BOLD}./$(basename "$0") --ball-localizer${RST}Start: webots + manager + ball_localizer
   ${BOLD}./$(basename "$0") --action-editor${RST} Start: webots + manager + action_editor
-  ${BOLD}./$(basename "$0") --demo${RST}          Start: webots + manager + demo
+  ${BOLD}./$(basename "$0") --demo${RST}          Start: demo launcher only
   ${BOLD}./$(basename "$0") --offset-tuner${RST} Start: offset tuner server (no manager)
-  ${BOLD}./$(basename "$0") --demo-soccer${RST}   Start: webots + manager + demo (soccer)
-  ${BOLD}./$(basename "$0") --demo-vision${RST}   Start: webots + manager + demo (vision)
-  ${BOLD}./$(basename "$0") --demo-action${RST}   Start: webots + manager + demo (action)
+  ${BOLD}./$(basename "$0") --demo-soccer${RST}   Start: demo launcher only (soccer)
+  ${BOLD}./$(basename "$0") --demo-vision${RST}   Start: demo launcher only (vision)
+  ${BOLD}./$(basename "$0") --demo-action${RST}   Start: demo launcher only (action)
   ${BOLD}./$(basename "$0") --studio${RST}        Start: webots + manager + bascorro studio
   ${BOLD}./$(basename "$0") --action-web${RST}    Alias for --studio
   ${BOLD}./$(basename "$0") --vision-lab${RST}    Start: Vision Lab MVP (Next.js + FastAPI)
@@ -45,19 +46,20 @@ ${BOLD}Options${RST}
   --profile NAME       Profile: webots | real_robot (default: ${PROFILE})
   --tools              Enable quick ROS tools pane
   --vision             Enable vision stack (yolo_vision)
+  --ball-head          Enable head-only ball tracking
   --ball               Enable vision + ball_localizer
   --ball-localizer     Enable ball_localizer
   --action-editor      Enable action editor (bridge + editor)
-  --demo               Enable demo stack (op3_demo)
+  --demo               Enable demo launcher (op3_demo)
   --offset-tuner       Enable offset tuner server (requires manager stopped)
-  --demo-soccer        Enable demo stack and switch to soccer mode
-  --demo-vision        Enable demo stack and switch to vision mode
-  --demo-action        Enable demo stack and switch to action mode
+  --demo-soccer        Enable demo launcher and switch to soccer mode
+  --demo-vision        Enable demo launcher and switch to vision mode
+  --demo-action        Enable demo launcher and switch to action mode
   --studio             Enable bascorro studio UI (bridge + apply node + Vite)
   --action-web         Alias for --studio
   --vision-lab         Enable Bascorro Studio Vision Lab (standalone MVP)
   --localization       Enable localization stack (soccer_localization + rviz)
-  --restart <comp>      comp: webots|manager|offset_tuner|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_localizer|action_editor|action_web|vision_lab|demo
+  --restart <comp>      comp: webots|manager|offset_tuner|teleop|foxglove|tools|rqt_image_view|yolo_vision|localization|ball_head_tracking|ball_localizer|action_editor|action_web|vision_lab|demo
   --doctor              Health check (deps + workspace)
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
@@ -83,7 +85,7 @@ ${BOLD}Defaults (env override)${RST}
 ${BOLD}Env overrides (recommended)${RST}
   OP3_WS, OP3_SETUP, OP3_SESSION, OP3_START_DELAY_SEC
   OP3_WEBOTS_CMD, OP3_MANAGER_CMD, OP3_TELEOP_CMD, OP3_FOXGLOVE_CMD
-  OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD, OP3_BALL_LOCALIZER_CMD, OP3_OFFSET_TUNER_CMD
+  OP3_YOLO_VISION_CMD, OP3_LOCALIZATION_CMD, OP3_BALL_HEAD_TRACKING_CMD, OP3_BALL_LOCALIZER_CMD, OP3_OFFSET_TUNER_CMD
   OP3_ACTION_EDITOR_CMD, OP3_ACTION_FILE, OP3_ACTION_FILE_SEED, OP3_ACTION_EDITOR_LOG, OP3_DEMO_CMD
   OP3_DEMO_MODE, OP3_DEMO_WAIT_STEP_SEC, OP3_DEMO_WAIT_STEPS
   OP3_STUDIO_CMD, OP3_ACTION_WEB_CMD
@@ -119,6 +121,7 @@ op3_tmux_dispatch() {
   WITH_RQT=0
   WITH_YOLO_VISION=0
   WITH_LOCALIZATION=0
+  WITH_BALL_HEAD_TRACKING=0
   WITH_BALL_LOCALIZER=0
   WITH_OFFSET_TUNER=0
   WITH_ACTION_EDITOR=0
@@ -155,6 +158,7 @@ op3_tmux_dispatch() {
       --foxglove) WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
       --all) WITH_TELEOP=1; WITH_FOXGLOVE=1; START_EXPLICIT=1; shift ;;
       --vision) WITH_YOLO_VISION=1; START_EXPLICIT=1; shift ;;
+      --ball-head) WITH_BALL_HEAD_TRACKING=1; START_EXPLICIT=1; shift ;;
       --ball) WITH_YOLO_VISION=1; WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --ball-localizer) WITH_BALL_LOCALIZER=1; START_EXPLICIT=1; shift ;;
       --action-editor) WITH_ACTION_EDITOR=1; START_EXPLICIT=1; shift ;;
@@ -216,5 +220,5 @@ op3_tmux_dispatch() {
     exit 0
   fi
 
-  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_OFFSET_TUNER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$WITH_VISION_LAB" "$WITH_DEMO" "$DRY_RUN"
+  start_stack "$WITH_WEBOTS" "$WITH_MANAGER" "$WITH_OFFSET_TUNER" "$WITH_TELEOP" "$WITH_FOXGLOVE" "$WITH_TOOLS" "$WITH_RQT" "$WITH_YOLO_VISION" "$WITH_LOCALIZATION" "$WITH_BALL_HEAD_TRACKING" "$WITH_BALL_LOCALIZER" "$WITH_ACTION_EDITOR" "$WITH_ACTION_WEB" "$WITH_VISION_LAB" "$WITH_DEMO" "$DRY_RUN"
 }

@@ -16,9 +16,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <chrono>
+#include <map>
+#include <sstream>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <sensor_msgs/image_encodings.hpp>
@@ -50,31 +53,30 @@ std::string toLower(std::string value)
   return value;
 }
 
-int resolveDnnBackend(const std::string& name)
+bool isDefaultBackendValue(const std::string& value)
 {
-  const std::string key = toLower(name);
-  if (key == "cuda") {
-    return cv::dnn::DNN_BACKEND_CUDA;
-  }
-  if (key == "opencv" || key == "default" || key.empty()) {
-    return cv::dnn::DNN_BACKEND_OPENCV;
-  }
-  return cv::dnn::DNN_BACKEND_OPENCV;
+  const std::string key = toLower(value);
+  return key.empty() || key == "opencv" || key == "default";
 }
 
-int resolveDnnTarget(const std::string& name)
+bool isDefaultTargetValue(const std::string& value)
 {
-  const std::string key = toLower(name);
-  if (key == "cuda") {
-    return cv::dnn::DNN_TARGET_CUDA;
+  const std::string key = toLower(value);
+  return key.empty() || key == "cpu" || key == "default";
+}
+
+std::string shapeToString(const ov::Shape& shape)
+{
+  std::ostringstream stream;
+  stream << "[";
+  for (size_t i = 0; i < shape.size(); ++i) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << shape[i];
   }
-  if (key == "cuda_fp16" || key == "fp16") {
-    return cv::dnn::DNN_TARGET_CUDA_FP16;
-  }
-  if (key == "cpu" || key == "default" || key.empty()) {
-    return cv::dnn::DNN_TARGET_CPU;
-  }
-  return cv::dnn::DNN_TARGET_CPU;
+  stream << "]";
+  return stream.str();
 }
 
 sensor_msgs::msg::Image toImageMsg(const cv::Mat& image,
@@ -150,6 +152,7 @@ cv::Mat toBgr(const sensor_msgs::msg::Image& msg)
 
 YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
 : Node("yolo_detector", options),
+  device_("CPU"),
   input_size_(640),
   nms_threshold_(0.5f),
   nms_score_threshold_(0.1f),
@@ -170,6 +173,7 @@ YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
   this->declare_parameter("use_fp16", use_fp16_);
   this->declare_parameter("dnn_backend", "opencv");
   this->declare_parameter("dnn_target", "cpu");
+  this->declare_parameter("device", device_);
   this->declare_parameter("input_size", input_size_);
   this->declare_parameter("ball_confidence_threshold", 0.2);
   this->declare_parameter("goalpost_confidence_threshold", 0.5);
@@ -187,15 +191,9 @@ YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
   use_fp16_ = this->get_parameter("use_fp16").as_bool();
   dnn_backend_ = this->get_parameter("dnn_backend").as_string();
   dnn_target_ = this->get_parameter("dnn_target").as_string();
-  if (use_gpu_) {
-    const std::string backend_key = toLower(dnn_backend_);
-    const std::string target_key = toLower(dnn_target_);
-    if (backend_key.empty() || backend_key == "opencv" || backend_key == "default") {
-      dnn_backend_ = "cuda";
-    }
-    if (target_key.empty() || target_key == "cpu" || target_key == "default") {
-      dnn_target_ = use_fp16_ ? "cuda_fp16" : "cuda";
-    }
+  device_ = this->get_parameter("device").as_string();
+  if (device_.empty()) {
+    device_ = "CPU";
   }
   input_size_ = this->get_parameter("input_size").as_int();
   nms_threshold_ = static_cast<float>(this->get_parameter("nms_threshold").as_double());
@@ -218,6 +216,7 @@ YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
   class_info_[5] = {"X-intersection", cv::Scalar(0, 255, 255),
     static_cast<float>(this->get_parameter("intersection_confidence_threshold").as_double())};
 
+  logDeprecatedBackendSettings();
   model_loaded_ = loadModel();
 
   image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -237,6 +236,18 @@ YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
   RCLCPP_INFO(this->get_logger(), "YOLO detector initialized (SIMPLIFIED - 2D only)");
   RCLCPP_INFO(this->get_logger(), "  Image topic: %s", image_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  Model: %s", model_path_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  Device: %s", device_.c_str());
+}
+
+void YoloDetector::logDeprecatedBackendSettings() const
+{
+  if (use_gpu_ || use_fp16_ || !isDefaultBackendValue(dnn_backend_) || !isDefaultTargetValue(dnn_target_)) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Parameters use_gpu/use_fp16/dnn_backend/dnn_target are deprecated and ignored. "
+      "OpenVINO uses device='%s'.",
+      device_.c_str());
+  }
 }
 
 bool YoloDetector::loadModel()
@@ -252,40 +263,70 @@ bool YoloDetector::loadModel()
   }
 
   try {
-    net_ = cv::dnn::readNetFromONNX(model_path_);
-    const std::string backend_key = toLower(dnn_backend_);
-    const std::string target_key = toLower(dnn_target_);
-    const bool backend_known = (backend_key == "opencv" || backend_key == "cuda" || backend_key.empty() ||
-      backend_key == "default");
-    const bool target_known = (target_key == "cpu" || target_key == "cuda" || target_key == "cuda_fp16" ||
-      target_key == "fp16" || target_key.empty() || target_key == "default");
-    if (!backend_known) {
-      RCLCPP_WARN(this->get_logger(), "Unknown dnn_backend '%s', falling back to OpenCV",
-                  dnn_backend_.c_str());
+    model_ = core_.read_model(model_path_);
+    if (!model_) {
+      RCLCPP_ERROR(this->get_logger(), "OpenVINO returned a null model handle");
+      return false;
     }
-    if (!target_known) {
-      RCLCPP_WARN(this->get_logger(), "Unknown dnn_target '%s', falling back to CPU",
-                  dnn_target_.c_str());
+
+    if (model_->inputs().empty()) {
+      RCLCPP_ERROR(this->get_logger(), "Model has no inputs");
+      return false;
     }
-    const int backend = resolveDnnBackend(dnn_backend_);
-    const int target = resolveDnnTarget(dnn_target_);
+
+    if (model_->outputs().empty()) {
+      RCLCPP_ERROR(this->get_logger(), "Model has no outputs");
+      return false;
+    }
+
     try {
-      net_.setPreferableBackend(backend);
-      net_.setPreferableTarget(target);
-      RCLCPP_INFO(this->get_logger(), "  DNN backend: %s", dnn_backend_.c_str());
-      RCLCPP_INFO(this->get_logger(), "  DNN target: %s", dnn_target_.c_str());
-    } catch (const cv::Exception& e) {
-      RCLCPP_WARN(this->get_logger(), "Failed to set DNN backend/target: %s", e.what());
-      net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-      net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
-      dnn_backend_ = "opencv";
-      dnn_target_ = "cpu";
-      RCLCPP_WARN(this->get_logger(), "Falling back to CPU (OpenCV)");
+      std::map<std::string, ov::PartialShape> reshape_map;
+      reshape_map.emplace(
+        model_->input().get_any_name(),
+        ov::PartialShape{1, 3, input_size_, input_size_});
+      model_->reshape(reshape_map);
+    } catch (const ov::Exception& e) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Failed to reshape model input to %dx%d: %s. Continuing with the model's native input shape.",
+        input_size_, input_size_, e.what());
     }
-  } catch (const cv::Exception& e) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to load YOLO model: %s", e.what());
-    RCLCPP_ERROR(this->get_logger(),
-                 "OpenCV DNN is picky about ONNX. Try models/old.onnx or upgrade OpenCV.");
+
+    compiled_model_ = core_.compile_model(model_, device_);
+    infer_request_ = compiled_model_.create_infer_request();
+
+    const ov::Shape input_shape = compiled_model_.input().get_shape();
+    if (input_shape.size() != 4) {
+      RCLCPP_ERROR(this->get_logger(), "Unexpected model input shape: %s",
+                   shapeToString(input_shape).c_str());
+      return false;
+    }
+
+    if (input_shape[0] != 1 || input_shape[1] != 3) {
+      RCLCPP_WARN(this->get_logger(), "Expected NCHW input [1, 3, H, W], got %s",
+                  shapeToString(input_shape).c_str());
+    }
+
+    if (input_shape[2] != input_shape[3]) {
+      RCLCPP_WARN(this->get_logger(), "Model input is not square: %s",
+                  shapeToString(input_shape).c_str());
+    }
+
+    if (static_cast<int>(input_shape[2]) != input_size_ || static_cast<int>(input_shape[3]) != input_size_) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Requested input_size=%d but model uses %s. Using the compiled model input height.",
+        input_size_, shapeToString(input_shape).c_str());
+      input_size_ = static_cast<int>(input_shape[2]);
+    }
+
+    RCLCPP_INFO(this->get_logger(), "  OpenVINO compiled model on %s", device_.c_str());
+    RCLCPP_INFO(this->get_logger(), "  Model input shape: %s",
+                shapeToString(compiled_model_.input().get_shape()).c_str());
+    RCLCPP_INFO(this->get_logger(), "  Model output shape: %s",
+                shapeToString(compiled_model_.output().get_shape()).c_str());
+  } catch (const ov::Exception& e) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to load YOLO model with OpenVINO: %s", e.what());
     return false;
   }
 
@@ -318,6 +359,16 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   const int width = bgr.cols;
   const int height = bgr.rows;
+  auto publish_debug_frame = [&]() {
+    if (publish_debug_) {
+      debug_pub_->publish(toImageMsg(bgr, msg->header, "bgr8"));
+    }
+  };
+  auto publish_empty_detections = [&]() {
+    soccer_msgs::msg::BoundingBoxes empty_boxes;
+    empty_boxes.header = msg->header;
+    detections_pub_->publish(empty_boxes);
+  };
 
   // Use square aspect ratio preserving resize (faster than letterbox)
   // Find the longer dimension to determine scale
@@ -338,33 +389,76 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   // Calculate scale for bbox coordinates
   float scale = static_cast<float>(max_dim) / static_cast<float>(input_size_);
 
-  cv::Mat blob = cv::dnn::blobFromImage(
-    processed, 1.0 / 255.0, cv::Size(input_size_, input_size_), cv::Scalar(), true, false);
+  cv::Mat rgb;
+  cv::cvtColor(processed, rgb, cv::COLOR_BGR2RGB);
 
-  net_.setInput(blob);
-  std::vector<cv::Mat> outputs;
-  net_.forward(outputs, net_.getUnconnectedOutLayersNames());
+  cv::Mat normalized;
+  rgb.convertTo(normalized, CV_32FC3, 1.0 / 255.0);
+
+  const size_t plane_size = static_cast<size_t>(input_size_) * static_cast<size_t>(input_size_);
+  std::vector<float> input_buffer(plane_size * 3);
+  std::vector<cv::Mat> channels;
+  cv::split(normalized, channels);
+  if (channels.size() != 3) {
+    RCLCPP_WARN(this->get_logger(), "Expected 3 channels after preprocessing, got %zu", channels.size());
+    publish_empty_detections();
+    publish_debug_frame();
+    return;
+  }
+  for (size_t channel = 0; channel < channels.size(); ++channel) {
+    std::memcpy(input_buffer.data() + (channel * plane_size),
+                channels[channel].ptr<float>(),
+                plane_size * sizeof(float));
+  }
+
+  cv::Mat debug_image;
+  if (publish_debug_) {
+    debug_image = bgr.clone();
+  }
+
+  std::vector<Detection> detections;
+  try {
+    const ov::Shape input_shape = compiled_model_.input().get_shape();
+    size_t expected_values = 1;
+    for (const auto dimension : input_shape) {
+      expected_values *= dimension;
+    }
+    if (expected_values != input_buffer.size()) {
+      RCLCPP_WARN(this->get_logger(), "Input tensor size mismatch: expected %zu values, have %zu",
+                  expected_values, input_buffer.size());
+      publish_empty_detections();
+      if (publish_debug_) {
+        debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));
+      }
+      return;
+    }
+
+    ov::Tensor input_tensor(ov::element::f32, input_shape, input_buffer.data());
+    infer_request_.set_input_tensor(input_tensor);
+    infer_request_.infer();
+
+    if (compiled_model_.outputs().empty()) {
+      RCLCPP_WARN(this->get_logger(), "YOLO inference returned no outputs");
+      publish_empty_detections();
+      if (publish_debug_) {
+        debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));
+      }
+      return;
+    }
+
+    detections = decodeDetections(infer_request_.get_output_tensor(0), scale, width, height);
+  } catch (const ov::Exception& e) {
+    RCLCPP_WARN(this->get_logger(), "OpenVINO inference failed: %s", e.what());
+    publish_empty_detections();
+    if (publish_debug_) {
+      debug_pub_->publish(toImageMsg(debug_image, msg->header, "bgr8"));
+    }
+    return;
+  }
 
   auto inference_time = std::chrono::high_resolution_clock::now();
   double inference_ms = std::chrono::duration<double, std::milli>(
     inference_time - start_time).count();
-
-  if (outputs.empty()) {
-    RCLCPP_WARN(this->get_logger(), "YOLO inference returned no outputs");
-    return;
-  }
-
-  cv::Mat output = outputs[0];
-
-  std::vector<Detection> detections = decodeDetections(output, scale, width, height);
-
-  if (detections.empty()) {
-    // Publish empty detections
-    soccer_msgs::msg::BoundingBoxes empty_boxes;
-    empty_boxes.header = msg->header;
-    detections_pub_->publish(empty_boxes);
-    return;
-  }
 
   std::vector<cv::Rect> boxes;
   std::vector<float> scores;
@@ -387,53 +481,49 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   float best_ball_score = -1.0f;
   double best_ball_area = 0.0;
 
-  // Only clone for debug if needed
-  cv::Mat debug_image;
-  if (publish_debug_) {
-    debug_image = bgr.clone();
-  }
-
-  for (int idx : indices) {
-    if (idx < 0 || idx >= static_cast<int>(detections.size())) {
-      continue;
-    }
-    const auto& det = detections[idx];
-    const auto& info = class_info_[det.class_id];
-
-    soccer_msgs::msg::BoundingBox bbox;
-    bbox.probability = det.score;
-    bbox.xmin = det.box.x;
-    bbox.ymin = det.box.y;
-    bbox.xmax = det.box.x + det.box.width;
-    bbox.ymax = det.box.y + det.box.height;
-    bbox.class_id = info.name;
-    bbox.id = det.class_id;
-
-    int cx = det.box.x + det.box.width / 2;
-    int cy = det.box.y + det.box.height / 2;
-    bbox.xbase = cx;
-    bbox.ybase = det.box.y + det.box.height;
-    bbox.obstacle_detected = false;
-
-    bboxes_msg.bounding_boxes.push_back(bbox);
-
-    if (info.name == "ball") {
-      double area = det.box.width * det.box.height;
-      if (!have_ball_center || area > best_ball_area ||
-          (std::abs(area - best_ball_area) < 1e-3 && det.score > best_ball_score)) {
-        have_ball_center = true;
-        best_ball_area = area;
-        best_ball_score = det.score;
-        best_ball_pixel = cv::Point2f(static_cast<float>(cx), static_cast<float>(cy));
+  if (!detections.empty()) {
+    for (int idx : indices) {
+      if (idx < 0 || idx >= static_cast<int>(detections.size())) {
+        continue;
       }
-    }
+      const auto& det = detections[idx];
+      const auto& info = class_info_[det.class_id];
 
-    if (publish_debug_) {
-      cv::rectangle(debug_image, det.box, info.color, 2);
-      const std::string label = info.name + " " +
-        cv::format("%.2f", static_cast<double>(det.score));
-      cv::putText(debug_image, label, cv::Point(det.box.x, std::max(0, det.box.y - 5)),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.5, info.color, 1);
+      soccer_msgs::msg::BoundingBox bbox;
+      bbox.probability = det.score;
+      bbox.xmin = det.box.x;
+      bbox.ymin = det.box.y;
+      bbox.xmax = det.box.x + det.box.width;
+      bbox.ymax = det.box.y + det.box.height;
+      bbox.class_id = info.name;
+      bbox.id = det.class_id;
+
+      int cx = det.box.x + det.box.width / 2;
+      int cy = det.box.y + det.box.height / 2;
+      bbox.xbase = cx;
+      bbox.ybase = det.box.y + det.box.height;
+      bbox.obstacle_detected = false;
+
+      bboxes_msg.bounding_boxes.push_back(bbox);
+
+      if (info.name == "ball") {
+        double area = det.box.width * det.box.height;
+        if (!have_ball_center || area > best_ball_area ||
+            (std::abs(area - best_ball_area) < 1e-3 && det.score > best_ball_score)) {
+          have_ball_center = true;
+          best_ball_area = area;
+          best_ball_score = det.score;
+          best_ball_pixel = cv::Point2f(static_cast<float>(cx), static_cast<float>(cy));
+        }
+      }
+
+      if (publish_debug_) {
+        cv::rectangle(debug_image, det.box, info.color, 2);
+        const std::string label = info.name + " " +
+          cv::format("%.2f", static_cast<double>(det.score));
+        cv::putText(debug_image, label, cv::Point(det.box.x, std::max(0, det.box.y - 5)),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, info.color, 1);
+      }
     }
   }
 
@@ -467,9 +557,9 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     double avg_full_ms = total_full_ms_ / frame_count_;
     double effective_fps = 1000.0 / avg_full_ms;
     RCLCPP_INFO(this->get_logger(),
-                "Performance: inference=%.1fms, total=%.1fms, %.1f FPS (skip=%d, backend=%s/%s)",
+                "Performance: inference=%.1fms, total=%.1fms, %.1f FPS (skip=%d, device=%s)",
                 avg_inference_ms, avg_full_ms, effective_fps, frame_skip_,
-                dnn_backend_.c_str(), dnn_target_.c_str());
+                device_.c_str());
     frame_count_ = 0;
     total_inference_ms_ = 0.0;
     total_full_ms_ = 0.0;
@@ -478,34 +568,53 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 }
 
 std::vector<YoloDetector::Detection> YoloDetector::decodeDetections(
-  const cv::Mat& output,
+  const ov::Tensor& output,
   float scale,
   int image_width,
   int image_height) const
 {
   std::vector<Detection> detections;
+  const ov::Shape shape = output.get_shape();
+
+  std::vector<float> converted_output;
+  const float* output_data = nullptr;
+  if (output.get_element_type() == ov::element::f32) {
+    output_data = static_cast<const float*>(output.data());
+  } else if (output.get_element_type() == ov::element::f16) {
+    const auto* float16_data = static_cast<const ov::float16*>(output.data());
+    converted_output.resize(output.get_size());
+    for (size_t i = 0; i < output.get_size(); ++i) {
+      converted_output[i] = static_cast<float>(float16_data[i]);
+    }
+    output_data = converted_output.data();
+  } else {
+    RCLCPP_WARN(this->get_logger(), "Unsupported YOLO output tensor type: %s",
+                output.get_element_type().to_string().c_str());
+    return detections;
+  }
 
   cv::Mat data;
   const int cols_no_obj = 4 + kNumClasses;
   const int cols_with_obj = 5 + kNumClasses;
 
-  if (output.dims == 3) {
-    const int dim1 = output.size[1];
-    const int dim2 = output.size[2];
+  if (shape.size() == 3) {
+    const int dim1 = static_cast<int>(shape[1]);
+    const int dim2 = static_cast<int>(shape[2]);
     if (dim1 == cols_no_obj || dim1 == cols_with_obj) {
-      cv::Mat reshaped(dim1, dim2, CV_32F, const_cast<float*>(output.ptr<float>()));
+      cv::Mat reshaped(dim1, dim2, CV_32F, const_cast<float*>(output_data));
       cv::transpose(reshaped, data);
     } else if (dim2 == cols_no_obj || dim2 == cols_with_obj) {
-      data = cv::Mat(dim1, dim2, CV_32F, const_cast<float*>(output.ptr<float>())).clone();
+      data = cv::Mat(dim1, dim2, CV_32F, const_cast<float*>(output_data)).clone();
     } else {
-      RCLCPP_WARN(this->get_logger(), "Unexpected YOLO output shape [%d, %d, %d]",
-                  output.size[0], output.size[1], output.size[2]);
+      RCLCPP_WARN(this->get_logger(), "Unexpected YOLO output shape %s",
+                  shapeToString(shape).c_str());
       return detections;
     }
-  } else if (output.dims == 2) {
-    data = output;
+  } else if (shape.size() == 2) {
+    data = cv::Mat(static_cast<int>(shape[0]), static_cast<int>(shape[1]), CV_32F,
+                   const_cast<float*>(output_data)).clone();
   } else {
-    RCLCPP_WARN(this->get_logger(), "Unexpected YOLO output dims: %d", output.dims);
+    RCLCPP_WARN(this->get_logger(), "Unexpected YOLO output rank: %zu", shape.size());
     return detections;
   }
 

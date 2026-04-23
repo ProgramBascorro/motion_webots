@@ -113,6 +113,19 @@
   overflow: hidden;
 }
 
+/* Tuning cards */
+.tuning-card {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.tuning-card-collapsed {
+  min-height: 0 !important;
+}
+
+.tuning-card[data-card-id] {
+  scroll-margin-top: 12px;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

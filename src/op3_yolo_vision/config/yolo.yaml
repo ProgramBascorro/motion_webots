@@ -7,10 +7,11 @@ yolo_detector:
     use_fp16: false
     dnn_backend: opencv
     dnn_target: cpu
+    device: CPU
     input_size: 640
-    ball_confidence_threshold: 0.2
-    goalpost_confidence_threshold: 0.2
-    robot_confidence_threshold: 0.2
+    ball_confidence_threshold: 0.5
+    goalpost_confidence_threshold: 0.5
+    robot_confidence_threshold: 0.5
     intersection_confidence_threshold: 0.4
     nms_threshold: 0.5
     nms_score_threshold: 0.1

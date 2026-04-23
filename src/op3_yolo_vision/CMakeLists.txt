@@ -16,6 +16,22 @@ find_package(geometry_msgs REQUIRED)
 find_package(soccer_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(OpenCV REQUIRED)
+if(NOT OpenVINO_DIR AND DEFINED ENV{OpenVINO_DIR})
+  set(OpenVINO_DIR "$ENV{OpenVINO_DIR}")
+endif()
+find_package(OpenVINO QUIET)
+if(NOT OpenVINO_FOUND)
+  foreach(_openvino_path IN ITEMS
+      /opt/intel/openvino/runtime/cmake
+      /opt/intel/openvino_2025.4.0/runtime/cmake
+      /usr/lib/x86_64-linux-gnu/cmake/OpenVINO
+      /usr/lib/aarch64-linux-gnu/cmake/OpenVINO)
+    if(EXISTS "${_openvino_path}/OpenVINOConfig.cmake")
+      list(APPEND CMAKE_PREFIX_PATH "${_openvino_path}")
+    endif()
+  endforeach()
+  find_package(OpenVINO REQUIRED)
+endif()
 
 include_directories(
   include
@@ -35,7 +51,10 @@ ament_target_dependencies(yolo_detector
   ament_index_cpp
 )
 
-target_link_libraries(yolo_detector ${OpenCV_LIBRARIES})
+target_link_libraries(yolo_detector
+  ${OpenCV_LIBRARIES}
+  openvino::runtime
+)
 
 install(TARGETS
   yolo_detector
@@ -56,11 +75,6 @@ install(DIRECTORY config/
 
 install(DIRECTORY models/
   DESTINATION share/${PROJECT_NAME}/models
-)
-
-install(PROGRAMS
-  scripts/yolo_detector_node.py
-  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

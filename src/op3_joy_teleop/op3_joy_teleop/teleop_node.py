@@ -1,4 +1,5 @@
 import copy
+import json
 import time
 from typing import Dict, Optional, Tuple
 
@@ -44,6 +45,22 @@ class Op3JoyTeleop(Node):
         self._publish_rate = float(self.declare_parameter("publish_rate", 30.0).value)
         self._dry_run = bool(self.declare_parameter("dry_run", False).value)
         self._joy_timeout = float(self.declare_parameter("joy_timeout", 0.5).value)
+        self._teleop_command_topic = str(
+            self.declare_parameter(
+                "teleop_command_topic", "/op3_joy_teleop/command"
+            ).value
+        )
+        self._teleop_status_topic = str(
+            self.declare_parameter(
+                "teleop_status_topic", "/op3_joy_teleop/status"
+            ).value
+        )
+        self._auto_refresh_baseline_sec = float(
+            self.declare_parameter("auto_refresh_baseline_sec", 0.0).value
+        )
+        self._refresh_baseline_button = int(
+            self.declare_parameter("refresh_baseline_button", -1).value
+        )
 
         self._smoothing_mode = str(
             self.declare_parameter("smoothing_mode", "accel_limit").value
@@ -215,6 +232,9 @@ class Op3JoyTeleop(Node):
         self._param_pub = self.create_publisher(
             WalkingParam, "/robotis/walking/set_params", 10
         )
+        self._teleop_status_pub = self.create_publisher(
+            String, self._teleop_status_topic, 10
+        )
         self._head_offset_pub = self.create_publisher(
             JointState, "/robotis/head_control/set_joint_states_offset", 10
         )
@@ -238,6 +258,10 @@ class Op3JoyTeleop(Node):
         )
         self._baseline_params: Optional[WalkingParam] = None
         self._baseline_request_in_flight = False
+        self._baseline_request_reason = "startup"
+        self._baseline_version = 0
+        self._last_baseline_refresh_time = 0.0
+        self._last_baseline_error = ""
 
         self._deadman_active = False
         self._stop_pressed = False
@@ -245,6 +269,7 @@ class Op3JoyTeleop(Node):
         self._last_log_times: Dict[str, float] = {}
         self._last_joy_time: Optional[float] = None
         self._joy_timed_out = False
+        self._refresh_baseline_pressed = False
         self._last_walk_update_time = time.monotonic()
         self._smoothed_x = 0.0
         self._smoothed_y = 0.0
@@ -297,6 +322,9 @@ class Op3JoyTeleop(Node):
         self._getup_back_pressed = False
 
         self.create_subscription(Joy, "/joy", self._joy_callback, 10)
+        self.create_subscription(
+            String, self._teleop_command_topic, self._teleop_command_callback, 10
+        )
         self._joint_state_sub = self.create_subscription(
             JointState, "/joint_states", self._joint_states_callback, 10
         )
@@ -310,6 +338,7 @@ class Op3JoyTeleop(Node):
             self._log_throttled("dry_startup", "dry_run enabled; not publishing startup enable")
 
         self.create_timer(1.0, self._try_fetch_baseline)
+        self.create_timer(1.0, self._publish_teleop_status)
 
         if self._publish_rate <= 0.0:
             self.get_logger().warn("publish_rate <= 0; defaulting to 30.0")
@@ -334,6 +363,7 @@ class Op3JoyTeleop(Node):
         getup_mode_pressed = self._get_button(msg, self._getup_mode_button)
         getup_front_pressed = self._get_button(msg, self._getup_front_button)
         getup_back_pressed = self._get_button(msg, self._getup_back_button)
+        refresh_baseline_pressed = self._get_button(msg, self._refresh_baseline_button)
         self._turbo_active = self._get_button(msg, self._turbo_button)
 
         if stop and not self._stop_pressed:
@@ -348,6 +378,7 @@ class Op3JoyTeleop(Node):
         self._update_heading_hold_and_gear(x_pressed, now)
         self._update_head_center_longpress(head_center_pressed, now)
         self._update_init_pose_longpress(init_pose_pressed, now)
+        self._update_baseline_refresh_button(refresh_baseline_pressed)
         self._update_kick_mode(kick_mode_pressed, now)
         self._handle_kick_trigger(now)
         self._update_getup_mode(getup_mode_pressed)
@@ -355,11 +386,34 @@ class Op3JoyTeleop(Node):
 
         self._deadman_active = deadman
         self._stop_pressed = stop
+        self._refresh_baseline_pressed = refresh_baseline_pressed
 
     def _try_fetch_baseline(self) -> None:
-        if self._baseline_params is not None or self._baseline_request_in_flight:
+        if self._baseline_request_in_flight:
+            return
+        if self._baseline_params is not None:
+            if self._auto_refresh_baseline_sec <= 0.0:
+                return
+            now = time.monotonic()
+            if now - self._last_baseline_refresh_time < self._auto_refresh_baseline_sec:
+                return
+            self._request_baseline_refresh("auto", force=True)
+            return
+
+        self._request_baseline_refresh("startup", force=False)
+
+    def _request_baseline_refresh(self, reason: str, force: bool = True) -> None:
+        if self._baseline_request_in_flight:
+            self._log_throttled(
+                "baseline_busy",
+                "Walking baseline refresh already in flight",
+                1.0,
+            )
+            return
+        if self._baseline_params is not None and not force:
             return
         if not self._param_client.service_is_ready():
+            self._last_baseline_error = "/robotis/walking/get_params unavailable"
             self._log_throttled(
                 "wait_params",
                 "Waiting for /robotis/walking/get_params service...",
@@ -371,6 +425,7 @@ class Op3JoyTeleop(Node):
         request.get_param = True
         future = self._param_client.call_async(request)
         self._baseline_request_in_flight = True
+        self._baseline_request_reason = reason
         future.add_done_callback(self._handle_baseline_response)
 
     def _handle_baseline_response(self, future) -> None:
@@ -378,13 +433,23 @@ class Op3JoyTeleop(Node):
         try:
             response = future.result()
         except Exception as exc:  # noqa: BLE001
+            self._last_baseline_error = str(exc)
             self.get_logger().warn(f"Failed to get walking params: {exc}")
             return
         if response is None:
+            self._last_baseline_error = "empty response"
             self.get_logger().warn("Walking params response was empty")
             return
         self._baseline_params = response.parameters
-        self.get_logger().info("Loaded baseline walking parameters")
+        self._baseline_version += 1
+        self._last_baseline_refresh_time = time.monotonic()
+        self._last_baseline_error = ""
+        self.get_logger().info(
+            (
+                "Loaded baseline walking parameters "
+                f"(version={self._baseline_version}, reason={self._baseline_request_reason})"
+            )
+        )
 
     def _publish_loop(self) -> None:
         self._handle_joy_timeout()
@@ -464,6 +529,80 @@ class Op3JoyTeleop(Node):
         params.y_move_amplitude = y
         params.angle_move_amplitude = yaw
         self._param_pub.publish(params)
+
+    def _teleop_command_callback(self, msg: String) -> None:
+        command = msg.data.strip().lower().replace("-", "_")
+        if not command:
+            return
+
+        if command in {"refresh", "refresh_params", "refresh_baseline", "reload_params"}:
+            self._request_baseline_refresh("command", force=True)
+        elif command in {"status", "publish_status"}:
+            self._publish_teleop_status()
+        elif command in {"enable", "enable_walking", "enable_walking_module"}:
+            if not self._dry_run:
+                self._enable_pub.publish(String(data=self._walking_module_name))
+            self._log_throttled("teleop_enable", "Teleop command: enable walking", 0.2)
+        elif command in {"start", "enable_start"}:
+            self._publish_enable_and_start()
+        elif command in {"stop", "stop_zero"}:
+            self._publish_stop_zero()
+        elif command in {"zero", "zero_params", "stop_motion"}:
+            self._publish_zero_params()
+        elif command in {"heading_hold_toggle", "toggle_heading_hold"}:
+            self._heading_hold = not self._heading_hold
+        elif command in {"heading_hold_on", "hold_heading"}:
+            self._heading_hold = True
+        elif command in {"heading_hold_off", "release_heading"}:
+            self._heading_hold = False
+        elif command in {"gear_next", "cycle_gear"}:
+            self._cycle_gear()
+        elif command.startswith("gear_"):
+            self._set_gear(command.removeprefix("gear_"))
+        else:
+            self.get_logger().warn(f"Unknown teleop command: {msg.data}")
+
+        self._publish_teleop_status()
+
+    def _publish_teleop_status(self) -> None:
+        now = time.monotonic()
+        gear_name, gear_scale = self._current_gear_info()
+        last_joy_age = None
+        if self._last_joy_time is not None:
+            last_joy_age = max(0.0, now - self._last_joy_time)
+        baseline_age = None
+        if self._last_baseline_refresh_time > 0.0:
+            baseline_age = max(0.0, now - self._last_baseline_refresh_time)
+        payload = {
+            "baseline_loaded": self._baseline_params is not None,
+            "baseline_version": self._baseline_version,
+            "baseline_age_sec": baseline_age,
+            "baseline_refresh_in_flight": self._baseline_request_in_flight,
+            "baseline_error": self._last_baseline_error,
+            "deadman_active": self._deadman_active,
+            "joy_timed_out": self._joy_timed_out,
+            "last_joy_age_sec": last_joy_age,
+            "gear": gear_name,
+            "gear_index": self._gear_index,
+            "gear_scale": gear_scale,
+            "heading_hold": self._heading_hold,
+            "turbo_active": self._turbo_active,
+            "turn_src": self._turn_src,
+            "yaw_target": self._yaw_target,
+            "smoothed_x": self._smoothed_x,
+            "smoothed_y": self._smoothed_y,
+            "smoothed_yaw": self._smoothed_yaw,
+            "max_x": self._max_x,
+            "max_y": self._max_y,
+            "max_yaw": self._max_yaw,
+            "kick_mode_active": self._kick_mode_active,
+            "kick_stage": self._kick_stage,
+            "getup_mode_active": self._getup_mode_active,
+            "getup_stage": self._getup_stage,
+            "walking_module_name": self._walking_module_name,
+            "dry_run": self._dry_run,
+        }
+        self._teleop_status_pub.publish(String(data=json.dumps(payload, separators=(",", ":"))))
 
     def _publish_head(self) -> None:
         now = time.monotonic()
@@ -758,6 +897,12 @@ class Op3JoyTeleop(Node):
         if not pressed and self._init_pose_pressed:
             self._init_pose_pressed = False
 
+    def _update_baseline_refresh_button(self, pressed: bool) -> None:
+        if self._refresh_baseline_button < 0:
+            return
+        if pressed and not self._refresh_baseline_pressed:
+            self._request_baseline_refresh("joy_button", force=True)
+
     def _apply_smoothing(
         self, target_x: float, target_y: float, target_yaw: float, dt: float
     ) -> Tuple[float, float, float]:
@@ -797,11 +942,37 @@ class Op3JoyTeleop(Node):
             return
         self._gear_index = (self._gear_index + 1) % len(self._gear_scales)
 
+    def _set_gear(self, requested: str) -> None:
+        if not self._gear_scales:
+            return
+        requested = requested.strip().lower()
+        for index, name in enumerate(self._gear_names):
+            if str(name).lower() == requested:
+                self._gear_index = index
+                return
+        try:
+            index = int(requested)
+        except ValueError:
+            self.get_logger().warn(f"Unknown gear: {requested}")
+            return
+        if 0 <= index < len(self._gear_scales):
+            self._gear_index = index
+        else:
+            self.get_logger().warn(f"Gear index out of range: {index}")
+
     def _validate_gears(self) -> None:
         if not self._gear_scales:
             return
         if not self._gear_names or len(self._gear_names) != len(self._gear_scales):
             self._gear_names = [f"gear_{i}" for i in range(len(self._gear_scales))]
+
+    def _current_gear_info(self) -> Tuple[str, float]:
+        if self._gear_names and self._gear_scales:
+            return (
+                str(self._gear_names[self._gear_index]),
+                float(self._gear_scales[self._gear_index]),
+            )
+        return "n/a", 1.0
 
     def _get_dpad_inputs(self) -> Tuple[float, float]:
         dpad_x = 0.0
@@ -833,12 +1004,7 @@ class Op3JoyTeleop(Node):
         return dpad_x, dpad_y
 
     def _log_debug_state(self) -> None:
-        if self._gear_names and self._gear_scales:
-            gear_name = self._gear_names[self._gear_index]
-            gear_scale = self._gear_scales[self._gear_index]
-        else:
-            gear_name = "n/a"
-            gear_scale = 1.0
+        gear_name, gear_scale = self._current_gear_info()
         now = time.monotonic()
         kick_remaining = 0.0
         if self._kick_mode_active:

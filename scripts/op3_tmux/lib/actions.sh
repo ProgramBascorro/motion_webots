@@ -191,6 +191,11 @@ action_docker_run() {
   docker_cmd="$(docker_base_cmd)"
   [[ -d "$WS" ]] || die "Workspace not found: $WS"
 
+  local tty_in="/dev/tty"
+  if [[ ! -r "$tty_in" || ! -w "$tty_in" ]]; then
+    tty_in="/proc/self/fd/0"
+  fi
+
   local tag="${OP3_DOCKER_TAG:-op3-webots-ros2:humble}"
   local run_flags="${OP3_DOCKER_RUN_FLAGS:-}"
   local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
@@ -254,14 +259,17 @@ action_docker_run() {
   esac
 
   cmd+=(-w /ros2_ws)
+  [[ -n "${TERM:-}" ]] && cmd+=(-e "TERM=${TERM}")
 
   if [[ -n "$run_flags" ]]; then
     read -r -a extra_flags <<< "$run_flags"
     cmd+=("${extra_flags[@]}")
   fi
 
-  cmd+=("$tag" bash)
-  "${cmd[@]}"
+  local init_cmd
+  init_cmd='if [ -n "${OPENVINO_ROOT:-}" ] && [ -f "${OPENVINO_ROOT}/setupvars.sh" ]; then source "${OPENVINO_ROOT}/setupvars.sh" || true; fi; source /opt/ros/humble/setup.bash; if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash || true; fi; export WEBOTS_HOME="${WEBOTS_HOME:-/usr/local/webots}"; export LD_LIBRARY_PATH="$WEBOTS_HOME/lib:$WEBOTS_HOME/lib/controller:${LD_LIBRARY_PATH:-}"; export USER="${USER:-root}"; exec /bin/bash -il'
+  cmd+=(--entrypoint /bin/bash "$tag" -lc "$init_cmd")
+  "${cmd[@]}" <"$tty_in" >"$tty_in"
 }
 
 action_docker_up() {
@@ -300,6 +308,7 @@ restart_component() {
     rqt_image_view|rqt) pane="$(tmux_env_get @op3_pane_rqt)" ;;
     yolo_vision) pane="$(tmux_env_get @op3_pane_yolo_vision)" ;;
     localization) pane="$(tmux_env_get @op3_pane_localization)" ;;
+    ball_head_tracking) pane="$(tmux_env_get @op3_pane_ball_head_tracking)" ;;
     ball_localizer) pane="$(tmux_env_get @op3_pane_ball_localizer)" ;;
     action_editor) pane="$(tmux_env_get @op3_pane_action_editor)" ;;
     action_web) pane="$(tmux_env_get @op3_pane_action_web)" ;;
@@ -329,6 +338,7 @@ restart_component() {
     rqt_image_view|rqt) wrapped="$(wrap_cmd "$RQT_CMD")" ;;
     yolo_vision) wrapped="$(wrap_cmd "$YOLO_VISION_CMD")" ;;
     localization) wrapped="$(wrap_cmd "$LOCALIZATION_CMD")" ;;
+    ball_head_tracking) wrapped="$(wrap_cmd "$BALL_HEAD_TRACKING_CMD")" ;;
     ball_localizer) wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")" ;;
     action_editor) wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")" ;;
     action_web) wrapped="$(wrap_cmd "$ACTION_WEB_CMD")" ;;

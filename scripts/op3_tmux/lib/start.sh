@@ -8,15 +8,16 @@ start_stack() {
   local with_rqt="$7"
   local with_yolo_vision="$8"
   local with_localization="$9"
-  local with_ball_localizer="${10}"
-  local with_action_editor="${11}"
-  local with_action_web="${12}"
-  local with_vision_lab="${13}"
-  local with_demo="${14}"
-  local dry_run="${15}"
+  local with_ball_head_tracking="${10}"
+  local with_ball_localizer="${11}"
+  local with_action_editor="${12}"
+  local with_action_web="${13}"
+  local with_vision_lab="${14}"
+  local with_demo="${15}"
+  local dry_run="${16}"
 
   local needs_ros_stack=0
-  if [[ "$with_webots" -eq 1 || "$with_manager" -eq 1 || "$with_offset_tuner" -eq 1 || "$with_teleop" -eq 1 || "$with_foxglove" -eq 1 || "$with_tools" -eq 1 || "$with_rqt" -eq 1 || "$with_yolo_vision" -eq 1 || "$with_localization" -eq 1 || "$with_ball_localizer" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 || "$with_demo" -eq 1 ]]; then
+  if [[ "$with_webots" -eq 1 || "$with_manager" -eq 1 || "$with_offset_tuner" -eq 1 || "$with_teleop" -eq 1 || "$with_foxglove" -eq 1 || "$with_tools" -eq 1 || "$with_rqt" -eq 1 || "$with_yolo_vision" -eq 1 || "$with_localization" -eq 1 || "$with_ball_head_tracking" -eq 1 || "$with_ball_localizer" -eq 1 || "$with_action_editor" -eq 1 || "$with_action_web" -eq 1 || "$with_demo" -eq 1 ]]; then
     needs_ros_stack=1
   fi
 
@@ -31,7 +32,7 @@ start_stack() {
   fi
 
   local webots_wrapped manager_wrapped offset_tuner_wrapped teleop_wrapped fox_wrapped tools_wrapped rqt_wrapped
-  local yolo_vision_wrapped localization_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped vision_lab_wrapped
+  local yolo_vision_wrapped localization_wrapped ball_head_tracking_wrapped ball_localizer_wrapped action_editor_wrapped action_web_wrapped vision_lab_wrapped
   local demo_wrapped demo_cmd
   webots_wrapped="$(wrap_cmd "$WEBOTS_CMD")"
   manager_wrapped="$(wrap_cmd "$MANAGER_CMD")"
@@ -42,6 +43,7 @@ start_stack() {
   rqt_wrapped="$(wrap_cmd "$RQT_CMD")"
   yolo_vision_wrapped="$(wrap_cmd "$YOLO_VISION_CMD")"
   localization_wrapped="$(wrap_cmd "$LOCALIZATION_CMD")"
+  ball_head_tracking_wrapped="$(wrap_cmd "$BALL_HEAD_TRACKING_CMD")"
   ball_localizer_wrapped="$(wrap_cmd "$BALL_LOCALIZER_CMD")"
   action_editor_wrapped="$(wrap_cmd "$ACTION_EDITOR_CMD")"
   action_web_wrapped="$(wrap_cmd "$ACTION_WEB_CMD")"
@@ -69,6 +71,7 @@ start_stack() {
     if [[ "$with_rqt" -eq 1 ]]; then echo "${DIM}Pane (rqt):     $RQT_CMD${RST}"; fi
     if [[ "$with_yolo_vision" -eq 1 ]]; then echo "${DIM}Pane (yolo_vision):  $YOLO_VISION_CMD${RST}"; fi
     if [[ "$with_localization" -eq 1 ]]; then echo "${DIM}Pane (localization): $LOCALIZATION_CMD${RST}"; fi
+    if [[ "$with_ball_head_tracking" -eq 1 ]]; then echo "${DIM}Pane (ball_head_tracking): $BALL_HEAD_TRACKING_CMD${RST}"; fi
     if [[ "$with_ball_localizer" -eq 1 ]]; then echo "${DIM}Pane (ball_localizer): $BALL_LOCALIZER_CMD${RST}"; fi
     if [[ "$with_action_editor" -eq 1 ]]; then echo "${DIM}Pane (action_editor): $ACTION_EDITOR_CMD${RST}"; fi
     if [[ "$with_action_web" -eq 1 ]]; then echo "${DIM}Pane (studio): $ACTION_WEB_CMD${RST}"; fi
@@ -85,8 +88,11 @@ start_stack() {
     tmux kill-session -t "$SESSION"
   fi
 
+  ensure_tmux_mouse_default
+
   # Create base session with ONE window named "main"
   tmux new-session -d -s "$SESSION" -n main
+  tmux set-option -g mouse on >/dev/null 2>&1 || true
 
   local components=()
   [[ "$with_webots" -eq 1 ]] && components+=(webots)
@@ -98,6 +104,7 @@ start_stack() {
   [[ "$with_rqt" -eq 1 ]] && components+=(rqt_image_view)
   [[ "$with_yolo_vision" -eq 1 ]] && components+=(yolo_vision)
   [[ "$with_localization" -eq 1 ]] && components+=(localization)
+  [[ "$with_ball_head_tracking" -eq 1 ]] && components+=(ball_head_tracking)
   [[ "$with_ball_localizer" -eq 1 ]] && components+=(ball_localizer)
   [[ "$with_action_editor" -eq 1 ]] && components+=(action_editor)
   [[ "$with_action_web" -eq 1 ]] && components+=(action_web)
@@ -167,6 +174,10 @@ start_stack() {
         tmux_send "$SESSION":main.$pane "$localization_wrapped"
         tmux_env_set "@op3_pane_localization" "$pane"
         ;;
+      ball_head_tracking)
+        tmux_send "$SESSION":main.$pane "$ball_head_tracking_wrapped"
+        tmux_env_set "@op3_pane_ball_head_tracking" "$pane"
+        ;;
       ball_localizer)
         tmux_send "$SESSION":main.$pane "$ball_localizer_wrapped"
         tmux_env_set "@op3_pane_ball_localizer" "$pane"
@@ -198,6 +209,7 @@ start_stack() {
   tmux_env_set "@op3_with_offset_tuner" "$with_offset_tuner"
   tmux_env_set "@op3_with_yolo_vision" "$with_yolo_vision"
   tmux_env_set "@op3_with_localization" "$with_localization"
+  tmux_env_set "@op3_with_ball_head_tracking" "$with_ball_head_tracking"
   tmux_env_set "@op3_with_ball_localizer" "$with_ball_localizer"
   tmux_env_set "@op3_with_action_editor" "$with_action_editor"
   tmux_env_set "@op3_with_action_web" "$with_action_web"

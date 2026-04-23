@@ -68,6 +68,7 @@ class SoccerDemo : public OPDemo
 
   rclcpp::Node::SharedPtr node_;
   void setNode(rclcpp::Node::SharedPtr node);
+  void setUsingHeadControl(bool use_head_control);
   void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
   void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
 
@@ -108,6 +109,7 @@ class SoccerDemo : public OPDemo
   BallTracker ball_tracker_;
   BallFollower ball_follower_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_data_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_tracker_cmd_pub_;
 
   // rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
   // rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;

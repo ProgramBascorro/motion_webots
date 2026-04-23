@@ -90,7 +90,8 @@ void SoccerDemo::setNode(rclcpp::Node::SharedPtr node)
     imu_data_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>("/robotis/open_cr/imu", 10,
                                                                       std::bind(&SoccerDemo::imuDataCallback, this, std::placeholders::_1));
     ball_tracker_.setNode(node);
-    ball_follower_.setNode(node);  
+    ball_follower_.setNode(node);
+    head_tracker_cmd_pub_ = node_->create_publisher<std_msgs::msg::String>("/ball_tracker/command", 10);
   }
   else
   {
@@ -98,14 +99,31 @@ void SoccerDemo::setNode(rclcpp::Node::SharedPtr node)
   }
 }
 
+void SoccerDemo::setUsingHeadControl(bool use_head_control)
+{
+  ball_tracker_.setUsingHeadControl(use_head_control);
+}
+
 void SoccerDemo::setDemoEnable()
 {
   enable_ = true;
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "start";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
   startSoccerMode();
 }
 
 void SoccerDemo::setDemoDisable()
 {
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "stop";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
   // handle disable procedure
   ball_tracker_.stopTracking();
   ball_follower_.stopFollowing();

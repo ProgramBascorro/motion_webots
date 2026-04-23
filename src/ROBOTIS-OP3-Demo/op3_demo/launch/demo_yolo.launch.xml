@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="with_manager" default="true"/>
+
+  <!-- robotis op3 manager -->
+  <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
+
+  <!-- YOLO detector -->
+  <include file="$(find-pkg-share op3_yolo_vision)/launch/yolo.launch.py"/>
+
+  <!-- YOLO -> CircleSet bridge so soccer_demo's BallTracker still gets ball positions -->
+  <node pkg="op3_ball_localization" exec="yolo_to_demo_bridge" output="screen"/>
+
+  <!-- Head tracking: start paused, activated by SoccerDemo via /ball_tracker/command -->
+  <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen">
+    <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
+    <param name="auto_start" value="false"/>
+  </node>
+
+  <!-- face tracking -->
+  <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml"/>
+
+  <!-- camera setting tool -->
+  <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml"/>
+
+  <!-- web setting -->
+  <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml"/>
+
+  <!-- robotis op3 demo: keep FSM + walking + kicking, disable internal head control -->
+  <node pkg="op3_demo" exec="op_demo_node" output="screen">
+    <param name="grass_demo" value="False"/>
+    <param name="p_gain" value="0.45"/>
+    <param name="d_gain" value="0.045"/>
+    <param name="use_head_control" value="false"/>
+  </node>
+</launch>

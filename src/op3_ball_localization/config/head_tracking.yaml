@@ -1,26 +1,53 @@
 head_tracking_node:
   ros__parameters:
-    # PID Control Gains (reduced for smoother, less jerky tracking)
-    p_gain: 0.35            # Reduced from 0.65 - less aggressive
-    d_gain: 0.10            # Increased from 0.08 - more damping
+    # Direct YOLO center tracking
+    ball_center_topic: /vision/yolo/ball_center
 
-    # Scanning Parameters (slower and safer range)
+    # PID gains based on the original OP3 tracker
+    p_gain: 0.30
+    i_gain: 0.0
+    d_gain: 0.045
+
+    # Ignore corrections while the ball sits within this fraction of the frame
+    # from center (e.g., 0.10 = inner 20% square). Prevents the camera from
+    # hunting when YOLO's bbox center jitters frame-to-frame.
+    center_deadzone: 0.10
+
+    # Exponential smoothing on the ball center. 1.0 = no smoothing (raw YOLO),
+    # lower = more smoothing but more lag. 0.4 keeps the response snappy while
+    # rejecting single-frame noise.
+    input_smoothing: 0.4
+
+    # Control loop
+    control_rate: 20.0
+    lost_timeout: 0.8
+
+    # When no ball is seen, sweep the head through forward + downward positions.
+    # Up-facing angles are intentionally excluded — the ball sits on the floor.
     scan_enabled: true
-    scan_pan_min: -0.9      # Reduced from -1.2 to avoid servo limits
-    scan_pan_max: 0.9       # Reduced from 1.2 to avoid servo limits
-    scan_tilt_down: -0.5    # Reduced from -0.6 to avoid servo limits
-    scan_tilt_up: -0.2      # Reduced from -0.25 for better view
-    scan_step: 0.15         # Smaller step for smoother scan (was 0.2)
-    scan_dwell_sec: 1.5     # Longer pause at each position (was 0.8)
+    scan_period_sec: 2.5           # seconds per position (move + focus dwell)
+    scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
+    scan_tilt_forward_rad: -0.10   # forward/horizon tilt (~-6°, slight down)
+    scan_tilt_down_rad: -0.35      # down tilt (~-20°, looking toward floor)
 
-    # Detection Parameters (much longer timeout to keep tracking stable)
-    lost_timeout: 4.0       # Much longer timeout (was 2.5) - stay in tracking mode longer
-    min_ball_radius: 0.005  # Lower threshold to detect smaller balls (was 0.01)
+    # Camera field of view copied from the original tracker
+    fov_width_deg: 35.2
+    fov_height_deg: 21.6
+
+    # Command shaping
+    min_command_deg: 1.0
+    max_offset_pan_rad: 0.25
+    max_offset_tilt_rad: 0.20
+    head_enable_retry_sec: 1.5
+    # Only retry the enable_ctrl_module handshake during this initial window.
+    # After that, stop — otherwise each re-enable resets the head's scan_state_.
+    head_enable_boot_sec: 5.0
+
+    # Sign multipliers — set to -1.0 to invert a direction if head moves wrong way
+    pan_sign: 1.0
+    tilt_sign: -1.0
 
     # Joint Names
     head_pan_joint: head_pan
     head_tilt_joint: head_tilt
     head_module_name: head_control_module
-
-    # Control Rate
-    control_rate: 10.0      # Hz

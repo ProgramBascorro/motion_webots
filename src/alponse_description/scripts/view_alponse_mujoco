@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+import argparse
+import sys
+import time
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
+
+
+def default_model_path() -> Path:
+    return Path(get_package_share_directory("alponse_description")) / "mujoco" / "alponse_mujoco.urdf"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Open the Alponse URDF in the MuJoCo viewer.")
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=default_model_path(),
+        help="Path to a MuJoCo-loadable URDF or MJCF file.",
+    )
+    parser.add_argument(
+        "--gravity",
+        action="store_true",
+        help="Keep gravity enabled. By default it is disabled for easier model inspection.",
+    )
+    args = parser.parse_args()
+
+    try:
+        import mujoco
+        from mujoco import viewer
+    except ImportError:
+        print(
+            "Python package 'mujoco' is not installed. In Docker, rebuild the image; "
+            "locally, run: python3 -m pip install mujoco",
+            file=sys.stderr,
+        )
+        return 1
+
+    model_path = args.model.expanduser().resolve()
+    if not model_path.exists():
+        print(f"Model file not found: {model_path}", file=sys.stderr)
+        return 1
+
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+
+    if not args.gravity:
+        model.opt.gravity[:] = 0.0
+
+    with viewer.launch_passive(model, data) as handle:
+        while handle.is_running():
+            step_start = time.time()
+            mujoco.mj_step(model, data)
+            handle.sync()
+            sleep_time = model.opt.timestep - (time.time() - step_start)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

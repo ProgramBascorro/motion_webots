@@ -28,6 +28,7 @@ BallTracker::BallTracker()
     NOT_FOUND_THRESHOLD(50),
     WAITING_THRESHOLD(5),
     use_head_scan_(true),
+    use_head_control_(true),
     count_not_found_(0),
     on_tracking_(false),
     current_ball_pan_(0),
@@ -132,6 +133,11 @@ void BallTracker::stopTracking()
 void BallTracker::setUsingHeadScan(bool use_scan)
 {
   use_head_scan_ = use_scan;
+}
+
+void BallTracker::setUsingHeadControl(bool use_head_control)
+{
+  use_head_control_ = use_head_control;
 }
 
 int BallTracker::processTracking()
@@ -257,6 +263,9 @@ int BallTracker::processTracking()
 
 void BallTracker::publishHeadJoint(double pan, double tilt)
 {
+  if (use_head_control_ == false)
+    return;
+
   if (node_ == nullptr)
   {
     RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot publish head joint");
@@ -281,6 +290,9 @@ void BallTracker::publishHeadJoint(double pan, double tilt)
 
 void BallTracker::goInit()
 {
+  if (use_head_control_ == false)
+    return;
+
   if (node_ == nullptr)
   {
     RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot go init");
@@ -300,6 +312,9 @@ void BallTracker::goInit()
 
 void BallTracker::scanBall()
 {
+  if (use_head_control_ == false)
+    return;
+
   if (use_head_scan_ == false)
     return;
 

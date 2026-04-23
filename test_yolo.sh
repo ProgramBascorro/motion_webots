@@ -1,17 +1,14 @@
 #!/bin/bash
 
-# Test script to verify YOLO works with OpenCV 4.8.1
+set -euo pipefail
 
-WORKSPACE="/home/farhan/Projects/Surgical_lokalisasi_bismillah/motion_webots_farhan_coba"
-OPENCV_LIB="/home/farhan/Projects/Surgical_lokalisasi_bismillah/third_party/opencv-4.8.1/install/lib"
-
-export LD_LIBRARY_PATH="${OPENCV_LIB}:$LD_LIBRARY_PATH"
+WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$WORKSPACE"
 source install/setup.bash
 
 echo "========================================="
-echo "YOLO Detector Test with OpenCV 4.8.1"
+echo "YOLO Detector Test with OpenVINO"
 echo "========================================="
 echo ""
 
@@ -26,8 +23,8 @@ echo "✓ Binary found: $BINARY"
 echo ""
 
 # Check library dependencies
-echo "Checking OpenCV libraries:"
-ldd "$BINARY" | grep opencv | head -5
+echo "Checking OpenVINO and OpenCV libraries:"
+ldd "$BINARY" | grep -E "openvino|opencv" | head -10 || true
 
 # Count missing libraries
 MISSING=$(ldd "$BINARY" 2>&1 | grep "not found" | wc -l)
@@ -40,7 +37,7 @@ if [ $MISSING -gt 0 ]; then
 fi
 
 echo ""
-echo "✓ All OpenCV libraries found"
+echo "✓ All runtime libraries found"
 echo ""
 echo "Launching YOLO detector..."
 echo "Press Ctrl+C to stop"

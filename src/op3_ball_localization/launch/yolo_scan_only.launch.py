@@ -6,18 +6,17 @@ import os
 
 def generate_launch_description():
     """
-    Launch YOLO + Head Tracking Only (SCAN ONLY mode)
+    Launch YOLO + Head Tracking Only.
 
     This launch file provides head tracking without walking or kicking.
     The robot will:
-    - Scan for the ball with head movements
     - Track the ball by keeping it centered in camera view
     - NOT walk toward the ball
     - NOT kick the ball
 
     Prerequisites:
     - Launch manager + USB camera first (via script.sh)
-    - This only launches YOLO vision, bridge, and head tracking node
+    - This only launches YOLO vision and the head tracking node
     """
 
     # Get package directories
@@ -38,15 +37,7 @@ def generate_launch_description():
             parameters=[yolo_config]
         ),
 
-        # 2. YOLO to Demo Bridge (converts YOLO → CircleSetStamped)
-        Node(
-            package='op3_ball_localization',
-            executable='yolo_to_demo_bridge',
-            name='yolo_to_demo_bridge',
-            output='screen'
-        ),
-
-        # 3. Head Tracking Only (NO walking or kicking)
+        # 2. Head Tracking Only (NO walking or kicking)
         Node(
             package='op3_ball_localization',
             executable='head_tracking_node',

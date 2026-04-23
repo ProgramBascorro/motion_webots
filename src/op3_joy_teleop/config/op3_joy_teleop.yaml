@@ -20,6 +20,10 @@ op3_joy_teleop:
     publish_rate: 30.0
     dry_run: false
     joy_timeout: 0.5
+    teleop_command_topic: /op3_joy_teleop/command
+    teleop_status_topic: /op3_joy_teleop/status
+    auto_refresh_baseline_sec: 0.0
+    refresh_baseline_button: -1
 
     smoothing_mode: accel_limit
     accel_limit_x: 0.06

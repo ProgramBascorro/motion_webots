@@ -32,3 +32,12 @@ tmux_env_get() {
   local key="$1"
   tmux show-environment -t "$SESSION" "$key" 2>/dev/null | sed -n "s/^${key}=//p"
 }
+
+ensure_tmux_mouse_default() {
+  local tmux_conf="${HOME}/.tmux.conf"
+  local mouse_line='set -g mouse on'
+
+  if [[ ! -f "$tmux_conf" ]] || ! grep -Eq '^[[:space:]]*set(-option)?[[:space:]]+-g[[:space:]]+mouse[[:space:]]+on([[:space:]]|$)' "$tmux_conf"; then
+    printf '%s\n' "$mouse_line" >> "$tmux_conf"
+  fi
+}

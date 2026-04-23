@@ -20,11 +20,11 @@
 #include <vector>
 
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <openvino/openvino.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <soccer_msgs/msg/bounding_boxes.hpp>
 
-#include <opencv2/dnn.hpp>
 #include <opencv2/opencv.hpp>
 
 namespace op3_yolo_vision
@@ -53,8 +53,9 @@ private:
   void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
   bool loadModel();
+  void logDeprecatedBackendSettings() const;
 
-  std::vector<Detection> decodeDetections(const cv::Mat& output,
+  std::vector<Detection> decodeDetections(const ov::Tensor& output,
                                           float scale,
                                           int image_width,
                                           int image_height) const;
@@ -62,6 +63,7 @@ private:
   std::string image_topic_;
   std::string ball_center_topic_;
   std::string model_path_;
+  std::string device_;
   std::string dnn_backend_;
   std::string dnn_target_;
 
@@ -73,7 +75,10 @@ private:
   bool use_fp16_;
   int frame_skip_;
 
-  cv::dnn::Net net_;
+  ov::Core core_;
+  std::shared_ptr<ov::Model> model_;
+  ov::CompiledModel compiled_model_;
+  ov::InferRequest infer_request_;
   bool model_loaded_;
   std::vector<ClassInfo> class_info_;
 

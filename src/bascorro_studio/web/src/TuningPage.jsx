@@ -14,6 +14,10 @@ import {
   Terminal,
   CheckCircle2,
   Download,
+  ChevronDown,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 
@@ -71,6 +75,17 @@ const JOINT_GROUPS = {
   "Legs": ["hip", "knee", "ank"],
 };
 
+const CARD_IDS = {
+  offset: "offset",
+  walkingTuner: "walking_tuner",
+  locomotion: "locomotion",
+  inputMonitor: "input_monitor",
+  manualParam: "manual_param",
+};
+
+const CARD_ID_LIST = Object.values(CARD_IDS);
+const LAYOUT_STORAGE_KEY = "bascorro.tuning.layout.v1";
+
 // --- Helpers ---
 
 function radToDeg(value) {
@@ -98,20 +113,79 @@ function makeParamValue(type, rawValue) {
   return { type: PARAM_TYPES.double, double_value: Number(value) };
 }
 
+function getDefaultCollapsedMap() {
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 1279px)").matches;
+  return {
+    [CARD_IDS.offset]: false,
+    [CARD_IDS.walkingTuner]: isMobile,
+    [CARD_IDS.locomotion]: true,
+    [CARD_IDS.inputMonitor]: true,
+    [CARD_IDS.manualParam]: true,
+  };
+}
+
+function sanitizeCollapsedCards(raw, fallback) {
+  if (!raw || typeof raw !== "object") return fallback;
+  const cleaned = { ...fallback };
+  CARD_ID_LIST.forEach((cardId) => {
+    if (typeof raw[cardId] === "boolean") cleaned[cardId] = raw[cardId];
+  });
+  return cleaned;
+}
+
 // --- Components ---
 
-const SectionCard = ({ title, icon: Icon, children, actions, className = "" }) => (
-  <div className={`bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col overflow-hidden ${className}`}>
+const SectionCard = ({
+  title,
+  icon: Icon,
+  children,
+  actions,
+  cardId,
+  className = "",
+  bodyClassName = "",
+  isCollapsed = false,
+  isFocused = false,
+  onToggleCollapse,
+  onToggleFocus,
+  collapsedSummary = null,
+}) => (
+  <div
+    data-card-id={cardId}
+    className={`tuning-card bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col overflow-hidden ${
+      isFocused ? "ring-2 ring-undip-blue/20 border-undip-blue/40" : ""
+    } ${isCollapsed ? "tuning-card-collapsed" : ""} ${className}`}
+  >
     <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
       <div className="flex items-center gap-2">
         {Icon && <Icon size={18} className="text-undip-blue" />}
         <h2 className="text-sm font-bold font-display text-gray-800 uppercase tracking-wide">{title}</h2>
       </div>
-      <div className="flex gap-2">{actions}</div>
+      <div className="flex items-center gap-2">
+        <div className="flex gap-2">{actions}</div>
+        <button
+          onClick={onToggleCollapse}
+          disabled={isFocused}
+          className="p-1.5 text-gray-500 hover:text-undip-blue hover:bg-blue-50 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title={isFocused ? "Focused card cannot be collapsed" : isCollapsed ? "Expand card" : "Minimize card"}
+        >
+          {isCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+        </button>
+        <button
+          onClick={onToggleFocus}
+          className="p-1.5 text-gray-500 hover:text-undip-blue hover:bg-blue-50 rounded-md transition-colors"
+          title={isFocused ? "Exit focus mode" : "Focus this card"}
+        >
+          {isFocused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
+      </div>
     </div>
-    <div className="p-5 flex-1 overflow-auto custom-scrollbar">
-      {children}
-    </div>
+    {isCollapsed ? (
+      collapsedSummary ? <div className="px-5 py-3 border-t border-gray-100">{collapsedSummary}</div> : null
+    ) : (
+      <div className={`p-5 flex-1 overflow-auto custom-scrollbar ${bodyClassName}`}>
+        {children}
+      </div>
+    )}
   </div>
 );
 
@@ -146,6 +220,11 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
   const [paramNode, setParamNode] = useState("op3_yolo_vision");
   const [paramName, setParamName] = useState("ball_confidence_threshold");
   const [paramValue, setParamValue] = useState("0.2");
+  
+  // --- State: Layout ---
+  const [layoutMode, setLayoutMode] = useState("multi");
+  const [collapsedCards, setCollapsedCards] = useState(() => getDefaultCollapsedMap());
+  const [focusedCardId, setFocusedCardId] = useState(null);
 
   // --- Refs ---
   const offsetDataPubRef = useRef(null);
@@ -157,6 +236,34 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
   const enableModulePubRef = useRef(null);
+  const preFocusSnapshotRef = useRef(null);
+
+  useEffect(() => {
+    const defaults = getDefaultCollapsedMap();
+    setCollapsedCards(defaults);
+    try {
+      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      const savedMode = parsed?.layoutMode === "single" ? "single" : "multi";
+      setLayoutMode(savedMode);
+      setCollapsedCards(sanitizeCollapsedCards(parsed?.collapsedCards, defaults));
+    } catch {
+      setLayoutMode("multi");
+      setCollapsedCards(defaults);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
+        layoutMode,
+        collapsedCards,
+      }));
+    } catch {
+      // Ignore storage failures (private mode, quota, etc.).
+    }
+  }, [layoutMode, collapsedCards]);
 
   // --- Setup ROS ---
   useEffect(() => {
@@ -374,18 +481,138 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
     return rows;
   }, [offsetRows, offsetFilter, activeGroup]);
 
+  const setLayoutModeAndCollapse = (nextMode) => {
+    setLayoutMode(nextMode);
+    if (nextMode !== "single") return;
+    setCollapsedCards((prev) => {
+      const keepOpenCard = focusedCardId || CARD_ID_LIST.find((id) => !prev[id]) || CARD_IDS.offset;
+      const next = {};
+      CARD_ID_LIST.forEach((id) => {
+        next[id] = id !== keepOpenCard;
+      });
+      return next;
+    });
+  };
+
+  const toggleCardCollapse = (cardId) => {
+    if (focusedCardId && focusedCardId === cardId) return;
+    setCollapsedCards((prev) => {
+      const willCollapse = !prev[cardId];
+      const next = { ...prev, [cardId]: willCollapse };
+      if (layoutMode === "single" && !willCollapse) {
+        CARD_ID_LIST.forEach((id) => {
+          if (id !== cardId) next[id] = true;
+        });
+      }
+      return next;
+    });
+  };
+
+  const toggleCardFocus = (cardId) => {
+    if (focusedCardId === cardId) {
+      setFocusedCardId(null);
+      setCollapsedCards((prev) => {
+        const snapshot = preFocusSnapshotRef.current;
+        preFocusSnapshotRef.current = null;
+        if (!snapshot) return prev;
+        return sanitizeCollapsedCards(snapshot, getDefaultCollapsedMap());
+      });
+      return;
+    }
+
+    setCollapsedCards((prev) => {
+      preFocusSnapshotRef.current = { ...prev };
+      const next = {};
+      CARD_ID_LIST.forEach((id) => {
+        next[id] = id !== cardId;
+      });
+      return next;
+    });
+    setFocusedCardId(cardId);
+
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1279px)").matches) {
+      window.setTimeout(() => {
+        const cardEl = document.querySelector(`[data-card-id="${cardId}"]`);
+        cardEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+    }
+  };
+
+  const isOffsetFocused = focusedCardId === CARD_IDS.offset;
+  const isRightFocused = focusedCardId && focusedCardId !== CARD_IDS.offset;
+  const leftColumnClass = isOffsetFocused ? "xl:col-span-12" : isRightFocused ? "xl:col-span-4" : "xl:col-span-8";
+  const rightColumnClass = isOffsetFocused ? "xl:col-span-12" : isRightFocused ? "xl:col-span-8" : "xl:col-span-4";
+
+  const offsetCollapsedSummary = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="text-xs font-mono text-gray-500">
+        <span className="font-bold text-gray-700">{filteredOffsetRows.length}</span>
+        <span className="mx-1">/</span>
+        <span className="font-bold text-gray-700">{offsetRows.length}</span>
+        <span className="ml-1">joints</span>
+        <span className="mx-2 text-gray-300">|</span>
+        <span>{activeGroup}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={loadOffsetRows}
+          disabled={rosState !== "connected" || offsetLoading}
+          className="p-1.5 text-gray-500 hover:text-undip-blue hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
+          title="Reload"
+        >
+          <RefreshCw size={14} className={offsetLoading ? "animate-spin" : ""} />
+        </button>
+        <button
+          onClick={applyAllOffsets}
+          disabled={rosState !== "connected" || offsetRows.length === 0}
+          className="px-2.5 py-1.5 bg-undip-blue text-white rounded-md text-[11px] font-bold hover:bg-opacity-90 transition-colors disabled:opacity-50"
+        >
+          Apply All
+        </button>
+      </div>
+    </div>
+  );
+
   // --- Render ---
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-gray-50/50">
-      <div className="flex-1 w-full p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 overflow-y-auto xl:overflow-hidden">
+      <div className="px-4 md:px-6 pt-4 md:pt-6 pb-0 flex justify-end">
+        <div className="inline-flex items-center bg-gray-100 p-1 rounded-xl border border-gray-200">
+          <button
+            onClick={() => setLayoutModeAndCollapse("single")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              layoutMode === "single" ? "bg-white text-undip-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Single-open
+          </button>
+          <button
+            onClick={() => setLayoutModeAndCollapse("multi")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              layoutMode === "multi" ? "bg-white text-undip-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Multi-open
+          </button>
+        </div>
+      </div>
+
+      <div className={`flex-1 w-full p-4 md:p-6 pt-4 grid grid-cols-1 xl:grid-cols-12 gap-6 overflow-y-auto ${focusedCardId ? "xl:overflow-y-auto" : "xl:overflow-hidden"}`}>
         
         {/* LEFT COLUMN: Offset Tuner */}
-        <div className="xl:col-span-8 flex flex-col gap-6 h-auto xl:h-full xl:overflow-hidden">
+        <div className={`${leftColumnClass} flex flex-col gap-6 h-auto xl:h-full ${focusedCardId ? "xl:overflow-visible" : "xl:overflow-hidden"}`}>
           <SectionCard 
+            cardId={CARD_IDS.offset}
             title="Offset Tuner" 
             icon={Sliders} 
-            className="flex-1 min-h-[500px] xl:min-h-0"
+            className={collapsedCards[CARD_IDS.offset] ? "" : `${focusedCardId === CARD_IDS.offset ? "min-h-[620px]" : "flex-1 min-h-[500px] xl:min-h-0"}`}
+            bodyClassName={focusedCardId === CARD_IDS.offset ? "xl:min-h-[520px]" : ""}
+            isCollapsed={Boolean(collapsedCards[CARD_IDS.offset])}
+            isFocused={focusedCardId === CARD_IDS.offset}
+            onToggleCollapse={() => toggleCardCollapse(CARD_IDS.offset)}
+            onToggleFocus={() => toggleCardFocus(CARD_IDS.offset)}
+            collapsedSummary={offsetCollapsedSummary}
             actions={
               <div className="flex items-center gap-2">
                  <button 
@@ -555,12 +782,19 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
         </div>
 
         {/* RIGHT COLUMN: Walking & Utils */}
-        <div className="xl:col-span-4 flex flex-col gap-6 h-auto xl:h-full xl:overflow-y-auto custom-scrollbar xl:pr-2">
+        <div className={`${rightColumnClass} flex flex-col gap-6 h-auto ${focusedCardId ? "xl:overflow-visible" : "xl:h-full xl:overflow-y-auto"} custom-scrollbar xl:pr-2`}>
           
           {/* Walking Parameters */}
           <SectionCard 
+            cardId={CARD_IDS.walkingTuner}
             title="Walking Tuner" 
             icon={Sliders}
+            className={collapsedCards[CARD_IDS.walkingTuner] ? "" : `${focusedCardId === CARD_IDS.walkingTuner ? "xl:min-h-[620px]" : ""}`}
+            bodyClassName={focusedCardId === CARD_IDS.walkingTuner ? "xl:min-h-[500px]" : ""}
+            isCollapsed={Boolean(collapsedCards[CARD_IDS.walkingTuner])}
+            isFocused={focusedCardId === CARD_IDS.walkingTuner}
+            onToggleCollapse={() => toggleCardCollapse(CARD_IDS.walkingTuner)}
+            onToggleFocus={() => toggleCardFocus(CARD_IDS.walkingTuner)}
             actions={
               <button onClick={loadWalkingParams} className="p-1.5 text-gray-400 hover:text-undip-blue hover:bg-blue-50 rounded transition-colors"><RefreshCw size={14}/></button>
             }
@@ -603,7 +837,16 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
           </SectionCard>
 
           {/* Walking Control */}
-          <SectionCard title="Locomotion Control" icon={Gamepad2}>
+          <SectionCard
+            cardId={CARD_IDS.locomotion}
+            title="Locomotion Control"
+            icon={Gamepad2}
+            className={collapsedCards[CARD_IDS.locomotion] ? "" : `${focusedCardId === CARD_IDS.locomotion ? "xl:min-h-[620px]" : ""}`}
+            isCollapsed={Boolean(collapsedCards[CARD_IDS.locomotion])}
+            isFocused={focusedCardId === CARD_IDS.locomotion}
+            onToggleCollapse={() => toggleCardCollapse(CARD_IDS.locomotion)}
+            onToggleFocus={() => toggleCardFocus(CARD_IDS.locomotion)}
+          >
              <div className="space-y-3">
                 <button
                   className="w-full py-2.5 bg-gradient-to-r from-undip-blue to-blue-900 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
@@ -650,14 +893,32 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
           </SectionCard>
 
           {/* Teleop Viz */}
-          <SectionCard title="Input Monitor" icon={Gamepad2}>
+          <SectionCard
+            cardId={CARD_IDS.inputMonitor}
+            title="Input Monitor"
+            icon={Gamepad2}
+            className={collapsedCards[CARD_IDS.inputMonitor] ? "" : `${focusedCardId === CARD_IDS.inputMonitor ? "xl:min-h-[620px]" : ""}`}
+            isCollapsed={Boolean(collapsedCards[CARD_IDS.inputMonitor])}
+            isFocused={focusedCardId === CARD_IDS.inputMonitor}
+            onToggleCollapse={() => toggleCardCollapse(CARD_IDS.inputMonitor)}
+            onToggleFocus={() => toggleCardFocus(CARD_IDS.inputMonitor)}
+          >
             <div className="flex justify-center py-2">
               <GamepadVisualizer joy={joyState} rosConnected={rosState === "connected"} publishJoy={publishJoy} />
             </div>
           </SectionCard>
 
           {/* Manual Param */}
-          <SectionCard title="Manual Parameter" icon={Terminal}>
+          <SectionCard
+            cardId={CARD_IDS.manualParam}
+            title="Manual Parameter"
+            icon={Terminal}
+            className={collapsedCards[CARD_IDS.manualParam] ? "" : `${focusedCardId === CARD_IDS.manualParam ? "xl:min-h-[620px]" : ""}`}
+            isCollapsed={Boolean(collapsedCards[CARD_IDS.manualParam])}
+            isFocused={focusedCardId === CARD_IDS.manualParam}
+            onToggleCollapse={() => toggleCardCollapse(CARD_IDS.manualParam)}
+            onToggleFocus={() => toggleCardFocus(CARD_IDS.manualParam)}
+          >
             <div className="space-y-3">
               <div className="space-y-1">
                  <label className="text-[10px] font-bold text-gray-400 uppercase">Node</label>

@@ -28,6 +28,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG WITH_WEBOTS=1
 ARG OPENCV_VERSION=4.8.1
 ARG OPENCV_PREFIX=/opt/opencv-${OPENCV_VERSION}
+ARG OPENVINO_VERSION=2025.4.0
+ARG OPENVINO_FULL_VERSION=2025.4.0.20398.8fdad55727d
 
 # Tool versions (pin for reproducibility)
 # NOTE: We avoid NodeSource apt repo to prevent signature/proxy issues during docker build.
@@ -53,6 +55,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-dev libavformat-dev libswscale-dev libv4l-dev \
     libgtk-3-dev \
     python3-colcon-common-extensions python3-rosdep \
+    python3-pip \
+    libgl1 libgl1-mesa-dri libglfw3 libglew2.2 libosmesa6 \
     ros-humble-cv-bridge \
     ros-humble-image-transport \
     ros-humble-tf2-eigen \
@@ -81,6 +85,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ubuntu-keyring \
  && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m pip install --no-cache-dir mujoco
+
 # ---- OpenCV (newer than Ubuntu repo) for ONNX DNN compatibility ----
 RUN set -eux; \
   mkdir -p /tmp/opencv; \
@@ -108,6 +114,26 @@ RUN set -eux; \
   cmake --build build --parallel "$(nproc)"; \
   cmake --install build; \
   rm -rf /tmp/opencv
+
+# ---- OpenVINO Runtime (archive install, CPU-ready in Docker) ----
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) \
+      ov_archive="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64.tgz"; \
+      ov_dir="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64" ;; \
+    arm64) \
+      ov_archive="openvino_toolkit_ubuntu20_${OPENVINO_FULL_VERSION}_arm64.tgz"; \
+      ov_dir="openvino_toolkit_ubuntu20_${OPENVINO_FULL_VERSION}_arm64" ;; \
+    *) echo "Unsupported arch for OpenVINO: $arch" >&2; exit 1 ;; \
+  esac; \
+  mkdir -p /opt/intel; \
+  curl -fsSL -o /tmp/openvino.tgz \
+    "https://storage.openvinotoolkit.org/repositories/openvino/packages/2025.4/linux/${ov_archive}"; \
+  tar -xf /tmp/openvino.tgz -C /tmp; \
+  mv "/tmp/${ov_dir}" "/opt/intel/openvino_${OPENVINO_VERSION}"; \
+  /opt/intel/openvino_${OPENVINO_VERSION}/install_dependencies/install_openvino_dependencies.sh -y; \
+  rm -rf /tmp/openvino.tgz "/tmp/${ov_dir}"
 
 # ---- Install Node.js from official tarball (no apt repos) ----
 RUN set -eux; \
@@ -197,9 +223,12 @@ ENV PATH=/usr/local/webots:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/webots/lib:/usr/local/webots/lib/controller
 ENV QTWEBENGINE_DISABLE_SANDBOX=1
 ENV USER=root
+ENV OPENVINO_ROOT=/opt/intel/openvino_${OPENVINO_VERSION}
+ENV OpenVINO_DIR=${OPENVINO_ROOT}/runtime/cmake
 ENV OP3_OPENCV_PREFIX=${OPENCV_PREFIX}
 ENV OpenCV_DIR=${OPENCV_PREFIX}/lib/cmake/opencv4
-ENV LD_LIBRARY_PATH=${OPENCV_PREFIX}/lib:${LD_LIBRARY_PATH}
+ENV CMAKE_PREFIX_PATH=${OpenVINO_DIR}:${CMAKE_PREFIX_PATH}
+ENV LD_LIBRARY_PATH=${OPENVINO_ROOT}/runtime/lib/intel64:${OPENVINO_ROOT}/runtime/3rdparty/tbb/lib:${OPENCV_PREFIX}/lib:${LD_LIBRARY_PATH}
 
 # Workspace
 WORKDIR /ros2_ws

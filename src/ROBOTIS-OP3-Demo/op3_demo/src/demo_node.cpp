@@ -94,6 +94,11 @@ int main(int argc, char **argv)
   action_demo->setNode(node);
   vision_demo->setNode(node);
 
+  bool use_head_control = node->declare_parameter<bool>("use_head_control", true);
+  soccer_demo->setUsingHeadControl(use_head_control);
+  RCLCPP_INFO(node->get_logger(), "use_head_control = %s",
+              use_head_control ? "true" : "false");
+
   // connect imu callback
   // auto imu_data_sub = node->create_subscription<sensor_msgs::msg::Imu>("/robotis/open_cr/imu", 10,
   //                                                                     std::bind(&robotis_op::SoccerDemo::imuDataCallback, soccer_demo.get(), std::placeholders::_1));
