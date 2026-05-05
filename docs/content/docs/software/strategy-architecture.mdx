@@ -1,0 +1,815 @@
+---
+title: Strategy Architecture
+description: Arsitektur strategi humanoid OP3 RoboCup KidSize berbasis layer, prioritas, dan planning implementasi dari nol
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<style>{`
+article {
+  font-family: "Times New Roman", Times, serif;
+  font-size: 12pt;
+  line-height: 1.7;
+}
+
+article code,
+article pre,
+article kbd,
+article samp {
+  font-family: "Courier New", Courier, monospace !important;
+}
+`}</style>
+
+# Strategy Architecture for `motion_webots`
+
+Dokumen ini menyatukan seluruh diskusi strategi yang sudah kita bangun, lalu menurunkannya menjadi arsitektur software yang benar-benar mengacu pada codebase `motion_webots` saat ini. Fokusnya bukan hanya menjelaskan "robot harus pintar", tetapi menjelaskan bagaimana perilaku robot dibentuk bertahap dari level pertandingan, persepsi, keputusan, sampai eksekusi gerak.
+
+Dokumen ini ditulis sebagai referensi desain dari nol. Artinya, bila nanti tim ingin membuat package strategy baru seperti `op3_soccer_core`, seluruh keputusan desain awal, dependensi, urutan implementasi, dan titik integrasi dengan package yang sudah ada harus bisa dibaca dari sini.
+
+<Callout type="info">
+Body dokumen ini menggunakan gaya serif seperti dokumen formal, sementara path repository, nama package, topic ROS, parameter, dan potongan kode ditandai dalam font monospace.
+</Callout>
+
+---
+
+## 1. Tujuan Arsitektur
+
+Arsitektur ini dibangun untuk target berikut:
+
+- Platform robot adalah `ROBOTIS OP3`.
+- Kompetisi target adalah RoboCup Humanoid League KidSize 2025/2026.
+- Lingkungan pertandingan menggunakan artificial turf sekitar 30 mm, sehingga gerak dan stabilitas tidak bisa diperlakukan seperti lantai datar laboratorium.
+- Sistem tidak boleh bergantung pada magnetometer.
+- Robot harus mampu bermain secara otonom, sinkron dengan GameController, patuh aturan, dan mendukung koordinasi empat pemain: Goalkeeper, Striker, Support, dan Defender.
+
+Dalam konteks ini, strategy tidak boleh berdiri sendiri. Strategy harus dibangun di atas aturan resmi pertandingan, karakter gerak robot humanoid, keterbatasan persepsi visual, dan struktur package yang sudah tersedia di repository ini.
+
+---
+
+## 2. Baseline Codebase Saat Ini
+
+Sebelum mendefinisikan layer, penting untuk menandai apa yang sudah ada di repository dan apa yang belum ada.
+
+### 2.1 Package dan File Kunci yang Sudah Ada
+
+| Komponen | Lokasi | Peran Saat Ini |
+| --- | --- | --- |
+| Webots launch utama | `src/ROBOTIS-OP3-Simulations/op3_webots_ros2/launch/robot_launch.py` | Menjalankan Webots, `op3_extern_controller`, `op3_gc_bridge`, dan `robot_state_publisher` |
+| Webots robot bridge | `src/ROBOTIS-OP3-Simulations/op3_webots_ros2/src/op3_extern_controller.cpp` | Menjembatani joint command, IMU, camera, joint state, dan odometry |
+| GameController bridge | `src/ROBOTIS-OP3-Simulations/gc_bridge_webots/src/gc_bridge.cpp` | Menerima paket UDP GameController dan publish topik game state |
+| Structured game message | `src/soccer_msgs/msg/GameState.msg` | Tipe pesan yang cocok untuk strategy layer |
+| YOLO vision config | `src/op3_yolo_vision/config/yolo.yaml` | Menunjukkan topik visi aktif dari kamera Webots |
+| Ball behavior reference | `src/op3_ball_localization/op3_ball_localization/ball_localizer_node.py` | Contoh behavior scan-approach-kick dan penggunaan topic motion OP3 |
+| Localization candidate | `src/humanoid_navigation/humanoid_localization` | Probabilistic localization stack |
+| Planner candidate | `src/humanoid_navigation/humanoid_planner_2d` | Planner 2D yang dapat menjadi basis planning jangka menengah |
+
+### 2.2 Fakta Teknis yang Sudah Terverifikasi dari Codebase
+
+- `robot_launch.py` saat ini sudah meluncurkan `op3_gc_bridge`, jadi sinkronisasi GameController memang sudah mulai dibangun dari jalur simulasi.
+- `op3_extern_controller.cpp` sudah mem-publish:
+  - `/robotis_op3/joint_states`
+  - `/robotis_op3/imu`
+  - `/robotis_op3/camera/image_raw`
+  - `/robotis_op3/camera/camera_info`
+  - `/odom`
+- `gc_bridge.cpp` sudah mem-publish:
+  - `/game_controller/raw`
+  - `/game_controller/state`
+  - `/game_controller/state_json`
+- `yolo.yaml` menunjukkan vision pipeline sekarang sudah mengarah ke:
+  - `image_topic: /robotis_op3/camera/image_raw`
+  - `ball_center_topic: /vision/yolo/ball_center`
+- `ball_localizer_node.py` membuktikan strategy layer bisa langsung mengendalikan:
+  - `/robotis/enable_ctrl_module`
+  - `/robotis/walking/command`
+  - `/robotis/walking/set_params`
+  - `/robotis/action/page_num`
+
+### 2.3 Celah Arsitektur Saat Ini
+
+Repository sudah memiliki banyak komponen dasar, tetapi belum memiliki satu stack strategy yang utuh dengan fungsi berikut:
+
+- adapter dari `/game_controller/state_json` ke `soccer_msgs/GameState`
+- layer compliance khusus RoboCup KidSize
+- role manager empat robot
+- coordinator antar robot via UDP team communication
+- world model bersama yang menggabungkan bola, lawan, pose, dan state pertandingan
+- planner hybrid A* 8-arah plus APF
+- satu dokumen arsitektur resmi yang mengikat semua keputusan tersebut
+
+Dokumen ini dirancang untuk menutup kekosongan desain itu.
+
+---
+
+## 3. Prinsip Prioritas yang Mengatur Semua Layer
+
+Sebelum masuk ke layer, arsitektur ini bekerja dengan tiga prioritas utama:
+
+### 3.1 Rule First
+
+Semua keputusan harus lolos aturan pertandingan lebih dahulu. Artinya, robot tidak boleh:
+
+- mengeksekusi aksi saat state pertandingan belum mengizinkan
+- melanggar jarak saat set-play
+- mencetak direct goal dari kickoff
+- memegang bola terlalu lama
+- menggunakan asumsi sensor yang dilarang seperti magnetometer
+
+Strategy yang menang tapi tidak legal tetap dianggap strategi gagal.
+
+### 3.2 Safety First
+
+Robot humanoid tidak boleh mengejar target dengan mengorbankan stabilitas. Pada turf 30 mm, slip, jatuh, dan keterlambatan recovery adalah faktor besar. Karena itu:
+
+- fall detection harus bisa override taktik
+- get-up behavior harus disiapkan sebagai aksi prioritas
+- planner harus memerhatikan stabilitas gerak, bukan hanya shortest path
+- keputusan yang memaksa belokan tajam atau tabrakan frontal harus dikendalikan
+
+### 3.3 Team First
+
+Empat robot tidak boleh berpikir seperti empat striker independen. Hanya satu robot yang boleh benar-benar commit ke bola dalam satu fase permainan, sementara robot lain harus:
+
+- membuka lane
+- menutup ancaman
+- menjadi receiver
+- menjaga struktur pertahanan
+
+Ini sangat penting agar strategi tidak runtuh menjadi chaos multi-agen.
+
+---
+
+## 4. Gambaran Besar Layer
+
+Struktur layer yang digunakan adalah:
+
+1. `GC Layer`
+2. `Compliance Layer`
+3. `Safety Layer`
+4. `Tactical Layer`
+5. `Team Coordination Layer`
+6. `Planning Layer`
+7. `Perception and Localization Layer`
+8. `Motion Layer`
+
+Urutannya penting. Layer di atas tidak boleh "meloncat" melewati layer di bawah. Misalnya, `Tactical Layer` tidak boleh langsung menggerakkan robot bila `Compliance Layer` atau `Safety Layer` sedang menahan aksi.
+
+---
+
+## 5. Layer 1 - GC Layer
+
+## 5.1 Tujuan
+
+`GC Layer` adalah gerbang resmi pertandingan. Layer ini memaksa seluruh sistem hanya bertindak sesuai state dari GameController.
+
+### 5.2 Referensi Existing di Repository
+
+- Publisher state:
+  - `src/ROBOTIS-OP3-Simulations/gc_bridge_webots/src/gc_bridge.cpp`
+- Tipe pesan target:
+  - `src/soccer_msgs/msg/GameState.msg`
+- Launch integrasi:
+  - `src/ROBOTIS-OP3-Simulations/op3_webots_ros2/launch/robot_launch.py`
+
+### 5.3 Input dan Output
+
+**Input utama**
+
+- `/game_controller/state_json`
+- opsional: `/game_controller/state` untuk fallback debugging
+
+**Output yang disarankan**
+
+- `/game_state` bertipe `soccer_msgs/GameState`
+- event internal seperti:
+  - `is_penalized`
+  - `is_kickoff_for_us`
+  - `is_setplay_for_us`
+  - `secondary_state_mode`
+
+### 5.4 Tanggung Jawab
+
+Layer ini harus:
+
+- membaca primary state: `INITIAL`, `READY`, `SET`, `PLAYING`, `FINISHED`
+- membaca secondary state: `DIRECT_FREEKICK`, `INDIRECT_FREEKICK`, `PENALTYKICK`, `CORNER_KICK`, `GOAL_KICK`, `THROW_IN`, `TIMEOUT`, `OVERTIME`
+- membaca status penalti robot sendiri
+- membaca siapa pemilik kick-off atau set-play
+- membaca sisa waktu pertandingan dan sisa waktu secondary state
+
+### 5.5 Langkah Implementasi dari Nol
+
+1. Buat adapter baru yang subscribe `/game_controller/state_json`.
+2. Parse JSON menjadi struktur yang cocok untuk `soccer_msgs/GameState`.
+3. Map `secondary_state_info` ke `secondary_state_team` dan `secondary_state_mode`.
+4. Tambahkan log throttled agar perubahan state bisa ditelusuri saat debugging.
+5. Jadikan seluruh node strategy downstream hanya subscribe ke hasil adapter ini, bukan langsung ke JSON mentah.
+
+### 5.6 Acceptance Criteria
+
+- Saat GameController berpindah dari `READY` ke `SET`, strategy langsung masuk mode tunggu.
+- Saat robot penalized, semua behavior aktif berhenti.
+- Saat secondary state berubah, role behavior menerima event dalam satu sumber data yang konsisten.
+
+---
+
+## 6. Layer 2 - Compliance Layer
+
+## 6.1 Tujuan
+
+Layer ini adalah penjaga legalitas aksi. Ia duduk di bawah GameController tetapi di atas taktik. Bila taktik mengusulkan aksi yang melanggar aturan, compliance harus memblokir atau memodifikasi aksi tersebut.
+
+### 6.2 Rule Set yang Harus Dikontrol
+
+Berdasarkan diskusi strategi dan rule context yang sudah kita bangun, layer ini minimal harus mengontrol:
+
+- kickoff tidak boleh langsung menghasilkan gol
+- bola harus keluar center circle atau disentuh pemain lain sebelum shoot langsung ke gawang
+- non-eksekutor harus menjaga jarak minimal `0.75 m` saat set-play
+- ball holding harus diputus sebelum melewati `5 detik`
+- pemain non-goalkeeper tidak boleh menyentuh bola dengan lengan
+- sistem lokalisasi dan heading tidak boleh bergantung pada magnetometer
+
+### 6.3 Mengapa Layer Ini Harus Terpisah
+
+Kalau aturan ditanam langsung ke role behavior, setiap role akan menyalin logika legalitas sendiri. Itu akan membuat:
+
+- logika sulit diverifikasi
+- bug legalitas tersebar di banyak node
+- debugging sulit karena tidak ada satu titik keputusan
+
+Dengan memisahkan compliance, kita mendapatkan satu "filter legalitas" terpusat.
+
+### 6.4 Input dan Output
+
+**Input**
+
+- `GameState`
+- proposed action dari tactical layer
+- estimasi jarak bola
+- role aktif
+- timer penguasaan bola
+
+**Output**
+
+- `allow`
+- `deny`
+- `force_release`
+- `force_reposition`
+- `force_wait`
+
+### 6.5 Langkah Implementasi dari Nol
+
+1. Definisikan struktur `proposed action`, misalnya `search`, `approach`, `kick`, `clear`, `hold_position`.
+2. Tambahkan evaluator legalitas yang memeriksa action terhadap state pertandingan.
+3. Tambahkan timer internal untuk durasi kontrol bola.
+4. Tambahkan policy kickoff:
+   - mode `tap-pass`
+   - mode `dribble keluar circle`
+5. Tambahkan policy set-play:
+   - siapa eksekutor
+   - siapa yang harus menjauh
+6. Tambahkan override bila robot bukan pemilik set-play.
+
+### 6.6 Acceptance Criteria
+
+- Robot non-eksekutor tidak maju mendekati bola pada set-play lawan.
+- Striker tidak langsung menembak dari kickoff tanpa syarat legal.
+- Saat timer penguasaan bola mendekati batas, system memaksa release behavior.
+
+---
+
+## 7. Layer 3 - Safety Layer
+
+## 7.1 Tujuan
+
+`Safety Layer` menjaga robot tetap berdiri, recoverable, dan aman di lapangan turf.
+
+### 7.2 Referensi Existing di Repository
+
+- IMU data dari:
+  - `src/ROBOTIS-OP3-Simulations/op3_webots_ros2/src/op3_extern_controller.cpp`
+- contoh parameter fall dan get-up di:
+  - `src/op3_ball_localization/op3_ball_localization/ball_localizer_node.py`
+
+### 7.3 Fungsi Wajib
+
+- deteksi jatuh depan dan belakang
+- cooldown get-up
+- lock motion saat robot sedang bangun
+- stop action kick bila pose belum stabil
+- membatasi command yang terlalu agresif di turf
+
+### 7.4 Pertimbangan Lapangan Nyata
+
+Diskusi sebelumnya menegaskan bahwa telapak kaki OP3 perlu `cleats` atau `studs` agar tidak mudah slip di artificial turf 30 mm. Karena itu, safety layer harus diasumsikan bekerja di sistem yang:
+
+- tetap bisa mengalami slip walau cleats sudah dipasang
+- punya akselerasi lateral terbatas
+- lebih aman menggunakan perubahan yaw progresif ketimbang snap turn
+
+### 7.5 Langkah Implementasi dari Nol
+
+1. Gunakan IMU pitch/roll untuk menentukan kondisi jatuh.
+2. Definisikan state internal:
+   - `stable`
+   - `unstable`
+   - `fallen_front`
+   - `fallen_back`
+   - `recovering`
+3. Tambahkan action get-up yang memanggil `action_module`.
+4. Saat `recovering`, blok semua command taktis selain `stop`.
+5. Tambahkan parameter limit untuk:
+   - yaw rate maksimum
+   - lateral move maksimum
+   - burst acceleration
+
+### 7.6 Acceptance Criteria
+
+- Robot tidak tetap berjalan saat jatuh.
+- Setelah recovery, robot baru kembali aktif setelah cooldown habis.
+- Command gerak tidak membuat robot sering oscillate di turf.
+
+---
+
+## 8. Layer 4 - Tactical Layer
+
+## 8.1 Tujuan
+
+`Tactical Layer` menentukan siapa melakukan apa dan kapan. Ini adalah inti behavior pertandingan.
+
+### 8.2 Struktur Role Dasar
+
+Empat role dasar yang sudah kita sepakati adalah:
+
+- `P1 Goalkeeper`
+- `P2 Striker`
+- `P3 Support`
+- `P4 Defender`
+
+### 8.3 FSM Role yang Diinginkan
+
+**Goalkeeper**
+
+- `HoldGoal`
+- `InterceptBox`
+- `Clear`
+- `Recover`
+
+**Striker**
+
+- `Search`
+- `Approach`
+- `Align`
+- `Kick`
+- `Reposition`
+
+**Support**
+
+- `SupportLane`
+- `SecondBall`
+- `TakeoverStriker`
+
+**Defender**
+
+- `GuardHalf`
+- `InterceptThreat`
+- `ClearToSupport`
+
+### 8.4 Referensi Existing di Repository
+
+Behavior paling dekat yang sudah ada saat ini adalah:
+
+- `src/op3_ball_localization/op3_ball_localization/ball_localizer_node.py`
+
+Node itu sudah memuat pola penting:
+
+- head scan
+- search yaw
+- ball approach
+- pre-kick positioning
+- kick action
+- fall handling
+
+Dengan kata lain, repository ini sudah punya "bibit striker local behavior", tetapi belum punya tactical architecture empat role yang terkoordinasi.
+
+### 8.5 Role Assignment dan Fallback
+
+Fallback dinamis yang kita sepakati:
+
+- jika `P2` penalized atau jatuh lama, `P3` takeover striker
+- jika `P1` incapabable, `P4` takeover goalkeeper sementara
+
+Tujuan fallback adalah menjaga struktur tim tanpa memerlukan reinitialization total seluruh strategy.
+
+### 8.6 Mengapa Tactical Layer Tidak Boleh Langsung Mengendalikan Hardware
+
+Layer ini sebaiknya hanya menghasilkan `intent`, misalnya:
+
+- `attack_ball`
+- `cover_lane`
+- `hold_goal`
+- `clear_ball`
+- `support_striker`
+
+Lalu intent itu diteruskan ke planning dan motion layer. Ini penting supaya:
+
+- perubahan planner tidak memaksa rewrite logic role
+- compliance dan safety masih bisa mengintervensi
+- trace debugging lebih rapi
+
+### 8.7 Langkah Implementasi dari Nol
+
+1. Definisikan `role manager`.
+2. Definisikan `global tactical state`.
+3. Definisikan FSM per role.
+4. Tambahkan fallback logic berbasis penalti dan status jatuh.
+5. Tambahkan arbitration rule agar hanya satu robot commit ke bola.
+6. Tambahkan transition guard agar role switch tidak terlalu sering.
+
+### 8.8 Acceptance Criteria
+
+- Dalam satu waktu hanya satu robot menjadi attacker utama.
+- Saat striker hilang, support mengambil alih tanpa seluruh sistem berhenti.
+- Goalkeeper tidak keluar terlalu jauh dari area yang aman.
+
+---
+
+## 9. Layer 5 - Team Coordination Layer
+
+## 9.1 Tujuan
+
+Layer ini memungkinkan empat robot berbagi status ringkas agar keputusan tim tidak dibuat dari persepsi lokal semata.
+
+### 9.2 Constraint Komunikasi
+
+Sesuai diskusi sebelumnya:
+
+- komunikasi menggunakan UDP broadcast
+- frekuensi sekitar `5-10 Hz`
+- total bandwidth maksimal `1 Mbit/s` per robot
+
+### 9.3 Data Minimal yang Perlu Dikirim
+
+Payload minimum yang disepakati:
+
+- `id`
+- `role`
+- `penalized`
+- `pose x y yaw`
+- `ball distance`
+- `ball bearing`
+- `ball confidence`
+- `commit flag`
+
+### 9.4 Fungsi Utama Layer Ini
+
+- menentukan siapa yang paling layak commit ke bola
+- mendukung fallback role
+- mencegah dua robot menyerang target yang sama
+- membiarkan defender dan support tahu kapan harus menutup ruang
+
+### 9.5 Strategi Arbitration yang Disarankan
+
+Jangan gunakan aturan tunggal "jarak paling dekat ke bola" saja. Lebih baik gunakan skor berbobot:
+
+- jarak ke bola
+- bearing terhadap bola
+- apakah robot sedang penalized
+- apakah robot itu striker utama
+- confidence pose dan confidence bola
+
+Dengan begitu, robot yang sedikit lebih jauh tapi lebih stabil dan menghadap ke bola bisa menang arbitration dibanding robot yang lebih dekat namun sedang tidak siap.
+
+### 9.6 Langkah Implementasi dari Nol
+
+1. Definisikan format payload JSON atau binary ringan.
+2. Tambahkan publisher UDP.
+3. Tambahkan receiver UDP.
+4. Simpan `team world snapshot`.
+5. Jalankan arbitration setiap tick taktis.
+6. Terapkan cooldown pada pergantian `commit owner`.
+
+### 9.7 Acceptance Criteria
+
+- Dua robot tidak terus-menerus menuju bola yang sama.
+- Fallback striker dapat dipicu dari data tim, bukan tebakan lokal saja.
+- Bandwidth tetap aman dan pesan tetap sederhana.
+
+---
+
+## 10. Layer 6 - Planning Layer
+
+## 10.1 Tujuan
+
+Layer ini mengubah intent taktis menjadi gerak yang efisien dan adaptif.
+
+### 10.2 Keputusan Desain yang Sudah Disepakati
+
+- planner global menggunakan `A*`
+- ruang aksi harus `8 arah`
+- planner lokal menggunakan `Artificial Potential Field (APF)`
+- OP3 memanfaatkan kemampuan `omnidirectional walking`, jadi diagonal dan strafing adalah gerak utama, bukan fitur tambahan
+
+### 10.3 Alasan A* 8-Arah Sangat Penting
+
+Kalau planner hanya 4-arah, robot akan bergerak seperti grid robot biasa: maju, mundur, kiri, kanan. Itu tidak cocok untuk OP3 karena:
+
+- robot bisa bergerak diagonal dengan `set_walk(x, y, yaw)`
+- jalur diagonal lebih pendek secara Euclidean
+- jumlah koreksi heading berkurang
+- konsumsi waktu dan baterai lebih efisien
+
+### 10.4 Peran APF
+
+`APF` digunakan untuk reaksi cepat terhadap obstacle dinamis:
+
+- bola menjadi gaya tarik
+- robot lawan menjadi gaya tolak
+- resultan gaya dimodulasi ke command gerak
+
+Dengan desain ini, global plan tidak harus terus di-recompute setiap kali lawan lewat sesaat.
+
+### 10.5 Referensi Existing di Repository
+
+- candidate planner package:
+  - `src/humanoid_navigation/humanoid_planner_2d`
+
+Meski package ini belum otomatis sama dengan A* 8-arah yang kita inginkan, keberadaannya memberi titik awal integrasi untuk planning 2D.
+
+### 10.6 Output Layer Ini
+
+Output planning ideal bukan langsung action kick, melainkan motion target seperti:
+
+- target heading
+- target waypoint
+- `vx`
+- `vy`
+- `yaw rate`
+
+### 10.7 Langkah Implementasi dari Nol
+
+1. Definisikan occupancy atau tactical grid sederhana.
+2. Buat A* 8-arah dengan cost diagonal.
+3. Tambahkan obstacle map dari deteksi lawan.
+4. Buat APF untuk refinement lokal.
+5. Buat fusion rule:
+   - A* menentukan arah global
+   - APF memodulasi avoidance lokal
+6. Tambahkan trigger replan:
+   - bola pindah signifikan
+   - path blocked
+   - pose confidence turun
+
+### 10.8 Acceptance Criteria
+
+- Robot tidak "patah-patah" seperti robot grid 4-arah.
+- Robot bisa menghindari lawan tanpa kehilangan tujuan utama.
+- Path menuju bola dan posisi support terasa natural untuk humanoid.
+
+---
+
+## 11. Layer 7 - Perception and Localization Layer
+
+## 11.1 Tujuan
+
+Layer ini menjawab dua pertanyaan:
+
+- "Apa yang saya lihat?"
+- "Saya sedang berada di mana?"
+
+### 11.2 Persepsi Visual yang Sudah Ada
+
+Vision saat ini bisa dibangun dari:
+
+- `src/op3_yolo_vision`
+- `src/op3_ball_localization`
+
+Topik yang sudah jelas dari konfigurasi saat ini:
+
+- `/robotis_op3/camera/image_raw`
+- `/vision/yolo/ball_center`
+
+Secara konseptual, vision perlu berkembang dari hanya deteksi bola menjadi deteksi:
+
+- bola
+- lawan
+- landmark lapangan
+- kandidat tiang gawang
+
+### 11.3 Lokalisasi yang Sudah Tersedia sebagai Kandidat
+
+- `src/humanoid_navigation/humanoid_localization`
+- `src/humanoid_navigation/humanoid_planner_2d`
+
+Diskusi sebelumnya sudah memutuskan bahwa lokalisasi utama harus menggabungkan:
+
+- odometri langkah
+- IMU
+- landmark visual
+- filter probabilistik seperti `Particle Filter` atau `MCL`
+
+### 11.4 Constraint Penting
+
+Karena magnetometer dilarang, heading harus datang dari:
+
+- integrasi gerak
+- IMU orientation yang sah
+- koreksi terhadap landmark lapangan
+
+### 11.5 Output Layer Ini
+
+Output yang diperlukan tactical dan planning layer adalah:
+
+- `ball pose`
+- `ball confidence`
+- `opponent map`
+- `self pose`
+- `self pose confidence`
+- landmark observations
+
+### 11.6 Langkah Implementasi dari Nol
+
+1. Rapikan output YOLO agar konsisten.
+2. Tambahkan converter dari deteksi ke world model.
+3. Bangun estimator pose menggunakan odom + landmark.
+4. Tambahkan confidence score.
+5. Pastikan planner hanya menerima data yang sudah memiliki kualitas minimal.
+
+### 11.7 Acceptance Criteria
+
+- Robot tetap punya estimasi heading tanpa magnetometer.
+- Robot tahu kapan bola terlihat, hilang, atau tidak cukup yakin.
+- Planner tidak menggunakan data liar tanpa confidence check.
+
+---
+
+## 12. Layer 8 - Motion Layer
+
+## 12.1 Tujuan
+
+`Motion Layer` adalah lapisan eksekusi akhir. Ia menerima command final dan menerjemahkannya ke antarmuka OP3 yang sudah ada.
+
+### 12.2 Referensi Existing yang Sudah Ada
+
+Dari `ball_localizer_node.py`, kita tahu antarmuka motion yang praktis saat ini adalah:
+
+- `/robotis/enable_ctrl_module`
+- `/robotis/walking/command`
+- `/robotis/walking/set_params`
+- `/robotis/action/page_num`
+
+### 12.3 Kenapa Motion Layer Perlu Dibungkus Ulang
+
+Walaupun topik OP3 sudah jelas, strategy tidak sebaiknya langsung tersebar publish ke banyak topik motor. Kita perlu satu abstraction layer, misalnya helper seperti:
+
+- `start_walking()`
+- `stop_walking()`
+- `set_walk(x, y, yaw)`
+- `kick_left()`
+- `kick_right()`
+- `getup_front()`
+- `getup_back()`
+
+Ini akan membuat seluruh stack strategy lebih stabil dan mudah dirawat.
+
+### 12.4 Hubungan dengan Turf
+
+Perintah motion perlu mempertimbangkan karakter lapangan:
+
+- `x`, `y`, dan `yaw` tidak boleh diubah terlalu agresif
+- strafing diagonal berguna tetapi harus dibatasi sesuai stabilitas
+- orientasi tendangan perlu disesuaikan dengan slip aktual
+
+### 12.5 Langkah Implementasi dari Nol
+
+1. Buat helper motion tunggal.
+2. Bungkus semua topik OP3 ke satu interface.
+3. Tambahkan parameter limits untuk velocity dan yaw.
+4. Tambahkan mode switching antara `walking_module` dan `action_module`.
+5. Integrasikan dengan safety dan compliance guard.
+
+### 12.6 Acceptance Criteria
+
+- Semua node strategy menggunakan satu jalur eksekusi motion yang konsisten.
+- Transisi `walking_module` ke `action_module` tidak menimbulkan konflik.
+- Robot dapat bergerak omnidirectional dan menendang tanpa race condition antar node.
+
+---
+
+## 13. Hubungan Antar Layer
+
+Hubungan antar layer harus dibaca sebagai pipeline keputusan:
+
+1. `GC Layer` menentukan apakah robot secara pertandingan boleh bertindak.
+2. `Compliance Layer` menentukan apakah aksi yang diusulkan legal.
+3. `Safety Layer` menentukan apakah aksi itu aman bagi robot.
+4. `Tactical Layer` menentukan niat strategis robot.
+5. `Team Coordination Layer` menyamakan keputusan antar robot.
+6. `Planning Layer` menghasilkan jalur dan command gerak.
+7. `Perception and Localization Layer` menyuplai konteks dunia.
+8. `Motion Layer` mengeksekusi aksi akhir.
+
+Secara praktis, `Compliance` dan `Safety` memiliki hak override terhadap `Tactical`. Ini penting untuk menjaga sistem tetap dapat dipercaya.
+
+---
+
+## 14. Roadmap Implementasi dari Nol
+
+Berikut urutan implementasi yang paling aman untuk codebase ini.
+
+### Fase 0 - Baseline Verification
+
+- pastikan `robot_launch.py` dapat menjalankan Webots, `op3_extern_controller`, dan `op3_gc_bridge`
+- verifikasi topik:
+  - `/robotis_op3/camera/image_raw`
+  - `/robotis_op3/imu`
+  - `/odom`
+  - `/game_controller/state_json`
+- verifikasi `op3_yolo_vision` bisa mendeteksi bola dari simulasi
+
+### Fase 1 - Package Strategy Baru
+
+- buat package strategy terdedikasi, misalnya `op3_soccer_core`
+- package ini menjadi rumah untuk:
+  - GC adapter
+  - compliance evaluator
+  - world model
+  - tactical FSM
+  - team comm
+  - motion helper
+
+### Fase 2 - GC dan Compliance
+
+- implement adapter ke `GameState`
+- implement legal action checker
+- implement kickoff gate
+- implement set-play distance gate
+
+### Fase 3 - Safety dan Motion Wrapper
+
+- implement fall monitor
+- implement get-up wrapper
+- implement helper `set_walk(x, y, yaw)`
+- implement module switching yang aman
+
+### Fase 4 - Tactical Role FSM
+
+- implement role statik
+- implement role intent
+- implement fallback dinamis P2 ke P3 dan P1 ke P4
+
+### Fase 5 - Team Coordination
+
+- implement UDP broadcast
+- implement arbitration siapa attacker utama
+- implement commit owner policy
+
+### Fase 6 - Planning
+
+- implement planner A* 8-arah
+- implement APF lokal
+- integrasikan ke motion helper
+
+### Fase 7 - Full Match Testing
+
+- uji skenario:
+  - kickoff tim sendiri
+  - kickoff lawan
+  - free kick lawan
+  - striker penalized
+  - goalkeeper incapacitated
+  - bola hilang dari kamera
+  - obstacle dinamis lewat di depan robot
+
+---
+
+## 15. Risiko Desain dan Titik Waspada
+
+Beberapa risiko utama yang harus terus dipantau:
+
+- `state_json` dan `GameState.msg` belum dijembatani langsung, sehingga adapter wajib akurat
+- komunikasi tim mudah menggoda untuk menjadi terlalu kompleks; payload harus tetap kecil
+- planner humanoid mudah terlalu ideal di simulasi dan kurang stabil di turf nyata
+- fallback role tanpa cooldown bisa menyebabkan role thrashing
+- behavior striker yang terlalu "bola-centric" akan merusak struktur tim
+
+---
+
+## 16. Kesimpulan Operasional
+
+Arsitektur strategy untuk `motion_webots` tidak boleh dimulai dari "bagaimana cara menendang bola". Arsitektur harus dimulai dari urutan berikut:
+
+- pahami state pertandingan
+- taati aturan
+- jaga stabilitas robot
+- koordinasikan tim
+- pilih niat taktis
+- rencanakan lintasan
+- baru eksekusi gerak
+
+Dengan pendekatan ini, strategy menjadi sistem yang bisa tumbuh dari perilaku sederhana sampai perilaku pertandingan penuh tanpa harus mengorbankan struktur software.
+
+<Callout type="info">
+Dokumen ini sengaja ditulis sebagai desain arsitektur, bukan desain implementasi final. Implementasi bisa bertahap, tetapi arah keputusan teknisnya harus tetap mengikuti layer, prioritas, dan roadmap yang sudah dirumuskan di sini.
+</Callout>

@@ -1,0 +1,150 @@
+digraph OP3RoboCupBehaviorTree {
+  graph [
+    rankdir=TB,
+    splines=ortho,
+    pad=0.35,
+    ranksep=0.7,
+    nodesep=0.35,
+    bgcolor="white",
+    fontname="Helvetica"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Helvetica",
+    fontsize=11,
+    color="#31473A",
+    fillcolor="#F4F7F2",
+    margin="0.16,0.08"
+  ];
+
+  edge [
+    color="#5B6F61",
+    penwidth=1.4,
+    arrowsize=0.8
+  ];
+
+  root [
+    label="OP3 RoboCup KidSize\nBehavior Architecture",
+    shape=ellipse,
+    fillcolor="#DCEBDD",
+    color="#2E5B44",
+    fontsize=16,
+    penwidth=2
+  ];
+
+  priorities [
+    label="Prioritas Utama\nRule First | Safety First | Team First",
+    fillcolor="#EAF4E7",
+    penwidth=1.8
+  ];
+
+  root -> priorities;
+
+  rule_first [label="Rule First\nSemua aksi tunduk pada GameController\nKickoff dan set-play harus legal"];
+  safety_first [label="Safety First\nAnti jatuh, anti slip,\nanti hold ball > 5 detik"];
+  team_first [label="Team First\nHanya 1 robot commit ke bola\nRobot lain support atau cover"];
+
+  priorities -> rule_first;
+  priorities -> safety_first;
+  priorities -> team_first;
+
+  layer_gc [
+    label="Layer 1: GC Layer\nInput: /game_controller/state_json\nOutput: INITIAL READY SET PLAYING FINISHED\nPeran: gerbang tertinggi semua aksi"
+  ];
+
+  layer_compliance [
+    label="Layer 2: Compliance Layer\nCek kickoff, set-play >= 0.75 m,\npenalty, arm-contact guard,\nno magnetometer"
+  ];
+
+  layer_safety [
+    label="Layer 3: Safety Layer\nFall detection, get-up,\nslip-aware walking,\nforce stop saat tidak aman"
+  ];
+
+  layer_tactical [
+    label="Layer 4: Tactical Layer\nP1 GK | P2 Striker | P3 Support | P4 Defender\nFallback dinamis saat penalti atau jatuh"
+  ];
+
+  layer_team_comm [
+    label="Layer 5: Team Coordination Layer\nUDP 5-10 Hz, <= 1 Mbit/s per robot\nArbiter siapa yang commit ke bola"
+  ];
+
+  layer_planning [
+    label="Layer 6: Planning Layer\nGlobal: A* 8-arah\nLocal: APF\nFusion: waypoint + obstacle avoidance"
+  ];
+
+  layer_perception [
+    label="Layer 7: Perception and Localization Layer\nYOLO bola dan lawan\nRK4 odometry + PF/MCL\nTanpa magnetometer"
+  ];
+
+  layer_motion [
+    label="Layer 8: Motion Layer\nset_walk(x,y,yaw), kick, getup, stop\nEksekusi omnidirectional di turf 30 mm"
+  ];
+
+  priorities -> layer_gc;
+  layer_gc -> layer_compliance;
+  layer_compliance -> layer_safety;
+  layer_safety -> layer_tactical;
+  layer_tactical -> layer_team_comm;
+  layer_team_comm -> layer_planning;
+  layer_planning -> layer_perception;
+  layer_perception -> layer_motion;
+
+  gk_fsm [
+    label="Goalkeeper FSM\nHoldGoal -> InterceptBox -> Clear -> Recover",
+    fillcolor="#FFF7E8",
+    color="#B48A2E"
+  ];
+
+  striker_fsm [
+    label="Striker FSM\nSearch -> Approach -> Align -> Kick -> Reposition",
+    fillcolor="#FFF7E8",
+    color="#B48A2E"
+  ];
+
+  support_fsm [
+    label="Support FSM\nSupportLane -> SecondBall -> TakeoverStriker",
+    fillcolor="#FFF7E8",
+    color="#B48A2E"
+  ];
+
+  defender_fsm [
+    label="Defender FSM\nGuardHalf -> InterceptThreat -> ClearToSupport",
+    fillcolor="#FFF7E8",
+    color="#B48A2E"
+  ];
+
+  layer_tactical -> gk_fsm;
+  layer_tactical -> striker_fsm;
+  layer_tactical -> support_fsm;
+  layer_tactical -> defender_fsm;
+
+  compliance_rules [
+    label="Hard Rules\nNo direct goal from kickoff\nBall must leave center circle or touch teammate\nBack off in set-play\nRelease ball before > 5 s",
+    fillcolor="#FDEFEF",
+    color="#B85C5C"
+  ];
+
+  layer_compliance -> compliance_rules;
+
+  execution [
+    label="Urutan Implementasi\n1. GC + Compliance\n2. Safety + Global FSM\n3. Role statik\n4. A* + APF\n5. UDP + fallback dinamis\n6. Tuning turf + stress test",
+    fillcolor="#E8F1FA",
+    color="#4473A7",
+    penwidth=1.8
+  ];
+
+  root -> execution;
+
+  note_dependency [
+    label="Aturan dependensi\nGC memberi izin\nCompliance dan Safety bisa override Tactical\nPlanning hanya merencanakan\nMotion hanya mengeksekusi",
+    fillcolor="#EEF2F6",
+    color="#5A6B7C"
+  ];
+
+  root -> note_dependency;
+
+  { rank=same; rule_first safety_first team_first }
+  { rank=same; execution note_dependency }
+}

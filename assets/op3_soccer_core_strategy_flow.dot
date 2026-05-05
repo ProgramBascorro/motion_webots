@@ -1,0 +1,270 @@
+digraph OP3SoccerCoreStrategyFlow {
+  graph [
+    rankdir=TB,
+    splines=ortho,
+    pad=0.35,
+    nodesep=0.35,
+    ranksep=0.65,
+    bgcolor="white",
+    fontname="Helvetica"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Helvetica",
+    fontsize=10,
+    color="#2F4F4F",
+    fillcolor="#F6FAFA",
+    margin="0.14,0.08"
+  ];
+
+  edge [
+    color="#4F6D6D",
+    penwidth=1.2,
+    arrowsize=0.75
+  ];
+
+  start [
+    label="OP3 Soccer Core Strategy Flow (Updated Stack)",
+    shape=ellipse,
+    fillcolor="#E2F1EC",
+    color="#2F6B57",
+    fontsize=15,
+    penwidth=1.9
+  ];
+
+  subgraph cluster_inputs {
+    label="External Inputs";
+    color="#CAD8D8";
+    style="rounded";
+
+    gc_json [label="/game_controller/state_json\nstd_msgs/String (JSON)"];
+    yolo_det [label="/vision/yolo/detections\nsoccer_msgs/BoundingBoxes"];
+    yolo_center [label="/vision/yolo/ball_center\ngeometry_msgs/PointStamped"];
+    imu [label="/robotis_op3/imu\nsensor_msgs/Imu"];
+    odom [label="/odom\nnav_msgs/Odometry"];
+  }
+
+  subgraph cluster_l1 {
+    label="Layer 1 - GC Adapter";
+    color="#BFDCCF";
+    style="rounded";
+
+    gc_adapter [label="gc_state_adapter_node.py\nGCStateAdapter"];
+    topic_game_state [label="/game_state\nsoccer_msgs/GameState", shape=note, fillcolor="#F0FFF7"];
+    topic_game_legacy [label="/game_controller/game_state\nlegacy alias", shape=note, fillcolor="#F0FFF7"];
+    topic_game_context [label="/game_context\nstd_msgs/String (JSON)", shape=note, fillcolor="#F0FFF7"];
+  }
+
+  subgraph cluster_l2 {
+    label="Layer 2 - Compliance";
+    color="#F1D7BD";
+    style="rounded";
+
+    compliance_node [label="compliance_node.py\nRule legality + substitutions"];
+    compliance_eval [label="compliance_evaluator.py\nKickoff / set-play / ball-hold checks", fillcolor="#FFF7EF"];
+    topic_compliance [label="/compliance/status\nstd_msgs/String (JSON)", shape=note, fillcolor="#FFF9F1"];
+  }
+
+  subgraph cluster_l3 {
+    label="Layer 3 - Safety";
+    color="#EBC2C2";
+    style="rounded";
+
+    safety_node [label="safety_monitor_node.py\nFall FSM + getup override"];
+    topic_safety_veto [label="/safety/motion_veto\nstd_msgs/Bool", shape=note, fillcolor="#FFF3F3"];
+    topic_safety_status [label="/safety/status\nstd_msgs/String (JSON)", shape=note, fillcolor="#FFF3F3"];
+  }
+
+  subgraph cluster_l4 {
+    label="Layer 4 - Tactical + Role FSM";
+    color="#CAD6F3";
+    style="rounded";
+
+    tactical_node [label="tactical_node.py\nWorldModel + role FSM tick"];
+    world_model [label="world_model.py\nsnapshot per control tick"];
+    intent_types [label="intent_types.py\nIntent contract"];
+    topic_role [label="/tactical/role\nstd_msgs/String", shape=note, fillcolor="#F3F6FF"];
+    topic_intent [label="/tactical/intent\nstd_msgs/String (JSON)", shape=note, fillcolor="#F3F6FF"];
+  }
+
+  subgraph cluster_roles {
+    label="Role FSMs";
+    color="#D8DFF5";
+    style="rounded,dashed";
+
+    role_gk [label="goalkeeper_fsm.py\nhold / intercept / clear"];
+    role_striker [label="striker_fsm.py\nsearch / approach / align / kick"];
+    role_support [label="support_fsm.py\nsupport lane / takeover"];
+    role_defender [label="defender_fsm.py\nguard / intercept / clear"];
+  }
+
+  subgraph cluster_l5 {
+    label="Layer 5 - Team Comm + Coordinator";
+    color="#D5E7F2";
+    style="rounded";
+
+    topic_team_tx [label="/team_comm/tx\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2FAFF"];
+    team_comm [label="team_comm_node.py\nUDP broadcast bridge"];
+    udp_net [label="UDP broadcast\nport 10030", shape=component, fillcolor="#EAF5FB"];
+    topic_team_rx [label="/team_comm/rx\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2FAFF"];
+
+    team_coord [label="team_coordinator_node.py\nSnapshot + ball owner arbitration"];
+    topic_snapshot [label="/team_coordinator/snapshot\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2FAFF"];
+    topic_ball_owner [label="/team_coordinator/ball_owner\nstd_msgs/Int32", shape=note, fillcolor="#F2FAFF"];
+  }
+
+  subgraph cluster_l6 {
+    label="Layer 6 - Planner";
+    color="#E4E8F8";
+    style="rounded";
+
+    planner_node [label="planner_node.py\nA* 8-dir + APF + fallback\npublishes /motion/command"];
+    astar_mod [label="planning/astar_8dir.py", fillcolor="#F8FAFF"];
+    apf_mod [label="planning/apf_local.py", fillcolor="#F8FAFF"];
+  }
+
+  subgraph cluster_l7 {
+    label="Layer 7 - Vision + Localization";
+    color="#C8E1C8";
+    style="rounded";
+
+    ball_estimator [label="ball_estimator_node.py\nball dist/bearing"];
+    topic_ball_est [label="/ball/estimate\nVector3Stamped\nx=dist, y=bearing, z=visible", shape=note, fillcolor="#F2FFF2"];
+
+    perception_node [label="perception_node.py\nYOLO -> obstacles + landmarks"];
+    topic_obstacles [label="/perception/obstacles\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2FFF2"];
+    topic_landmarks [label="/perception/landmarks\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2FFF2"];
+
+    localization_node [label="localization_node.py\nodom + imu + landmark fusion"];
+    topic_loc_pose [label="/localization/pose\nPoseWithCovarianceStamped", shape=note, fillcolor="#F2FFF2"];
+    topic_loc_conf [label="/localization/confidence\nstd_msgs/Float32", shape=note, fillcolor="#F2FFF2"];
+  }
+
+  subgraph cluster_l8 {
+    label="Layer 8 - Motion Execution";
+    color="#C9D8EA";
+    style="rounded";
+
+    topic_motion_cmd [label="/motion/command\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2F7FF"];
+    motion_node [label="motion_node.py\nsole /robotis publisher"];
+    walking_if [label="walking_interface.py\nmodule switch + walk + action page"];
+    topic_motion_status [label="/motion/status\nstd_msgs/String (JSON)", shape=note, fillcolor="#F2F7FF"];
+    robotis_topics [label="/robotis/...\nwalk params / command / page_num", shape=folder, fillcolor="#E9F1FC"];
+  }
+
+  priority_note [
+    label="Runtime Priority:\n1) Safety veto\n2) Compliance legality\n3) Tactical FSM\n4) Motion cooldown/clamp",
+    fillcolor="#FFF7D9",
+    color="#A3882A",
+    penwidth=1.4
+  ];
+
+  ops_note [
+    label="Operational notes:\n- planner + tactical + safety publish /motion/command\n- motion_node is sole executor to /robotis/...\n- keep rules_file params consistent across launch profiles",
+    fillcolor="#FFF2F2",
+    color="#B75D5D",
+    style="rounded,filled"
+  ];
+
+  note_transition [
+    label="Legacy note:\n soccer_brain_node.py still exists\n(do not run together with layered stack)",
+    style="rounded,dashed,filled",
+    fillcolor="#F6F6F6",
+    color="#8C8C8C"
+  ];
+
+  start -> gc_json;
+  start -> yolo_det;
+  start -> yolo_center;
+  start -> imu;
+  start -> odom;
+
+  gc_json -> gc_adapter;
+  gc_adapter -> topic_game_state;
+  gc_adapter -> topic_game_legacy;
+  gc_adapter -> topic_game_context;
+
+  yolo_det -> ball_estimator;
+  yolo_center -> ball_estimator;
+  ball_estimator -> topic_ball_est;
+
+  yolo_det -> perception_node;
+  perception_node -> topic_obstacles;
+  perception_node -> topic_landmarks;
+
+  odom -> localization_node;
+  imu -> localization_node;
+  topic_landmarks -> localization_node;
+  localization_node -> topic_loc_pose;
+  localization_node -> topic_loc_conf;
+
+  topic_game_state -> compliance_node;
+  topic_ball_est -> compliance_node;
+  topic_role -> compliance_node;
+  topic_team_rx -> compliance_node;
+  compliance_eval -> compliance_node [style=dashed];
+  compliance_node -> topic_compliance;
+
+  imu -> safety_node;
+  safety_node -> topic_safety_veto;
+  safety_node -> topic_safety_status;
+  safety_node -> topic_motion_cmd [xlabel="stop/getup override"];
+
+  topic_game_state -> tactical_node;
+  topic_game_context -> tactical_node;
+  topic_ball_est -> tactical_node;
+  topic_compliance -> tactical_node;
+  topic_safety_veto -> tactical_node;
+  imu -> tactical_node;
+  topic_loc_pose -> tactical_node;
+  topic_loc_conf -> tactical_node;
+  topic_snapshot -> tactical_node;
+  topic_ball_owner -> tactical_node;
+  topic_team_rx -> tactical_node;
+  topic_motion_status -> tactical_node;
+
+  tactical_node -> world_model;
+  tactical_node -> intent_types;
+  tactical_node -> role_gk;
+  tactical_node -> role_striker;
+  tactical_node -> role_support;
+  tactical_node -> role_defender;
+  tactical_node -> topic_role;
+  tactical_node -> topic_intent;
+  tactical_node -> topic_motion_cmd;
+  tactical_node -> topic_team_tx;
+
+  topic_team_tx -> team_comm;
+  team_comm -> udp_net;
+  udp_net -> team_comm;
+  team_comm -> topic_team_rx;
+
+  topic_team_rx -> team_coord;
+  topic_ball_est -> team_coord;
+  topic_role -> team_coord;
+  topic_intent -> team_coord;
+  team_coord -> topic_snapshot;
+  team_coord -> topic_ball_owner;
+
+  topic_intent -> planner_node;
+  topic_loc_pose -> planner_node;
+  topic_obstacles -> planner_node;
+  planner_node -> astar_mod [style=dashed];
+  planner_node -> apf_mod [style=dashed];
+  planner_node -> topic_motion_cmd;
+
+  topic_motion_cmd -> motion_node;
+  topic_safety_veto -> motion_node;
+  motion_node -> walking_if;
+  walking_if -> robotis_topics;
+  motion_node -> topic_motion_status;
+
+  priority_note -> tactical_node [style=dashed];
+  priority_note -> motion_node [style=dashed];
+  ops_note -> planner_node [style=dashed];
+  ops_note -> tactical_node [style=dashed];
+  ops_note -> motion_node [style=dashed];
+  note_transition -> start [style=dashed];
+}

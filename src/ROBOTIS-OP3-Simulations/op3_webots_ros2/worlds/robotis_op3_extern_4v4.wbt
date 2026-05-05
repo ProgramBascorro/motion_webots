@@ -1,0 +1,170 @@
+#VRML_SIM R2025a utf8
+
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RoboCupBackground.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupSoccerField.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/RobocupTexturedSoccerBall.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupMainLight.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupOffLight.proto"
+IMPORTABLE EXTERNPROTO "../protos/robocup_field/lighting/RoboCupTopLight.proto"
+EXTERNPROTO "../protos/RobotisOp3.proto"
+
+WorldInfo {
+  info [
+    "4v4 simulation: Team1 (T1P1–T1P4) vs Team2 (T2P1–T2P4)"
+    "Team1 starts in x<0, faces +X. Team2 starts in x>0, faces -X."
+    "Field: 9x6m (KidSize). Ball at centre. Controller: extern."
+  ]
+  title "Robocup V-HL Kid 4v4"
+  basicTimeStep 8
+  optimalThreadCount 8
+  physicsDisableTime 0.1
+  physicsDisableLinearThreshold 0.1
+  physicsDisableAngularThreshold 0.1
+  contactProperties [
+    ContactProperties {
+      material1 "grass"
+      coulombFriction [
+        0.5
+      ]
+      softCFM 0.03
+    }
+    ContactProperties {
+      material1 "grass"
+      material2 "robocup soccer ball"
+      coulombFriction [
+        0.5
+      ]
+      bounce 0.76
+      softCFM 0.05
+    }
+    ContactProperties {
+      material2 "robocup soccer ball"
+      bounce 0.76
+    }
+  ]
+}
+Viewpoint {
+  # Bird's-eye angled view to see all 8 robots on the 9x6m field
+  orientation -0.8 0 0 0.8
+  position 0 18 12
+}
+RoboCupBackground {
+}
+RoboCupMainLight {
+}
+RoboCupOffLight {
+}
+RoboCupTopLight {
+}
+DEF FIELD RobocupSoccerField {
+  size "kid"
+}
+
+# ── Team 1  (faces +X, starts in left half x < 0) ─────────────────────────
+RobotisOp3 {
+  name "T1P1"
+  translation -4.2 0 0.282665
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T1P2"
+  translation -0.9 0 0.282665
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T1P3"
+  translation -1.5 0.5 0.282665
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T1P4"
+  translation -2.5 -0.4 0.282665
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+
+# ── Team 2  (faces -X, rotation 180° around Z, starts in right half x > 0) ─
+RobotisOp3 {
+  name "T2P1"
+  translation 4.2 0 0.282665
+  rotation 0 0 1 3.14159265
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T2P2"
+  translation 0.9 0.3 0.282665
+  rotation 0 0 1 3.14159265
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T2P3"
+  translation 1.5 -0.5 0.282665
+  rotation 0 0 1 3.14159265
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+RobotisOp3 {
+  name "T2P4"
+  translation 2.5 0.4 0.282665
+  rotation 0 0 1 3.14159265
+  controller "<extern>"
+  supervisor TRUE
+  cameraWidth 1280
+  cameraHeight 720
+  bodySlot [
+    InertialUnit {
+    }
+  ]
+}
+
+# ── Ball ───────────────────────────────────────────────────────────────────
+RobocupTexturedSoccerBall {
+  translation 0 0 0.07
+}

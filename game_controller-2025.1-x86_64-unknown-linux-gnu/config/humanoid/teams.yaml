@@ -78,6 +78,11 @@
   fieldPlayerColors: [red, blue]
   goalkeeperColors: [black, white]
 
+- name: EWS Bascorro
+  number: 16
+  fieldPlayerColors: [red, blue]
+  goalkeeperColors: [black, white]
+
 - name: HERoEHS
   number: 25
   fieldPlayerColors: [red, blue]
