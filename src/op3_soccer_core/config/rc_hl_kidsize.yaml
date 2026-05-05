@@ -1,0 +1,95 @@
+rc_hl_kidsize:
+  # === FIELD DIMENSIONS ===
+  field_length_m: 9.0
+  field_width_m: 6.0
+  center_circle_radius_m: 0.75
+  goal_width_m: 2.6
+  goal_height_m: 1.2
+  penalty_area_depth_m: 2.0
+  penalty_area_width_offset_m: 1.2
+  penalty_mark_distance_m: 1.5
+
+  # === ROBOCUP RULES ===
+  opponent_distance_setplay_m: 0.75
+  game_interrupt_distance_m: 0.5
+  kick_off_ball_move_m: 0.05
+  kick_off_ball_in_play_after_sec: 10.0
+  max_ball_hold_sec: 5.0        # field players
+  max_ball_hold_soft_sec: 4.0   # field players soft warning
+  gk_ball_hold_sec: 6.0         # goalkeeper on ground (rule: 6s)
+  gk_ball_hold_soft_sec: 5.0    # goalkeeper soft warning
+  communication_max_mbps: 1.0
+  camera_fov_max_deg: 180.0
+  ball_size_fifa: 1
+
+  # === COMPLIANCE ===
+  kickoff_direct_goal_guard: true
+  setplay_executor_role: striker
+  ball_hold_backoff_speed: -0.015
+  ball_hold_backoff_duration_sec: 0.8
+
+  # === SAFETY ===
+  fall_pitch_front_deg: 60.0
+  fall_pitch_back_deg: 60.0
+  fall_hold_sec: 0.3
+  fall_cooldown_sec: 4.0
+  fall_recover_pitch_deg: 25.0
+  incapable_timeout_sec: 20.0   # rule: failed to recover in 20s → removal penalty
+
+  # === MOTION ===
+  # Speeds raised for Webots simulation (hardware max ~0.08 m/s; 0.020 = 7.5 min/field)
+  walk_max_vx: 0.060
+  walk_max_vy: 0.040
+  walk_max_vyaw: 0.40
+  kick_left_page: 120
+  kick_right_page: 121
+  getup_front_page: 122
+  getup_back_page: 123
+  kick_cooldown_sec: 1.0
+  getup_cooldown_sec: 2.0
+  kick_bearing_threshold: 0.15
+
+  # === TACTICAL ===
+  approach_x_gain: 0.10
+  approach_yaw_gain: 1.2
+  yaw_only_threshold: 0.6
+  search_yaw: 0.8
+  kick_distance: 0.18
+  pre_kick_distance: 0.22
+  gk_chase_distance: 1.0
+  gk_kick_distance: 0.22
+  defender_engage_distance: 1.2
+  support_takeover_distance: 1.0
+  role_switch_cooldown_sec: 3.0
+  kickoff_tap_duration_sec: 0.6
+  kickoff_tap_speed: 0.01
+  kickoff_window_sec: 15.0      # min repositioning time per rules (15–45s)
+
+  # === TEAM COORDINATION ===
+  team_comm_rate_hz: 10.0
+  ball_owner_hysteresis: 0.20
+  snapshot_staleness_sec: 2.0
+  role_weight_goalkeeper: 3.0
+  role_weight_defender: 2.0
+  role_weight_support: 1.5
+  role_weight_striker: 1.0
+
+  # === PLANNING ===
+  field_grid_resolution_m: 0.10
+  astar_replan_threshold_m: 0.30
+  apf_k_att: 1.5
+  apf_k_rep: 0.8
+  apf_influence_radius_m: 0.5
+  planner_fallback_min_confidence: 0.15   # lowered: bearing-only kicks in later
+
+  # === LOCALIZATION ===
+  # confidence_decay_rate: per-tick (10Hz); 0.01/tick = 0.1/sec → 10s from 1.0→0.0
+  confidence_decay_rate: 0.01
+  confidence_landmark_boost: 0.30
+
+  # === PERCEPTION ===
+  camera_focal_length_px: 1109.0
+  ball_real_diameter_m: 0.065
+  ball_lost_timeout_sec: 0.8
+  min_bbox_area: 100.0
+  camera_fov_deg: 60.0
