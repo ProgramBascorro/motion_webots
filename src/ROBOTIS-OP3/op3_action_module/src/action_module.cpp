@@ -100,8 +100,9 @@ void ActionModule::initialize(const int control_cycle_msec, robotis_framework::R
     action_joints_enable_[joint_name] = false;
   }
 
-  std::string default_path =
-      ament_index_cpp::get_package_share_directory("op3_action_module") + "/data/motion_4095.bin";
+  const std::string action_package_path = ament_index_cpp::get_package_share_directory("op3_action_module");
+  std::string default_path = action_package_path + "/data/motion_4095_CHRONUS.bin";
+  std::string fallback_path = action_package_path + "/data/motion_4095.bin";
   std::string action_file_path = default_path;
   const char* env_action_file = std::getenv("OP3_ACTION_FILE");
   if (env_action_file != nullptr && env_action_file[0] != '\0')
@@ -113,12 +114,23 @@ void ActionModule::initialize(const int control_cycle_msec, robotis_framework::R
   action_file_path = this->get_parameter("action_file_path").as_string();
 
   action_file_path_ = action_file_path;
-  if (loadFile(action_file_path_) == false && action_file_path_ != default_path)
+  if (loadFile(action_file_path_) == false)
   {
-    RCLCPP_WARN(this->get_logger(), "Failed to load action file '%s', falling back to '%s'",
-                action_file_path_.c_str(), default_path.c_str());
-    action_file_path_ = default_path;
-    loadFile(action_file_path_);
+    if (action_file_path_ != default_path)
+    {
+      RCLCPP_WARN(this->get_logger(), "Failed to load action file '%s', falling back to '%s'",
+                  action_file_path_.c_str(), default_path.c_str());
+      action_file_path_ = default_path;
+      loadFile(action_file_path_);
+    }
+
+    if (action_file_ == 0 && action_file_path_ != fallback_path)
+    {
+      RCLCPP_WARN(this->get_logger(), "Failed to load action file '%s', falling back to '%s'",
+                  action_file_path_.c_str(), fallback_path.c_str());
+      action_file_path_ = fallback_path;
+      loadFile(action_file_path_);
+    }
   }
 
   playing_ = false;

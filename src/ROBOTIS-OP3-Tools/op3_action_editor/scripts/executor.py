@@ -47,7 +47,7 @@ def main(args=None):
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095.bin'
+    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_CHRONUS.bin'
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
     device_name_default = '/dev/ttyUSB0'
 

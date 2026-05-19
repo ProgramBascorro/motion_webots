@@ -19,6 +19,7 @@
 /* ROS2 API Header */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
@@ -68,8 +69,25 @@ std::string g_init_file;
 std::string g_device_name;
 
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_init_pose_pub;
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_enable_ctrl_pub;
+rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr g_action_page_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_demo_command_pub;
 std::mutex g_health_mutex;
+
+void goToInitActionPage()
+{
+  const int kInitPosePageNum = 2;
+
+  std_msgs::msg::String mode_msg;
+  mode_msg.data = "action_module";
+  g_enable_ctrl_pub->publish(mode_msg);
+
+  rclcpp::sleep_for(std::chrono::milliseconds(500));
+
+  std_msgs::msg::Int32 page_msg;
+  page_msg.data = kInitPosePageNum;
+  g_action_page_pub->publish(page_msg);
+}
 
 std::string escapeJsonString(const std::string& value)
 {
@@ -171,12 +189,9 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
     usleep(200 * 1000);
 
-    // go to init pose
-    std_msgs::msg::String init_msg;
-    init_msg.data = "ini_pose";
-
-    g_init_pose_pub->publish(init_msg);
-    RCLCPP_INFO(controller->get_logger(), "Go to init pose");
+    // go to init pose : action_module page 2 (INIT_BARU)
+    goToInitActionPage();
+    RCLCPP_INFO(controller->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
   }
 }
 
@@ -237,6 +252,8 @@ int main(int argc, char **argv)
   auto button_sub = node->create_subscription<std_msgs::msg::String>("/robotis/open_cr/button", 1, buttonHandlerCallback);
   auto dxl_torque_sub = node->create_subscription<std_msgs::msg::String>("/robotis/dxl_torque", 1, dxlTorqueCheckCallback);
   g_init_pose_pub = node->create_publisher<std_msgs::msg::String>("/robotis/base/ini_pose", 0);
+  g_enable_ctrl_pub = node->create_publisher<std_msgs::msg::String>("/robotis/enable_ctrl_module", 10);
+  g_action_page_pub = node->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
   g_demo_command_pub = node->create_publisher<std_msgs::msg::String>("/ball_tracker/command", 10);
 
   node->declare_parameter<bool>("simulation", false);
@@ -332,12 +349,9 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // go to init pose
-  std_msgs::msg::String init_msg;
-  init_msg.data = "ini_pose";
-
-  g_init_pose_pub->publish(init_msg);
-  RCLCPP_INFO(node->get_logger(), "Go to init pose");
+  // go to init pose : action_module page 2 (INIT_BARU)
+  goToInitActionPage();
+  RCLCPP_INFO(node->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
       "/robotis/health_check",

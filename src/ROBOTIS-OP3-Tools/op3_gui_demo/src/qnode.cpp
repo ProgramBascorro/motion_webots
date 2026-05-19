@@ -59,7 +59,7 @@ bool QNodeOP3::init()
   // Add your ros communications here.
   module_control_pub_ = this->create_publisher<robotis_controller_msgs::msg::JointCtrlModule>("/robotis/set_joint_ctrl_modules", 10);
   module_control_preset_pub_ = this->create_publisher<std_msgs::msg::String>("/robotis/enable_ctrl_module", 10);
-  init_pose_pub_ = this->create_publisher<std_msgs::msg::String>("/robotis/base/ini_pose", 10);
+  motion_index_pub_ = this->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
 
   status_msg_sub_ = this->create_subscription<robotis_controller_msgs::msg::StatusMsg>("/robotis/status", 10, std::bind(&QNodeOP3::statusMsgCallback, this, std::placeholders::_1));
   current_module_control_sub_ = this->create_subscription<robotis_controller_msgs::msg::JointCtrlModule>("/robotis/present_joint_ctrl_modules", 10, std::bind(&QNodeOP3::refreshCurrentJointControlCallback, this, std::placeholders::_1));
@@ -269,15 +269,24 @@ bool QNodeOP3::isUsingModule(std::string module_name)
   return map_it->second;
 }
 
-// move ini pose : wholedody module
+// move ini pose : action_module page 2 (INIT_BARU)
 void QNodeOP3::moveInitPose()
 {
-  std_msgs::msg::String init_msg;
-  init_msg.data = "ini_pose";
+  const int kInitPosePageNum = 2;
 
-  init_pose_pub_->publish(init_msg);
+  setControlMode("action_module");
 
-  log(Info, "Go to robot initial pose.");
+  // give the controller a moment to switch joints to action_module
+  // before we trigger the page playback
+  rclcpp::sleep_for(std::chrono::milliseconds(500));
+
+  std_msgs::msg::Int32 motion_msg;
+  motion_msg.data = kInitPosePageNum;
+  motion_index_pub_->publish(motion_msg);
+
+  std::stringstream ss;
+  ss << "Go to robot initial pose (action page " << kInitPosePageNum << " : INIT_BARU).";
+  log(Info, ss.str());
 }
 
 // set mode(module) to each joint

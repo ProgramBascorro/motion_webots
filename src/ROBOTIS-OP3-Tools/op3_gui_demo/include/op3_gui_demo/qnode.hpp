@@ -221,7 +221,6 @@ private:
 
   op3_walking_module_msgs::msg::WalkingParam walking_param_;
 
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr init_pose_pub_;
   rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr module_control_preset_pub_;
   rclcpp::Publisher<robotis_controller_msgs::msg::SyncWriteItem>::SharedPtr init_gyro_pub_;

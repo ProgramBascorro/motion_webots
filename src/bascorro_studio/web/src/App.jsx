@@ -43,6 +43,7 @@ const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
 const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
 const TELEOP_COMMAND_TOPIC = "/op3_joy_teleop/command";
 const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
+const INIT_BARU_PAGE_NUM = 2;
 const DEFAULT_OVERLAY_TOPIC =
   import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
 
@@ -578,13 +579,12 @@ export default function App() {
   const joyPubRef = useRef(null);
   const teleopCommandPubRef = useRef(null);
   const teleopStatusSubRef = useRef(null);
-  const initPosePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
   const torquePubRef = useRef(null);
-  const headModulePubRef = useRef(null);
-  const walkingModulePubRef = useRef(null);
+  const controlModulePubRef = useRef(null);
+  const actionPagePubRef = useRef(null);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
@@ -689,11 +689,6 @@ export default function App() {
       name: TELEOP_COMMAND_TOPIC,
       messageType: "std_msgs/String",
     });
-    initPosePubRef.current = new ROSLIB.Topic({
-      ros,
-      name: "/robotis/base/ini_pose",
-      messageType: "std_msgs/String",
-    });
     walkingCommandPubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/walking/command",
@@ -709,15 +704,15 @@ export default function App() {
       name: "/robotis/sync_write_item",
       messageType: "robotis_controller_msgs/SyncWriteItem",
     });
-    headModulePubRef.current = new ROSLIB.Topic({
+    controlModulePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/enable_ctrl_module",
       messageType: "std_msgs/String",
     });
-    walkingModulePubRef.current = new ROSLIB.Topic({
+    actionPagePubRef.current = new ROSLIB.Topic({
       ros,
-      name: "/robotis/enable_ctrl_module",
-      messageType: "std_msgs/String",
+      name: "/robotis/action/page_num",
+      messageType: "std_msgs/Int32",
     });
 
     yoloSetServiceRef.current = new ROSLIB.Service({
@@ -937,11 +932,11 @@ export default function App() {
   };
 
   const enableWalkingModule = () => {
-    if (!walkingModulePubRef.current || rosState !== "connected") {
+    if (!controlModulePubRef.current || rosState !== "connected") {
       sendStatus("Walking module command unavailable", true);
       return;
     }
-    walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+    controlModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
     sendStatus("Walking module enabled");
   };
 
@@ -1070,10 +1065,15 @@ export default function App() {
   };
 
   const handleInitPose = () => {
-    if (initPosePubRef.current) {
-      initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
-      sendStatus("Init Pose Sent");
+    if (!controlModulePubRef.current || !actionPagePubRef.current) {
+      sendStatus("Init pose unavailable: ROS publishers not ready", true);
+      return;
     }
+    controlModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
+    window.setTimeout(() => {
+      actionPagePubRef.current?.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
+    }, 500);
+    sendStatus(`INIT_BARU page ${INIT_BARU_PAGE_NUM} sent`);
   };
 
   const handleSoftStop = () => {
@@ -1093,8 +1093,8 @@ export default function App() {
   };
 
   const handleEnableHeadModule = () => {
-    if (headModulePubRef.current) {
-      headModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
+    if (controlModulePubRef.current) {
+      controlModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
       sendStatus("Head Module Enabled");
     }
   };

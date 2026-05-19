@@ -104,14 +104,14 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   control_cycle_msec_ = control_cycle_msec;
 
   // m, s, rad
-  // init pose
-  walking_param_.init_x_offset = -0.010;
-  walking_param_.init_y_offset = 0.005;
-  walking_param_.init_z_offset = 0.020;
+  // init pose  --  all zero so WalkingReady matches ini_pose.yaml (all joints -> 2048)
+  walking_param_.init_x_offset = 0.0;
+  walking_param_.init_y_offset = 0.0;
+  walking_param_.init_z_offset = 0.0;
   walking_param_.init_roll_offset = 0.0;
   walking_param_.init_pitch_offset = 0.0 * DEGREE2RADIAN;
   walking_param_.init_yaw_offset = 0.0 * DEGREE2RADIAN;
-  walking_param_.hip_pitch_offset = 13.0 * DEGREE2RADIAN;
+  walking_param_.hip_pitch_offset = 0.0 * DEGREE2RADIAN;
   // time
   walking_param_.period_time = 600 * 0.001;
   walking_param_.dsp_ratio = 0.1;
@@ -159,7 +159,7 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
                  1,         -1;
   init_position_        <<     0.0,        0.0,         0.0,    0.0,           0.0,          0.0,
                  0.0,        0.0,         0.0,    0.0,           0.0,          0.0,
-                 5.0,       -5.0;
+                 0.0,        0.0;
   init_position_ *= DEGREE2RADIAN;
 
   std::string default_param_path = ament_index_cpp::get_package_share_directory("op3_walking_module") + "/config/param.yaml";
@@ -421,8 +421,9 @@ void WalkingModule::startWalking()
   ctrl_running_ = true;
   real_running_ = true;
 
-  //updateTimeParam(1.5); // hs
-  //time_ = control_cycle_msec_ * 0.001;
+  // soft start: stretch the first cycle 1.5x so the first foot-lift isn't a slam
+  updateTimeParam(1.5);
+  time_ = control_cycle_msec_ * 0.001;
 
   publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_INFO, "Start walking");
 }
@@ -491,24 +492,31 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       goal_position_.coeffRef(0, joint_index) = dxl->dxl_state_->goal_position_;
     }
 
-    processPhase(time_unit);
-
     bool get_angle = false;
-    get_angle = computeLegAngle(&angle[0]);
+    const bool walking_idle = (ctrl_running_ == false && real_running_ == false);
 
-    computeArmAngle(&angle[12]);
+    if (walking_idle == false)
+    {
+      processPhase(time_unit);
 
-    double rl_gyro_err = 0.0 - sensors["gyro_x"];
-    double fb_gyro_err = 0.0 - sensors["gyro_y"];
+      get_angle = computeLegAngle(&angle[0]);
 
-    sensoryFeedback(rl_gyro_err, fb_gyro_err, balance_angle);
+      computeArmAngle(&angle[12]);
+
+      double rl_gyro_err = 0.0 - sensors["gyro_x"];
+      double fb_gyro_err = 0.0 - sensors["gyro_y"];
+
+      sensoryFeedback(rl_gyro_err, fb_gyro_err, balance_angle);
+    }
 
     double err_total = 0.0, err_max = 0.0;
     // set goal position
     for (int idx = 0; idx < 14; idx++)
     {
       double goal_position = 0.0;
-      if (get_angle == false && idx < 12)
+      if (walking_idle == true)
+        goal_position = init_position_.coeff(0, idx);
+      else if (get_angle == false && idx < 12)
         goal_position = goal_position_.coeff(0, idx);
       else
         goal_position = init_position_.coeff(0, idx) + angle[idx] + balance_angle[idx];
@@ -527,9 +535,9 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       if (DEBUG)
         std::cout << "Check Err : " << err_max << std::endl;
 
-      // make trajecotry for init pose
-      int mov_time = err_max / 30;
-      iniPoseTraGene(mov_time < 1 ? 1 : mov_time);
+      // make trajecotry for init pose (slower transition: 15 deg/s, min 2.5 s)
+      double mov_time = err_max / 15.0;
+      iniPoseTraGene(mov_time < 2.5 ? 2.5 : mov_time);
 
       // set target to goal
       target_position_ = goal_position_;

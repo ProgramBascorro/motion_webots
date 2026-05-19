@@ -116,7 +116,7 @@ Q_OBJECT
  private:
   enum Motion_Index
   {
-    InitPose = 1,
+    InitPose = 2,
     WalkingReady = 9,
     GetUpFront = 122,
     GetUpBack = 123,
