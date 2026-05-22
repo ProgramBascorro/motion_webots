@@ -191,11 +191,11 @@ void OpenCRModule::publishIMU()
   double mui = 0.01;
   double sign = std::copysign(1.0, result_["acc_z"]);
   double roll = std::atan2(
-    result_["acc_y"],
-    sign * std::sqrt(result_["acc_z"] * result_["acc_z"] + mui * result_["acc_x"] * result_["acc_x"]));
-  double pitch = std::atan2(
     -result_["acc_x"],
-    std::sqrt(result_["acc_y"] * result_["acc_y"] + result_["acc_z"] * result_["acc_z"]));
+    sign * std::sqrt(result_["acc_z"] * result_["acc_z"] + mui * result_["acc_y"] * result_["acc_y"]));
+  double pitch = std::atan2(
+    result_["acc_y"],
+    std::sqrt(result_["acc_x"] * result_["acc_x"] + result_["acc_z"] * result_["acc_z"]));
   double yaw = 0.0;
 
   Eigen::Quaterniond orientation = robotis_framework::convertRPYToQuaternion(roll, pitch, yaw);

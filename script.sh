@@ -339,6 +339,8 @@ while true; do
     "$M_DOCKER_RUN")
       run_flags=""
       gum confirm "Run in detached mode?" && run_flags="-d"
+      serial_default="$(detect_docker_serial_device)"
+      serial_device="$(gum input --value "${OP3_DOCKER_SERIAL_DEVICE:-$serial_default}" --prompt "Serial device (none to skip): ")"
       mount_choice="$(gum choose --header "Mount mode" \
         "Cache (src read-only + build/install/log)" \
         "Src only (read-only)" \
@@ -361,6 +363,7 @@ while true; do
       OP3_DOCKER_RUN_FLAGS="$run_flags" \
         OP3_DOCKER_MOUNT_MODE="$mount_mode" \
         OP3_DOCKER_SRC_RO="$src_ro" \
+        OP3_DOCKER_SERIAL_DEVICE="$serial_device" \
         op3_tmux_main --docker-run
       ;;
 

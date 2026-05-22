@@ -165,6 +165,30 @@ docker_compose_cmd() {
   die "docker compose not found. Install docker or docker-compose."
 }
 
+detect_docker_serial_device() {
+  local preferred="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT8J0QK9-if00-port0"
+  local candidate
+
+  if [[ -e "$preferred" ]]; then
+    printf "%s" "$preferred"
+    return 0
+  fi
+
+  for candidate in /dev/serial/by-id/*; do
+    if [[ -e "$candidate" ]]; then
+      printf "%s" "$candidate"
+      return 0
+    fi
+  done
+
+  for candidate in /dev/ttyUSB* /dev/ttyACM*; do
+    if [[ -e "$candidate" ]]; then
+      printf "%s" "$candidate"
+      return 0
+    fi
+  done
+}
+
 action_docker_build() {
   local docker_cmd
   docker_cmd="$(docker_base_cmd)"
@@ -201,6 +225,8 @@ action_docker_run() {
   local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
   local mount_mode="${OP3_DOCKER_MOUNT_MODE:-cache}"
   local src_ro="${OP3_DOCKER_SRC_RO:-1}"
+  local serial_device="${OP3_DOCKER_SERIAL_DEVICE:-}"
+  [[ -z "$serial_device" ]] && serial_device="$(detect_docker_serial_device)"
 
   local -a docker_cmd_parts
   read -r -a docker_cmd_parts <<< "$docker_cmd"
@@ -216,7 +242,27 @@ action_docker_run() {
     --cap-add SYS_RESOURCE
   )
 
-  [[ -e /dev/ttyUSB0 ]] && cmd+=(--device=/dev/ttyUSB0)
+  case "$serial_device" in
+    ""|none|None|NONE|skip|Skip|SKIP)
+      ;;
+    *)
+      if [[ -e "$serial_device" ]]; then
+        local resolved_serial="$serial_device"
+        resolved_serial="$(readlink -f "$serial_device" 2>/dev/null || printf "%s" "$serial_device")"
+        if [[ -e "$resolved_serial" ]]; then
+          cmd+=(--device="$resolved_serial:$resolved_serial")
+        else
+          cmd+=(--device="$serial_device")
+        fi
+        [[ -d /dev/serial/by-id ]] && cmd+=(-v /dev/serial/by-id:/dev/serial/by-id:ro)
+        [[ -d /dev/serial/by-path ]] && cmd+=(-v /dev/serial/by-path:/dev/serial/by-path:ro)
+        cmd+=(-e "OP3_SERIAL_DEVICE=$serial_device")
+      else
+        echo "${YLW}Warning:${RST} serial device not found, not mounting: $serial_device"
+      fi
+      ;;
+  esac
+
   [[ -e /dev/input ]] && cmd+=(--device=/dev/input)
   [[ -e /dev/uinput ]] && cmd+=(--device=/dev/uinput)
 

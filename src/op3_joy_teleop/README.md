@@ -50,16 +50,28 @@ walking. Set `auto_enable_head_module: false` in the config to disable this beha
 
 ## Controls (default mapping)
 
-- Walk: left stick axes 0/1 + deadman L1 (button 6)
+- Walk: hold L1/deadman (button 6) + move left stick axes 0/1
 - Stop: disabled by default (set `stop_button` to enable)
-- Init pose: long-press button 2 (configurable); requires deadman released by default
+- Init pose: long-press A (button 0, >=1.0s); requires deadman released by default
 - Head: right stick axes 2/3
 - Heading hold: tap X (button 3) to toggle (yaw forced to 0)
 - Gear cycle: long-press X (>=0.5s) cycles slow/normal/fast
 - Turbo: hold R1 (button 7)
-- Recenter head: long-press A (button 0)
+- Recenter head: long-press A (button 0, >=0.5s)
 - Turn left/right: L2/R2 (buttons 8/9 by default; can be axes if configured)
 - Kick mode: long-press Y (button 4), then L2 = left kick, R2 = right kick
+- Getup mode: hold/tap B (button 1) mode, then L2 = front getup, R2 = back getup
+
+Teleop copies the latest walking baseline and only replaces `x_move_amplitude`,
+`y_move_amplitude`, and `angle_move_amplitude` while the deadman is held. With
+`use_baseline_move_amplitudes: true`, non-zero baseline amplitudes become the
+joystick limits; `max_x`, `max_y`, `max_yaw`, and `turn_max_yaw` are fallbacks
+when the baseline amplitudes are zero.
+
+When L1 starts walking, teleop publishes the latest baseline first with x/y/yaw
+motion zeroed, waits `walking_start_param_settle_sec`, then sends `walking start`.
+This keeps the walking module's start/ready transition aligned with the latest
+runtime walking params.
 
 Turning is disabled by default (`axis_yaw: -1`). Set `axis_yaw` if you want yaw control.
 Turning from triggers is controlled by `enable_turning` and `turn_*` parameters.
@@ -98,7 +110,7 @@ Optional config:
 
 Kick mode avoids input conflicts by repurposing L2/R2 only while it is active.
 Long-press Y (>=0.5s) to enter kick mode for ~2 seconds, then press L2 (left kick) or
-R2 (right kick). Kicks require deadman released and switch to `action_module` temporarily.
+R2 (right kick). Kicks auto-stop walking and switch to `action_module` temporarily.
 
 Diagnostics:
 

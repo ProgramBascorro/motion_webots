@@ -13,6 +13,8 @@ op3_joy_teleop:
     max_x: 0.005
     max_y: 0.005
     max_yaw: 0.12
+    use_baseline_move_amplitudes: true
+    baseline_amplitude_epsilon: 0.000001
     joy_sign_x: 1.0
     joy_sign_y: 1.0
     joy_sign_yaw: 1.0
@@ -24,6 +26,7 @@ op3_joy_teleop:
     teleop_status_topic: /op3_joy_teleop/status
     auto_refresh_baseline_sec: 0.0
     refresh_baseline_button: -1
+    walking_start_param_settle_sec: 0.05
 
     smoothing_mode: accel_limit
     accel_limit_x: 0.06

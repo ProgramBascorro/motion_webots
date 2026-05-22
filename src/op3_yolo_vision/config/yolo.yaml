@@ -1,6 +1,6 @@
 yolo_detector:
   ros__parameters:
-    image_topic: /robotis_op3/camera/image_raw
+    image_topic: /usb_cam_node/image_raw
     ball_center_topic: /vision/yolo/ball_center
     model_path: models/yolo.onnx
     use_gpu: false

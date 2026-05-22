@@ -27,10 +27,30 @@ class BallLocalizer(Node):
     STATE_PRE_KICK = "pre_kick"
     STATE_KICKING = "kicking"
     STATE_ARRIVED = "arrived"
+    VALID_TILT_MODES = {"geometry", "distance", "fixed", "pixel", "table"}
 
     def __init__(self) -> None:
         super().__init__("op3_ball_localizer")
+        self._declare_io_parameters()
+        self._declare_scan_parameters()
+        self._declare_fall_parameters()
+        self._declare_walking_parameters()
+        self._declare_head_tracking_parameters()
+        self._declare_action_parameters()
+        self._declare_runtime_parameters()
+        self._normalize_parameters()
+        self._create_ros_interfaces()
+        self._initialize_runtime_state()
+        self._create_ros_subscriptions()
+        self._create_ros_timers()
 
+        if self._auto_enable_head_module:
+            self._publish_head_module_assignment()
+
+        if self._log_sample_key_capture:
+            self._start_key_capture_thread()
+
+    def _declare_io_parameters(self) -> None:
         self._ball_topic = str(
             self.declare_parameter("ball_topic", "/vision/yolo/balls").value
         )
@@ -55,6 +75,8 @@ class BallLocalizer(Node):
         self._status_log_period_sec = float(
             self.declare_parameter("status_log_period_sec", 1.0).value
         )
+
+    def _declare_scan_parameters(self) -> None:
         self._scan_pan_min = float(
             self.declare_parameter("scan_pan_min", -1.2).value
         )
@@ -77,6 +99,8 @@ class BallLocalizer(Node):
         self._lost_timeout = float(
             self.declare_parameter("lost_timeout", 0.8).value
         )
+
+    def _declare_fall_parameters(self) -> None:
         self._fall_enable = bool(
             self.declare_parameter("fall_enable", True).value
         )
@@ -98,6 +122,8 @@ class BallLocalizer(Node):
         self._fall_imu_timeout_sec = float(
             self.declare_parameter("fall_imu_timeout_sec", 0.5).value
         )
+
+    def _declare_walking_parameters(self) -> None:
         self._arrive_distance = float(
             self.declare_parameter("arrive_distance", 0.25).value
         )
@@ -144,6 +170,8 @@ class BallLocalizer(Node):
         self._min_valid_x = float(
             self.declare_parameter("min_valid_x", 0.01).value
         )
+
+    def _declare_head_tracking_parameters(self) -> None:
         self._head_pan_joint = str(
             self.declare_parameter("head_pan_joint", "head_pan").value
         )
@@ -245,6 +273,8 @@ class BallLocalizer(Node):
         self._head_track_max_step = float(
             self.declare_parameter("head_track_max_step", 0.4).value
         )
+
+    def _declare_action_parameters(self) -> None:
         self._kick_enable = bool(
             self.declare_parameter("kick_enable", True).value
         )
@@ -293,6 +323,8 @@ class BallLocalizer(Node):
         self._action_module_name = str(
             self.declare_parameter("action_module_name", "action_module").value
         )
+
+    def _declare_runtime_parameters(self) -> None:
         self._auto_enable_head_module = bool(
             self.declare_parameter("auto_enable_head_module", True).value
         )
@@ -330,6 +362,7 @@ class BallLocalizer(Node):
         )
         self._dry_run = bool(self.declare_parameter("dry_run", False).value)
 
+    def _normalize_parameters(self) -> None:
         self._scan_step = abs(self._scan_step)
         if self._scan_pan_min > self._scan_pan_max:
             self._scan_pan_min, self._scan_pan_max = (
@@ -350,19 +383,13 @@ class BallLocalizer(Node):
             self._kick_bearing_deadzone = abs(self._kick_bearing_deadzone)
         self._pre_kick_max_x = abs(self._pre_kick_max_x)
         self._pre_kick_max_yaw = abs(self._pre_kick_max_yaw)
-        if self._head_track_tilt_mode not in {
-            "geometry",
-            "distance",
-            "fixed",
-            "pixel",
-            "table",
-        }:
+        if self._head_track_tilt_mode not in self.VALID_TILT_MODES:
             self.get_logger().warn(
                 f"Unknown head_track_tilt_mode '{self._head_track_tilt_mode}', using geometry"
             )
             self._head_track_tilt_mode = "geometry"
-        self._head_track_pixel_target_y = max(
-            0.0, min(1.0, self._head_track_pixel_target_y)
+        self._head_track_pixel_target_y = self._clamp(
+            self._head_track_pixel_target_y, 0.0, 1.0
         )
         self._head_track_pixel_gain = abs(self._head_track_pixel_gain)
         self._head_track_pixel_deadzone = abs(self._head_track_pixel_deadzone)
@@ -425,6 +452,7 @@ class BallLocalizer(Node):
             0.01, abs(self._head_track_min_distance)
         )
 
+    def _create_ros_interfaces(self) -> None:
         self._head_pub = self.create_publisher(
             JointState, "/robotis/head_control/set_joint_states", 10
         )
@@ -443,16 +471,15 @@ class BallLocalizer(Node):
         self._joint_ctrl_pub = self.create_publisher(
             JointCtrlModule, "/robotis/set_joint_ctrl_modules", 10
         )
-
         self._param_client = self.create_client(
             GetWalkingParam, "/robotis/walking/get_params"
         )
         self._baseline_params: Optional[WalkingParam] = None
         self._baseline_request_in_flight = False
 
+    def _initialize_runtime_state(self) -> None:
         self._state = self.STATE_SCAN
         self._scan_start_time = time.monotonic()
-        self._search_start_time = 0.0
         self._search_direction = 1.0
         self._last_search_flip_time = 0.0
         self._walking_active = False
@@ -461,7 +488,6 @@ class BallLocalizer(Node):
         self._head_track_last_tilt = self._head_track_tilt_far
         self._head_track_target_pan = 0.0
         self._head_track_target_tilt = self._head_track_tilt_far
-        self._pre_kick_start_time = 0.0
         self._kick_ready_since: Optional[float] = None
         self._kick_stage = "idle"
         self._kick_start_time = 0.0
@@ -482,18 +508,15 @@ class BallLocalizer(Node):
         self._last_imu_time: Optional[float] = None
         self._last_ball_distance = 0.0
         self._last_ball_bearing = 0.0
-
         self._last_ball_time: Optional[float] = None
         self._last_ball_point: Optional[Tuple[float, float, float]] = None
         self._last_ball_pixel: Optional[Tuple[float, float]] = None
         self._last_ball_pixel_time: Optional[float] = None
-
         self._last_scan_step_time = 0.0
         self._scan_pan = self._scan_pan_min
         self._scan_tilt = self._scan_tilt_down
         self._scan_direction = 1.0
         self._scan_tilt_down_active = True
-
         self._last_log_times = {}
         self._last_head_module_pub_time = 0.0
         self._last_walking_enable_time = 0.0
@@ -503,11 +526,11 @@ class BallLocalizer(Node):
         self._log_sample_writer = None
         self._head_pan_actual = None
         self._head_tilt_actual = None
-        self._head_joint_state_time = None
         self._capture_sample_requested = False
         self._capture_lock = threading.Lock()
         self._capture_thread = None
 
+    def _create_ros_subscriptions(self) -> None:
         self.create_subscription(
             PointCloud2, self._ball_topic, self._ball_callback, 10
         )
@@ -528,17 +551,12 @@ class BallLocalizer(Node):
             String, "/robotis/movement_done", self._movement_done_callback, 10
         )
 
-        if self._auto_enable_head_module:
-            self._publish_head_module_assignment()
-
+    def _create_ros_timers(self) -> None:
         self.create_timer(1.0, self._try_fetch_baseline)
-
         if self._publish_rate <= 0.0:
             self.get_logger().warn("publish_rate <= 0; defaulting to 10.0")
             self._publish_rate = 10.0
         self.create_timer(1.0 / self._publish_rate, self._control_loop)
-        if self._log_sample_key_capture:
-            self._start_key_capture_thread()
 
     def _ball_callback(self, msg: PointCloud2) -> None:
         if self._output_frame and msg.header.frame_id:
@@ -591,7 +609,6 @@ class BallLocalizer(Node):
             self._head_pan_actual = float(msg.position[pan_idx])
         if tilt_idx is not None and tilt_idx < len(msg.position):
             self._head_tilt_actual = float(msg.position[tilt_idx])
-        self._head_joint_state_time = time.monotonic()
 
     def _imu_callback(self, msg: Imu) -> None:
         q = msg.orientation
@@ -755,7 +772,6 @@ class BallLocalizer(Node):
             self._reset_scan_pattern()
             self._head_center_sent = False
         elif new_state == self.STATE_SEARCH:
-            self._search_start_time = now
             self._last_search_flip_time = now
             self._search_direction = 1.0
             self._reset_scan_pattern()
@@ -764,7 +780,6 @@ class BallLocalizer(Node):
             self._head_center_sent = False
         elif new_state == self.STATE_PRE_KICK:
             self._head_center_sent = False
-            self._pre_kick_start_time = now
             self._kick_ready_since = None
         elif new_state == self.STATE_KICKING:
             self._head_center_sent = False
@@ -858,7 +873,9 @@ class BallLocalizer(Node):
                 1.0,
             )
             return
-        params = copy.deepcopy(self._baseline_params)
+        params = self._copy_baseline_params()
+        if params is None:
+            return
         params.x_move_amplitude = x
         params.y_move_amplitude = 0.0
         params.angle_move_amplitude = yaw
@@ -899,18 +916,26 @@ class BallLocalizer(Node):
         self._walking_active = False
 
     def _publish_zero_params(self) -> None:
-        if self._baseline_params is None:
-            self._log_throttled(
-                "no_baseline_zero",
-                "Baseline walking params not available; cannot zero params",
-                1.0,
-            )
+        params = self._copy_baseline_params(
+            log_key="no_baseline_zero",
+            message="Baseline walking params not available; cannot zero params",
+        )
+        if params is None:
             return
-        params = copy.deepcopy(self._baseline_params)
         params.x_move_amplitude = 0.0
         params.y_move_amplitude = 0.0
         params.angle_move_amplitude = 0.0
         self._param_pub.publish(params)
+
+    def _copy_baseline_params(
+        self,
+        log_key: str = "no_baseline",
+        message: str = "Baseline walking params not available yet; skipping",
+    ) -> Optional[WalkingParam]:
+        if self._baseline_params is None:
+            self._log_throttled(log_key, message, 1.0)
+            return None
+        return copy.deepcopy(self._baseline_params)
 
     def _publish_head_absolute(self, pan: float, tilt: float) -> None:
         if self._log_only_mode:
@@ -1183,10 +1208,10 @@ class BallLocalizer(Node):
         if now - self._last_getup_time < self._getup_cooldown_sec:
             return
         self._stop_walking()
-        if not self._dry_run:
-            self._enable_pub.publish(String(data=self._action_module_name))
-        else:
-            self._log_throttled("getup_mode", "dry_run action module enable", 1.0)
+        self._switch_to_action_module(
+            log_key="getup_mode",
+            dry_run_message="dry_run action module enable",
+        )
 
         self._getup_stage = "switching"
         self._getup_start_time = now
@@ -1202,10 +1227,10 @@ class BallLocalizer(Node):
         if self._getup_stage == "idle":
             return
         if self._getup_stage == "switching" and now >= self._getup_apply_time:
-            if not self._dry_run:
-                self._action_page_pub.publish(Int32(data=self._getup_page))
-            else:
-                self._log_throttled("getup_page", f"dry_run page_num {self._getup_page}", 1.0)
+            self._publish_action_page(
+                page=self._getup_page,
+                log_key="getup_page",
+            )
             self._getup_stage = "waiting"
 
         if self._getup_stage == "waiting":
@@ -1213,10 +1238,10 @@ class BallLocalizer(Node):
                 self._finish_getup("timeout")
 
     def _finish_getup(self, result: str) -> None:
-        if not self._dry_run:
-            self._enable_pub.publish(String(data=self._walking_module_name))
-        else:
-            self._log_throttled("getup_restore", "dry_run walking module restore", 1.0)
+        self._restore_walking_module(
+            log_key="getup_restore",
+            dry_run_message="dry_run walking module restore",
+        )
         self._publish_head_module_assignment()
         self._getup_stage = "idle"
         self._last_getup_time = time.monotonic()
@@ -1243,10 +1268,10 @@ class BallLocalizer(Node):
             self._kick_center_prefer = "right"
 
         self._stop_walking()
-        if not self._dry_run:
-            self._enable_pub.publish(String(data=self._action_module_name))
-        else:
-            self._log_throttled("kick_mode", "dry_run action module enable", 1.0)
+        self._switch_to_action_module(
+            log_key="kick_mode",
+            dry_run_message="dry_run action module enable",
+        )
 
         self._kick_stage = "switching"
         self._kick_start_time = now
@@ -1257,14 +1282,10 @@ class BallLocalizer(Node):
         if self._kick_stage == "idle":
             return
         if self._kick_stage == "switching" and now >= self._kick_apply_time:
-            if not self._dry_run:
-                self._action_page_pub.publish(Int32(data=self._kick_selected_page))
-            else:
-                self._log_throttled(
-                    "kick_page",
-                    f"dry_run page_num {self._kick_selected_page}",
-                    1.0,
-                )
+            self._publish_action_page(
+                page=self._kick_selected_page,
+                log_key="kick_page",
+            )
             self._kick_stage = "waiting"
 
         if self._kick_stage == "waiting":
@@ -1284,16 +1305,34 @@ class BallLocalizer(Node):
         self._finish_kick(msg.data)
 
     def _finish_kick(self, result: str) -> None:
-        if not self._dry_run:
-            self._enable_pub.publish(String(data=self._walking_module_name))
-        else:
-            self._log_throttled("kick_restore", "dry_run walking module restore", 1.0)
+        self._restore_walking_module(
+            log_key="kick_restore",
+            dry_run_message="dry_run walking module restore",
+        )
         self._publish_head_module_assignment()
         self._kick_stage = "idle"
         self._last_kick_time = time.monotonic()
         self._walking_active = False
         self._set_state(self.STATE_SCAN)
         self.get_logger().info(f"Kick finished: {result}")
+
+    def _switch_to_action_module(self, log_key: str, dry_run_message: str) -> None:
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._action_module_name))
+            return
+        self._log_throttled(log_key, dry_run_message, 1.0)
+
+    def _publish_action_page(self, page: int, log_key: str) -> None:
+        if not self._dry_run:
+            self._action_page_pub.publish(Int32(data=page))
+            return
+        self._log_throttled(log_key, f"dry_run page_num {page}", 1.0)
+
+    def _restore_walking_module(self, log_key: str, dry_run_message: str) -> None:
+        if not self._dry_run:
+            self._enable_pub.publish(String(data=self._walking_module_name))
+            return
+        self._log_throttled(log_key, dry_run_message, 1.0)
 
     def _select_kick_page(self, bearing: float) -> int:
         if abs(bearing) < self._kick_bearing_deadzone:
@@ -1478,6 +1517,16 @@ class BallLocalizer(Node):
             if self._log_sample_fp:
                 self._log_sample_fp.close()
                 self._log_sample_fp = None
+
+    def _close_sample_csv(self) -> None:
+        if self._log_sample_fp is not None:
+            self._log_sample_fp.close()
+            self._log_sample_fp = None
+        self._log_sample_writer = None
+
+    def destroy_node(self) -> bool:
+        self._close_sample_csv()
+        return super().destroy_node()
 
 
 def main() -> None:

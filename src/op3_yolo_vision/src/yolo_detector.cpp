@@ -219,8 +219,9 @@ YoloDetector::YoloDetector(const rclcpp::NodeOptions& options)
   logDeprecatedBackendSettings();
   model_loaded_ = loadModel();
 
+  // FIX: gunakan QoS Reliable agar cocok dengan publisher USB cam (RELIABLE)
   image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-    image_topic_, rclcpp::SensorDataQoS(),
+    image_topic_, rclcpp::QoS(10).reliable(),
     std::bind(&YoloDetector::imageCallback, this, std::placeholders::_1));
 
   debug_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/vision/yolo/debug", 10);
@@ -370,23 +371,17 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     detections_pub_->publish(empty_boxes);
   };
 
-  // Use square aspect ratio preserving resize (faster than letterbox)
-  // Find the longer dimension to determine scale
   const int max_dim = std::max(width, height);
 
-  // Create a square canvas (but don't use black padding, just resize)
   cv::Mat processed;
   if (width == height) {
-    // Already square, just resize
     cv::resize(bgr, processed, cv::Size(input_size_, input_size_));
   } else {
-    // Create square letterbox (more efficient than before)
     cv::Mat square(max_dim, max_dim, CV_8UC3, cv::Scalar(114, 114, 114));
     bgr.copyTo(square(cv::Rect(0, 0, width, height)));
     cv::resize(square, processed, cv::Size(input_size_, input_size_));
   }
 
-  // Calculate scale for bbox coordinates
   float scale = static_cast<float>(max_dim) / static_cast<float>(input_size_);
 
   cv::Mat rgb;
@@ -547,7 +542,6 @@ void YoloDetector::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   auto end_time = std::chrono::high_resolution_clock::now();
   double full_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
-  // Performance logging
   frame_count_++;
   total_inference_ms_ += inference_ms;
   total_full_ms_ += full_ms;

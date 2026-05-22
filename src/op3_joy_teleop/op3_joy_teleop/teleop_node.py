@@ -38,6 +38,12 @@ class Op3JoyTeleop(Node):
         self._max_x = float(self.declare_parameter("max_x", 0.02).value)
         self._max_y = float(self.declare_parameter("max_y", 0.015).value)
         self._max_yaw = float(self.declare_parameter("max_yaw", 0.25).value)
+        self._use_baseline_move_amplitudes = bool(
+            self.declare_parameter("use_baseline_move_amplitudes", True).value
+        )
+        self._baseline_amplitude_epsilon = float(
+            self.declare_parameter("baseline_amplitude_epsilon", 1e-6).value
+        )
         self._joy_sign_x = float(self.declare_parameter("joy_sign_x", -1.0).value)
         self._joy_sign_y = float(self.declare_parameter("joy_sign_y", 1.0).value)
         self._joy_sign_yaw = float(self.declare_parameter("joy_sign_yaw", 1.0).value)
@@ -60,6 +66,9 @@ class Op3JoyTeleop(Node):
         )
         self._refresh_baseline_button = int(
             self.declare_parameter("refresh_baseline_button", -1).value
+        )
+        self._walking_start_param_settle_sec = float(
+            self.declare_parameter("walking_start_param_settle_sec", 0.05).value
         )
 
         self._smoothing_mode = str(
@@ -274,6 +283,10 @@ class Op3JoyTeleop(Node):
         self._smoothed_x = 0.0
         self._smoothed_y = 0.0
         self._smoothed_yaw = 0.0
+        self._effective_max_x = self._max_x
+        self._effective_max_y = self._max_y
+        self._effective_max_yaw = self._max_yaw
+        self._effective_turn_max_yaw = self._turn_max_yaw
         self._heading_hold = False
         self._turn_src = "none"
         self._yaw_target = 0.0
@@ -476,15 +489,23 @@ class Op3JoyTeleop(Node):
         raw_x = self._get_axis(self._last_joy, self._axis_x)
         raw_y = self._get_axis(self._last_joy, self._axis_y)
         raw_yaw = self._get_axis(self._last_joy, self._axis_yaw)
+        max_x, max_y, max_yaw = self._get_effective_walk_limits()
+        turn_max_yaw = self._baseline_limit(
+            "angle_move_amplitude", self._turn_max_yaw
+        )
+        self._effective_max_x = max_x
+        self._effective_max_y = max_y
+        self._effective_max_yaw = max_yaw
+        self._effective_turn_max_yaw = turn_max_yaw
 
-        target_x = self._joy_sign_x * self._max_x * self._apply_deadzone(raw_x)
-        target_y = self._joy_sign_y * self._max_y * self._apply_deadzone(raw_y)
-        target_yaw = self._joy_sign_yaw * self._max_yaw * self._apply_deadzone(raw_yaw)
+        target_x = self._joy_sign_x * max_x * self._apply_deadzone(raw_x)
+        target_y = self._joy_sign_y * max_y * self._apply_deadzone(raw_y)
+        target_yaw = self._joy_sign_yaw * max_yaw * self._apply_deadzone(raw_yaw)
 
         if self._enable_turning:
             target_yaw, self._turn_src = self._get_turning_yaw()
             if self._turn_src != "none":
-                target_yaw *= self._turn_max_yaw
+                target_yaw *= turn_max_yaw
             else:
                 self._turn_src = "none"
         else:
@@ -492,9 +513,9 @@ class Op3JoyTeleop(Node):
 
         dpad_x, dpad_y = self._get_dpad_inputs()
         if dpad_x != 0.0:
-            target_x += dpad_x * self._max_x * self._dpad_step_x
+            target_x += dpad_x * max_x * self._dpad_step_x
         if dpad_y != 0.0:
-            target_y += dpad_y * self._max_y * self._dpad_step_y
+            target_y += dpad_y * max_y * self._dpad_step_y
 
         if self._heading_hold:
             target_yaw = 0.0
@@ -592,9 +613,15 @@ class Op3JoyTeleop(Node):
             "smoothed_x": self._smoothed_x,
             "smoothed_y": self._smoothed_y,
             "smoothed_yaw": self._smoothed_yaw,
-            "max_x": self._max_x,
-            "max_y": self._max_y,
-            "max_yaw": self._max_yaw,
+            "max_x": self._effective_max_x,
+            "max_y": self._effective_max_y,
+            "max_yaw": self._effective_max_yaw,
+            "fallback_max_x": self._max_x,
+            "fallback_max_y": self._max_y,
+            "fallback_max_yaw": self._max_yaw,
+            "turn_max_yaw": self._effective_turn_max_yaw,
+            "fallback_turn_max_yaw": self._turn_max_yaw,
+            "use_baseline_move_amplitudes": self._use_baseline_move_amplitudes,
             "kick_mode_active": self._kick_mode_active,
             "kick_stage": self._kick_stage,
             "getup_mode_active": self._getup_mode_active,
@@ -675,6 +702,9 @@ class Op3JoyTeleop(Node):
             return
         self._enable_pub.publish(String(data=self._walking_module_name))
         self._publish_head_module_assignment()
+        self._publish_zero_params()
+        if self._walking_start_param_settle_sec > 0.0:
+            time.sleep(self._walking_start_param_settle_sec)
         self._command_pub.publish(String(data="start"))
 
     def _publish_stop_zero(self) -> None:
@@ -936,6 +966,21 @@ class Op3JoyTeleop(Node):
         if self._turbo_active:
             return gear_scale * self._turbo_scale
         return gear_scale
+
+    def _get_effective_walk_limits(self) -> Tuple[float, float, float]:
+        return (
+            self._baseline_limit("x_move_amplitude", self._max_x),
+            self._baseline_limit("y_move_amplitude", self._max_y),
+            self._baseline_limit("angle_move_amplitude", self._max_yaw),
+        )
+
+    def _baseline_limit(self, field_name: str, fallback: float) -> float:
+        if not self._use_baseline_move_amplitudes or self._baseline_params is None:
+            return fallback
+        value = abs(float(getattr(self._baseline_params, field_name, 0.0)))
+        if value <= self._baseline_amplitude_epsilon:
+            return fallback
+        return value
 
     def _cycle_gear(self) -> None:
         if not self._gear_scales:
