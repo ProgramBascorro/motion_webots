@@ -1002,11 +1002,34 @@ bool OP3KinematicsDynamics::calcInverseKinematicsForLeg(double *out, double x, d
   //calc q4
   Eigen::Vector3d p03 = robotis_framework::getRotationZ(*(out + 0))*robotis_framework::getTransitionXYZ(hip_pitch_offset_m_, 0, 0);
   Eigen::Vector3d p36 = p06 - p03;
-  
-  *(out + 3) = -acos((thigh_length_m_*thigh_length_m_ + calf_length_m_*calf_length_m_ - p36.norm()*p36.norm())/(2*thigh_length_m_*calf_length_m_)) + EIGEN_PI;
+
+  // Clamp the law-of-cosines / law-of-sines arguments to the valid [-1, 1]
+  // domain. When the requested foot pose is (even slightly) out of the leg's
+  // reach -- e.g. a large x/y move amplitude during the swing phase -- the raw
+  // argument leaves [-1, 1] and acos()/asin() return NaN. An unclamped NaN
+  // propagates into every leg joint, the walking goal position becomes NaN, and
+  // the controller drops that update, so the legs freeze while the IK-free arm
+  // swing keeps moving (no IK error is ever logged). Clamping makes the IK
+  // degrade gracefully to the nearest reachable pose instead of freezing.
+  double p36_norm = p36.norm();
+  if (p36_norm < 1e-6)
+    p36_norm = 1e-6;
+
+  double knee_cos = (thigh_length_m_*thigh_length_m_ + calf_length_m_*calf_length_m_ - p36_norm*p36_norm)
+                    / (2*thigh_length_m_*calf_length_m_);
+  if (knee_cos > 1.0)
+    knee_cos = 1.0;
+  else if (knee_cos < -1.0)
+    knee_cos = -1.0;
+  *(out + 3) = -acos(knee_cos) + EIGEN_PI;
 
   //calc q5
-  double alpha = asin(thigh_length_m_*sin(EIGEN_PI - *(out + 3))/p36.norm());
+  double alpha_sin = thigh_length_m_*sin(EIGEN_PI - *(out + 3))/p36_norm;
+  if (alpha_sin > 1.0)
+    alpha_sin = 1.0;
+  else if (alpha_sin < -1.0)
+    alpha_sin = -1.0;
+  double alpha = asin(alpha_sin);
   Eigen::Vector3d p63 = -R06.transpose()*p36;
   *(out + 4) = -atan2(p63(0), getSign(p63(2))*sqrt(p63(1)*p63(1) + p63(2)*p63(2))) - alpha;
 

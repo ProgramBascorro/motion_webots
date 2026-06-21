@@ -363,6 +363,14 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
   const [yamlText, setYamlText] = useState("");
   const [yamlData, setYamlData] = useState(null);
   const [parseError, setParseError] = useState("");
+  // Target .bin file info from the backend (path + on-disk last-modified time), so
+  // the user can see which bin "Apply/Upload" writes to and whether it changed
+  // since this draft was loaded (prevents overwriting newer edits with a stale draft).
+  const [binInfo, setBinInfo] = useState(null);
+  const [showUploadConfirm, setShowUploadConfirm] = useState(false);
+  // bin mtime at the last point the draft and bin were in sync (export/apply);
+  // used so a successful upload doesn't immediately flag the draft as "stale".
+  const [lastSyncMs, setLastSyncMs] = useState(NaN);
   const [selectedPageIndex, setSelectedPageIndex] = useState(null);
   const [selectedStepIndex, setSelectedStepIndex] = useState(null);
 
@@ -850,10 +858,23 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
     resultSubRef.current.subscribe(msg => {
       try {
         const payload = JSON.parse(msg.data);
+        // every backend result carries the current target bin path + mtime
+        if (payload.action_file) {
+          setBinInfo({
+            name: payload.action_file_name || payload.action_file.split("/").pop(),
+            path: payload.action_file,
+            mtime: payload.mtime ? payload.mtime * 1000 : null,
+            mtimeIso: payload.mtime_iso || null,
+          });
+        }
+        if (payload.action === "stat") return;  // status-only; don't overwrite the status line
         const msgText = payload.message || (payload.ok ? "Success" : "Error");
         setStatus(msgText);
         setStatusError(!payload.ok);
-        if (payload.action === "export" && payload.yaml) setYamlText(payload.yaml);
+        if (payload.action === "export" && payload.yaml) {
+          setYamlText(payload.yaml);
+          setLastSyncMs(payload.mtime ? payload.mtime * 1000 : Date.now());
+        }
         if (payload.action === "apply" && payload.ok) {
           try {
             localStorage.removeItem(ACTION_DRAFT_KEY);
@@ -862,6 +883,7 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
             // Ignore localStorage clear errors.
           }
           setHasLocalDraft(false);
+          setLastSyncMs(payload.mtime ? payload.mtime * 1000 : Date.now());
         }
         
         const pending = pendingRunRef.current;
@@ -881,6 +903,11 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
         }
       } catch (e) { setStatus("Error parsing result"); setStatusError(true); }
     });
+
+    // ask the backend which bin we target + when it last changed on disk
+    setTimeout(() => {
+      requestRef.current?.publish(new ROSLIB.Message({ data: JSON.stringify({ action: "stat" }) }));
+    }, 400);
 
     const applyJointState = (msg) => {
       const next = { ...livePoseRef.current };
@@ -1068,8 +1095,36 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
     requestRef.current.publish(new ROSLIB.Message({ data: JSON.stringify(payload) }));
   };
 
-  const handleApply = () => { sendRequest({ action: "apply", yaml: yamlText }); setStatus("Applying..."); setStatusError(false); };
+  // Upload/Apply overwrites the .bin file. The draft lives in the browser and can
+  // be stale (the bin may have been edited elsewhere since), so confirm first and
+  // refresh the bin's on-disk timestamp so the dialog can warn about it.
+  const handleApply = () => {
+    requestRef.current?.publish(new ROSLIB.Message({ data: JSON.stringify({ action: "stat" }) }));
+    setShowUploadConfirm(true);
+  };
+  const confirmApply = () => {
+    setShowUploadConfirm(false);
+    sendRequest({ action: "apply", yaml: yamlText });
+    setStatus("Applying..."); setStatusError(false);
+  };
+  const handleReloadFromBin = () => {
+    setShowUploadConfirm(false);
+    sendRequest({ action: "export", pages: exportPages });
+    setStatus("Reloading from bin..."); setStatusError(false);
+  };
   const handleExport = () => { sendRequest({ action: "export", pages: exportPages }); setStatus("Exporting..."); setStatusError(false); };
+
+  // staleness check for the upload confirmation: was the target bin changed on
+  // disk AFTER this draft was generated? (e.g. edited via the terminal editor)
+  const draftGeneratedAt = yamlData?.meta?.generated_at || null;
+  const draftGeneratedMs = draftGeneratedAt ? Date.parse(draftGeneratedAt) : NaN;
+  // when draft and bin were last in sync = later of (draft generated, last export/apply)
+  const syncMs = Math.max(
+    Number.isFinite(draftGeneratedMs) ? draftGeneratedMs : 0,
+    Number.isFinite(lastSyncMs) ? lastSyncMs : 0,
+  );
+  const binIsNewerThanDraft = !!(binInfo?.mtime && syncMs && binInfo.mtime > syncMs + 2000);
+  const formatBinTime = (ms) => { try { return new Date(ms).toLocaleString(); } catch { return "?"; } };
 
   const updateYamlData = (label, updater, options = {}) => mutateYaml(label, updater, options);
 
@@ -2085,21 +2140,33 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
 
         {/* YAML Editor Toggle */}
         <div className={`bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col transition-all ${showYaml ? 'h-[300px]' : 'h-auto'}`}>
-          <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-2xl">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-gray-700">YAML</span>
-              {hasLocalDraft && (
-                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  Draft Saved
-                </span>
-              )}
-              <button onClick={() => setShowYaml(!showYaml)} className="text-xs text-undip-blue hover:underline">
-                {showYaml ? "Hide" : "Show"}
-              </button>
+          <div className="p-3 border-b border-gray-100 flex justify-between items-start bg-gray-50/50 rounded-t-2xl gap-2">
+            <div className="flex flex-col gap-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-gray-700">YAML</span>
+                {hasLocalDraft && (
+                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                    Draft Saved
+                  </span>
+                )}
+                {binIsNewerThanDraft && (
+                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full" title="Bin di disk lebih baru dari draft ini">
+                    ⚠ Draft mungkin basi
+                  </span>
+                )}
+                <button onClick={() => setShowYaml(!showYaml)} className="text-xs text-undip-blue hover:underline">
+                  {showYaml ? "Hide" : "Show"}
+                </button>
+              </div>
+              <div className="text-[10px] text-gray-400 leading-tight truncate">
+                Target bin: <span className="font-mono text-gray-500">{binInfo?.name || "?"}</span>
+                {binInfo?.mtimeIso && <> · bin diubah: <span className="text-gray-500">{formatBinTime(binInfo.mtime)}</span></>}
+                {draftGeneratedAt && <> · draft: <span className="text-gray-500">{formatBinTime(draftGeneratedMs)}</span></>}
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button title="Apply" onClick={handleApply} className="p-1.5 bg-undip-blue text-white rounded hover:bg-opacity-90"><Upload size={14}/></button>
-              <button title="Export" onClick={handleExport} className="p-1.5 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"><Download size={14}/></button>
+            <div className="flex gap-2 shrink-0">
+              <button title="Upload draft ke bin (konfirmasi dulu)" onClick={handleApply} className="p-1.5 bg-undip-blue text-white rounded hover:bg-opacity-90"><Upload size={14}/></button>
+              <button title="Muat ulang dari bin (timpa draft)" onClick={handleExport} className="p-1.5 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"><Download size={14}/></button>
             </div>
           </div>
           {showYaml && (
@@ -2507,6 +2574,41 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
           </div>
         </div>
       </div>
+
+      {showUploadConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowUploadConfirm(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-gray-900 mb-1">Upload draft ke file bin?</h3>
+            <p className="text-xs text-gray-500 mb-3">Tindakan ini <b>menimpa</b> file aksi di robot dengan draft yang sekarang ada di editor.</p>
+
+            <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1 mb-3">
+              <div className="flex justify-between gap-2"><span className="text-gray-400">Target bin</span><span className="font-mono text-gray-700 truncate">{binInfo?.name || "?"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-400">Bin diubah terakhir</span><span className="text-gray-700">{binInfo?.mtime ? formatBinTime(binInfo.mtime) : "?"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-400">Draft sinkron pada</span><span className="text-gray-700">{syncMs ? formatBinTime(syncMs) : "?"}</span></div>
+            </div>
+
+            {binIsNewerThanDraft ? (
+              <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mb-3">
+                ⚠ <b>Bin di disk lebih baru dari draft ini.</b> Kemungkinan bin sudah diedit di tempat lain (mis. action editor terminal) setelah draft dimuat. Menimpa akan <b>menghapus</b> perubahan itu. Disarankan <b>Muat ulang dari bin</b> dulu.
+              </div>
+            ) : binInfo?.mtime ? (
+              <div className="text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-3 mb-3">
+                Draft sinkron dengan bin di disk — aman untuk diupload.
+              </div>
+            ) : (
+              <div className="text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded-lg p-3 mb-3">
+                Tidak bisa memverifikasi waktu bin (restart stack agar info ini muncul). Pastikan manual sebelum menimpa.
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2 justify-end">
+              <button onClick={() => setShowUploadConfirm(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Batal</button>
+              <button onClick={handleReloadFromBin} className="px-3 py-2 text-sm rounded-lg border border-undip-blue text-undip-blue hover:bg-blue-50 font-medium">Muat ulang dari bin</button>
+              <button onClick={confirmApply} className={`px-3 py-2 text-sm rounded-lg text-white font-bold ${binIsNewerThanDraft ? "bg-amber-600 hover:bg-amber-700" : "bg-undip-blue hover:bg-opacity-90"}`}>Timpa bin</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

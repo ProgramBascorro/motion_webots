@@ -7,7 +7,7 @@ import sys
 import rclpy
 import time
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, get_package_prefix
 
 class ActionEditorExecutor(Node):
     def __init__(self):
@@ -33,6 +33,22 @@ def ensure_action_file(action_file_path: str, default_path: str) -> None:
     os.makedirs(os.path.dirname(action_file_path), exist_ok=True)
     shutil.copyfile(default_path, action_file_path)
 
+def resolve_action_file_default() -> str:
+    """Default action file = the version-controlled workspace src copy that the op3
+    stack and Bascorro Studio web read (via OP3_ACTION_FILE). Editing the same file
+    keeps the editor and the running stack from drifting apart. Falls back to the
+    installed share copy if the src tree is not available."""
+    share_copy = get_package_share_directory('op3_action_module') + '/data/motion_4095_CHRONUS.bin'
+    try:
+        ws_root = os.path.dirname(os.path.dirname(get_package_prefix('op3_action_module')))
+        src_copy = os.path.join(ws_root, 'src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin')
+        if os.path.isfile(src_copy):
+            return src_copy
+    except Exception:
+        pass
+    return share_copy
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = ActionEditorExecutor()
@@ -47,7 +63,7 @@ def main(args=None):
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_CHRONUS.bin'
+    action_file_path_default = resolve_action_file_default()
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
     device_name_default = '/dev/ttyUSB0'
 

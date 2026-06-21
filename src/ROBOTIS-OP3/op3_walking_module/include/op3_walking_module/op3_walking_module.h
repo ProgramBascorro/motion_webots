@@ -126,6 +126,7 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   void loadWalkingParam(const std::string &path);
   void saveWalkingParam(std::string &path);
   void iniPoseTraGene(double mov_time);
+  bool computeNeutralLegAngle(double *neutral);
 
   void setJointGains(int balancing_idx);
 
@@ -144,6 +145,12 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd target_position_;
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
+  // Walking stance is locked to the pose present when walking is enabled
+  // (INIT_BARU). captured_init_pose_ holds that pose; walking_bias_ = captured -
+  // neutral IK stance, so the gait oscillation is added on top of INIT_BARU.
+  Eigen::MatrixXd captured_init_pose_;
+  Eigen::MatrixXd walking_bias_;
+  bool capture_init_pose_;
   Eigen::MatrixXi joint_axis_direction_;
   std::map<std::string, int> joint_table_;
   int walking_state_;

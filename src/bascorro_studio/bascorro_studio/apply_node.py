@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import datetime
 import json
 import os
 import shutil
@@ -142,6 +143,12 @@ class ActionWebNode(Node):
             elif action == "export":
                 pages = str(payload.get("pages", "used"))
                 self.export_yaml(pages, request_id)
+            elif action == "stat":
+                # cheap query: which bin will be written and when it last changed,
+                # so the UI can warn before overwriting it with a stale draft.
+                self.publish_result(
+                    {"ok": True, "action": "stat", "request_id": request_id, **self.file_info()}
+                )
             else:
                 self.publish_result(
                     {
@@ -247,7 +254,27 @@ class ActionWebNode(Node):
             if tmp_path and os.path.isfile(tmp_path):
                 os.unlink(tmp_path)
 
+    def file_info(self) -> Dict[str, object]:
+        """Target bin path + when it was last modified on disk, so the UI can show
+        'this bin was last updated at X' and warn if a draft is older than that."""
+        path = self.action_file
+        info: Dict[str, object] = {
+            "action_file": path,
+            "action_file_name": os.path.basename(path),
+        }
+        try:
+            mtime = os.path.getmtime(path)
+            info["mtime"] = mtime  # epoch seconds
+            info["mtime_iso"] = datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+        except OSError:
+            info["mtime"] = None
+            info["mtime_iso"] = None
+        return info
+
     def publish_result(self, payload: Dict[str, object]) -> None:
+        # always attach current bin file info so the UI knows the on-disk state
+        if "action_file" not in payload:
+            payload = {**payload, **self.file_info()}
         msg = String()
         msg.data = json.dumps(payload)
         self.result_pub.publish(msg)

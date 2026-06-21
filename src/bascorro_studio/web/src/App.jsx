@@ -315,8 +315,29 @@ const WALKING_PARAM_GROUPS = [
   },
 ];
 
+// Time to wait after enabling walking_module before sending a walking command,
+// so the controller has switched the active module and settled the init pose.
+const WALKING_ENABLE_SETTLE_MS = 1200;
 const WALKING_INT_FIELDS = new Set(["p_gain", "i_gain", "d_gain"]);
 const WALKING_BOOL_FIELDS = new Set(["move_aim_on", "balance_enable"]);
+
+// Soft torque-on: enabling torque makes each Dynamixel drive to its goal at full
+// speed, so the robot snaps/jerks. To avoid that we first limit the XM430
+// profile velocity/acceleration (RAM regs 112/108) so the joints ease into the
+// goal, enable torque, then restore full speed (0 = unlimited) so walking/action
+// run at normal speed. Velocity unit ~0.229 rev/min, accel unit ~214.6 rev/min^2.
+// restoreMs = how long to keep the speed limit before unlocking full speed; sized
+// so even a large bring-up move finishes ramping first (slower preset -> longer).
+const TORQUE_SPEED_PRESETS = [
+  { key: "slow", label: "Lambat", velocity: 15, accel: 6, restoreMs: 5000 },
+  { key: "medium", label: "Sedang", velocity: 35, accel: 12, restoreMs: 3000 },
+  { key: "fast", label: "Cepat", velocity: 70, accel: 25, restoreMs: 2000 },
+];
+// robotis_controller batches every /robotis/sync_write_item for a port into ONE
+// GroupSyncWrite per ~8ms control cycle, keyed only by port (not the item address),
+// so two different items sent in the same cycle collide and the second is dropped.
+// Space successive items well past one cycle so each lands in its own batch.
+const SYNC_ITEM_GAP_MS = 60;
 
 function normalizeWalkingParams(params = {}) {
   const next = { ...WALKING_DEFAULT_PARAMS, ...params };
@@ -523,6 +544,7 @@ export default function App() {
   const [demoMode, setDemoMode] = useState("");
   const [demoCommand, setDemoCommand] = useState("");
   const [demoCommandAt, setDemoCommandAt] = useState(null);
+  const [torqueSpeedKey, setTorqueSpeedKey] = useState("medium");
   const [walkingParams, setWalkingParams] = useState(() => normalizeWalkingParams());
   const [walkingCurrentParams, setWalkingCurrentParams] = useState(null);
   const [walkingLoaded, setWalkingLoaded] = useState(false);
@@ -582,6 +604,9 @@ export default function App() {
   const walkingCommandPubRef = useRef(null);
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
+  // Tracks whether walking_module is the active control module. Walking commands
+  // (start/stop/balance) are ignored by op3_walking_module unless it is enabled.
+  const walkingModuleEnabledRef = useRef(false);
   const torquePubRef = useRef(null);
   const controlModulePubRef = useRef(null);
   const actionPagePubRef = useRef(null);
@@ -925,10 +950,41 @@ export default function App() {
     return true;
   };
 
-  const applyWalkingAndStart = () => {
-    if (applyWalkingParams()) {
-      sendWalkingCommand("start", "Walking params applied and started");
+  // op3_walking_module ignores start/stop/balance commands unless walking_module
+  // is the active control module ("walking module is not ready."). Switching to
+  // Init Pose / Head module / Action deactivates it, so make sure it is enabled
+  // before sending walking commands. Returns true if it was *just* enabled (caller
+  // should wait for the module switch to settle before sending the command).
+  const ensureWalkingModuleEnabled = () => {
+    if (walkingModuleEnabledRef.current) return false;
+    if (!controlModulePubRef.current || rosState !== "connected") {
+      sendStatus("Walking module command unavailable", true);
+      return false;
     }
+    // make sure the soft torque-on speed limit is lifted before the gait runs
+    restoreFullSpeed();
+    controlModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+    walkingModuleEnabledRef.current = true;
+    sendStatus("Walking module enabled");
+    return true;
+  };
+
+  const startWalking = () => {
+    const justEnabled = ensureWalkingModuleEnabled();
+    window.setTimeout(() => {
+      sendWalkingCommand("start");
+    }, justEnabled ? WALKING_ENABLE_SETTLE_MS : 0);
+  };
+
+  const applyWalkingAndStart = () => {
+    const justEnabled = ensureWalkingModuleEnabled();
+    window.setTimeout(() => {
+      if (applyWalkingParams()) {
+        window.setTimeout(() => {
+          sendWalkingCommand("start", "Walking params applied and started");
+        }, 200);
+      }
+    }, justEnabled ? WALKING_ENABLE_SETTLE_MS : 0);
   };
 
   const enableWalkingModule = () => {
@@ -937,6 +993,7 @@ export default function App() {
       return;
     }
     controlModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+    walkingModuleEnabledRef.current = true;
     sendStatus("Walking module enabled");
   };
 
@@ -1069,6 +1126,7 @@ export default function App() {
       sendStatus("Init pose unavailable: ROS publishers not ready", true);
       return;
     }
+    walkingModuleEnabledRef.current = false;
     controlModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
     window.setTimeout(() => {
       actionPagePubRef.current?.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
@@ -1080,20 +1138,74 @@ export default function App() {
     sendWalkingCommand("stop", "Soft Stop Sent");
   };
 
+  // Write a single control-table item (same value) to every joint via
+  // /robotis/sync_write_item. Returns false if no joints are known yet.
+  const writeSyncItem = (itemName, value) => {
+    if (!torquePubRef.current || !metrics?.joint_names?.length) return false;
+    torquePubRef.current.publish(new ROSLIB.Message({
+      item_name: itemName,
+      joint_name: metrics.joint_names,
+      value: metrics.joint_names.map(() => value),
+    }));
+    return true;
+  };
+
+  // Send a list of [item, value] writes one per control cycle. The controller drops
+  // multiple different items sent in the same cycle (see SYNC_ITEM_GAP_MS), so the
+  // profile-velocity / acceleration / torque writes must NOT be sent back-to-back.
+  const writeSyncItemsSequential = (items, onDone) => {
+    let i = 0;
+    const step = () => {
+      if (i >= items.length) {
+        if (onDone) onDone();
+        return;
+      }
+      const [name, value] = items[i++];
+      writeSyncItem(name, value);
+      window.setTimeout(step, SYNC_ITEM_GAP_MS);
+    };
+    step();
+  };
+
+  // Lift the soft torque-on speed limit (0 = unlimited) so module-driven motion
+  // (walking, action) is not slowed down.
+  const restoreFullSpeed = () => {
+    writeSyncItemsSequential([
+      ["profile_velocity", 0],
+      ["profile_acceleration", 0],
+    ]);
+  };
+
   const handleTorque = (enable) => {
-    if (torquePubRef.current && metrics?.joint_names?.length) {
-      const values = metrics.joint_names.map(() => (enable ? 1 : 0));
-      torquePubRef.current.publish(new ROSLIB.Message({
-        item_name: "torque_enable",
-        joint_name: metrics.joint_names,
-        value: values
-      }));
-      sendStatus(enable ? "Torque ON" : "Torque OFF");
+    if (!torquePubRef.current || !metrics?.joint_names?.length) return;
+
+    if (!enable) {
+      writeSyncItem("torque_enable", 0);
+      sendStatus("Torque OFF");
+      return;
     }
+
+    // Soft bring-up, each item in its own control cycle:
+    //   profile_velocity -> profile_acceleration -> torque_enable
+    // so the joints ease into their goal instead of snapping. Then restore full
+    // speed so walking/action are not slowed.
+    const preset = TORQUE_SPEED_PRESETS.find((p) => p.key === torqueSpeedKey) || TORQUE_SPEED_PRESETS[1];
+    writeSyncItemsSequential(
+      [
+        ["profile_velocity", preset.velocity],
+        ["profile_acceleration", preset.accel],
+        ["torque_enable", 1],
+      ],
+      () => {
+        sendStatus(`Torque ON (${preset.label})`);
+        window.setTimeout(restoreFullSpeed, preset.restoreMs);
+      },
+    );
   };
 
   const handleEnableHeadModule = () => {
     if (controlModulePubRef.current) {
+      walkingModuleEnabledRef.current = false;
       controlModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
       sendStatus("Head Module Enabled");
     }
@@ -1429,7 +1541,7 @@ export default function App() {
             </div>
 
             <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2">
-              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={() => sendWalkingCommand("start")} disabled={!rosConnected}>
+              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalking} disabled={!rosConnected}>
                 <Play size={14} /> Start
               </button>
               <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
@@ -1800,6 +1912,18 @@ export default function App() {
             <StopCircle size={18} /> Soft Stop
           </button>
           <div className="flex-1 hidden sm:block"></div>
+          <div className="flex items-center gap-1.5 w-full sm:w-auto" title="Kecepatan saat Torque ON (mencegah robot menyentak)">
+            <span className="text-xs text-gray-400 hidden sm:inline">Speed</span>
+            {TORQUE_SPEED_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                className={`flex-1 sm:flex-none px-2.5 py-2 rounded-lg text-xs font-medium border transition-all ${torqueSpeedKey === p.key ? "bg-undip-blue text-white border-undip-blue shadow-sm" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+                onClick={() => setTorqueSpeedKey(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2 w-full sm:w-auto">
             <button className="flex-1 sm:flex-none px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50 text-sm" onClick={() => handleTorque(false)}>Torque OFF</button>
             <button className="flex-1 sm:flex-none px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all text-sm" onClick={() => handleTorque(true)}>Torque ON</button>
