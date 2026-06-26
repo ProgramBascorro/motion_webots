@@ -147,7 +147,11 @@ void BaseModule::parseInitPoseData(const std::string &path)
     base_module_state_->joint_ini_pose_.coeffRef(id, 0) = value * DEGREE2RADIAN;
   }
 
-  base_module_state_->all_time_steps_ = int(base_module_state_->mov_time_ / base_module_state_->smp_time_) + 1;
+  // Must match calcMinimumJerkTra's row count (round(mov_time/smp_time + 1)).
+  // The old int(...)+1 truncation produces an off-by-one whenever the ratio's
+  // fractional part is >= 0.5, which then blows up the .block() assignment
+  // below with an Eigen assertion that kills op3_manager.
+  base_module_state_->all_time_steps_ = round(base_module_state_->mov_time_ / base_module_state_->smp_time_ + 1);
   base_module_state_->calc_joint_tra_.resize(base_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 }
 
@@ -241,7 +245,11 @@ void BaseModule::poseGenerateProc(Eigen::MatrixXd joint_angle_pose)
     std::this_thread::sleep_for(std::chrono::milliseconds(8));
 
   base_module_state_->mov_time_ = 5.0;
-  base_module_state_->all_time_steps_ = int(base_module_state_->mov_time_ / base_module_state_->smp_time_) + 1;
+  // Must match calcMinimumJerkTra's row count (round(mov_time/smp_time + 1)).
+  // The old int(...)+1 truncation produces an off-by-one whenever the ratio's
+  // fractional part is >= 0.5, which then blows up the .block() assignment
+  // below with an Eigen assertion that kills op3_manager.
+  base_module_state_->all_time_steps_ = round(base_module_state_->mov_time_ / base_module_state_->smp_time_ + 1);
 
   base_module_state_->calc_joint_tra_.resize(base_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 
@@ -288,7 +296,11 @@ void BaseModule::poseGenerateProc(std::map<std::string, double>& joint_angle_pos
   base_module_state_->joint_pose_ = target_pose;
 
   base_module_state_->mov_time_ = 5.0;
-  base_module_state_->all_time_steps_ = int(base_module_state_->mov_time_ / base_module_state_->smp_time_) + 1;
+  // Must match calcMinimumJerkTra's row count (round(mov_time/smp_time + 1)).
+  // The old int(...)+1 truncation produces an off-by-one whenever the ratio's
+  // fractional part is >= 0.5, which then blows up the .block() assignment
+  // below with an Eigen assertion that kills op3_manager.
+  base_module_state_->all_time_steps_ = round(base_module_state_->mov_time_ / base_module_state_->smp_time_ + 1);
 
   base_module_state_->calc_joint_tra_.resize(base_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 

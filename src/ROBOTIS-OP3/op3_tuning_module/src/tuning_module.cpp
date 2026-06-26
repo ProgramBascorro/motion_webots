@@ -212,7 +212,10 @@ bool TuningModule::parseInitPoseData(const std::string &path)
       robot_tuning_data_[joint_name]->goal_position_ = value * DEGREE2RADIAN;
   }
 
-  tuning_module_state_->all_time_steps_ = int(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_) + 1;
+  // Must match the formula inside calcMinimumJerkTra (round(mov_time/smp_time + 1)),
+  // otherwise the .block() assignment below sees a row-count mismatch and Eigen
+  // asserts (kills op3_manager — already fixed in op3_walking_module).
+  tuning_module_state_->all_time_steps_ = round(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_ + 1);
   tuning_module_state_->calc_joint_tra_.resize(tuning_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 
   return true;
@@ -314,7 +317,10 @@ bool TuningModule::parseTunePoseData(const std::string &path, const std::string 
     RCLCPP_INFO_STREAM(this->get_logger(), "joint : " << joint_name << ", value : " << value);
   }
 
-  tuning_module_state_->all_time_steps_ = int(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_) + 1;
+  // Must match the formula inside calcMinimumJerkTra (round(mov_time/smp_time + 1)),
+  // otherwise the .block() assignment below sees a row-count mismatch and Eigen
+  // asserts (kills op3_manager — already fixed in op3_walking_module).
+  tuning_module_state_->all_time_steps_ = round(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_ + 1);
   tuning_module_state_->calc_joint_tra_.resize(tuning_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 
   RCLCPP_INFO_STREAM(this->get_logger(), "tune pose - via_num : " << via_num << ", move_time : " << total_move_time);
@@ -431,7 +437,10 @@ void TuningModule::poseGenerateProc(Eigen::MatrixXd joint_angle_pose)
     std::this_thread::sleep_for(std::chrono::milliseconds(8));
 
   tuning_module_state_->mov_time_ = 5.0;
-  tuning_module_state_->all_time_steps_ = int(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_) + 1;
+  // Must match the formula inside calcMinimumJerkTra (round(mov_time/smp_time + 1)),
+  // otherwise the .block() assignment below sees a row-count mismatch and Eigen
+  // asserts (kills op3_manager — already fixed in op3_walking_module).
+  tuning_module_state_->all_time_steps_ = round(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_ + 1);
 
   tuning_module_state_->calc_joint_tra_.resize(tuning_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 
@@ -481,7 +490,10 @@ void TuningModule::poseGenerateProc(std::map<std::string, double>& joint_angle_p
   tuning_module_state_->joint_pose_ = target_pose;
 
   tuning_module_state_->mov_time_ = 5.0;
-  tuning_module_state_->all_time_steps_ = int(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_) + 1;
+  // Must match the formula inside calcMinimumJerkTra (round(mov_time/smp_time + 1)),
+  // otherwise the .block() assignment below sees a row-count mismatch and Eigen
+  // asserts (kills op3_manager — already fixed in op3_walking_module).
+  tuning_module_state_->all_time_steps_ = round(tuning_module_state_->mov_time_ / tuning_module_state_->smp_time_ + 1);
 
   tuning_module_state_->calc_joint_tra_.resize(tuning_module_state_->all_time_steps_, MAX_JOINT_ID + 1);
 

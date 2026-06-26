@@ -103,11 +103,16 @@ void BallFollower::startFollowing()
 void BallFollower::stopFollowing()
 {
   on_tracking_ = false;
-  //  approach_ball_position_ = NotFound;
   count_to_kick_ = 0;
-//  accum_ball_position_ = 0;
   RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Stop Ball following");
 
+  // Zero the gait amplitudes BEFORE sending "stop" so walking_module's
+  // next cycle decelerates from amplitude → 0 instead of completing the
+  // last commanded forward/turn step. Visible effect: feet stop swinging
+  // forward almost immediately while body finishes settling — vs the
+  // old path where walking_module finished its full step (~750 ms)
+  // before stopping, making the STOP button feel laggy.
+  setWalkingParam(0.0, 0.0, 0.0);
   setWalkingCommand("stop");
 }
 

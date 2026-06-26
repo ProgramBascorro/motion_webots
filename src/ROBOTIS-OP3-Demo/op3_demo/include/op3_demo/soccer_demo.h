@@ -23,6 +23,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <boost/thread.hpp>
+#include <chrono>
 #include <eigen3/Eigen/Eigen>
 #include <yaml-cpp/yaml.h>
 
@@ -127,6 +128,9 @@ class SoccerDemo : public OPDemo
   std::map<std::string, int> joint_id_table_;
 
   bool is_start_soccer_running_;
+  // After stopSoccerMode(), block "start" re-toggle until this time. Stops the
+  // press-twice-during-walking-deceleration restart bug.
+  std::chrono::steady_clock::time_point stop_debounce_until_;
   bool is_grass_;
   int wait_count_;
   bool on_following_ball_;

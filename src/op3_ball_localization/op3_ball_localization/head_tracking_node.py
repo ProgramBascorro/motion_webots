@@ -181,7 +181,19 @@ class HeadTrackingNode(Node):
         elif cmd == "stop" and self._active:
             self._active = False
             self._reset_pid()
-            self.get_logger().info("[CMD] deactivated by stop command")
+            self._scan_active = False
+            self._last_scan_cmd_time = 0.0
+            # Park head at neutral (pan=0, tilt=forward) immediately so the
+            # robot stops mid-scan instead of completing the last SCAN target.
+            # Without this, the servos finish executing the last commanded
+            # SCAN pose, making the head visually "keep scanning" for a
+            # second or two after STOP was pressed.
+            msg = JointState()
+            msg.name = [self._head_pan_joint, self._head_tilt_joint]
+            msg.position = [0.0, self._scan_tilt_forward_rad]
+            msg.header.stamp = self.get_clock().now().to_msg()
+            self._head_abs_pub.publish(msg)
+            self.get_logger().info("[CMD] deactivated by stop command (head parked at neutral)")
 
     def _ball_center_callback(self, msg: PointStamped) -> None:
         """Track the latest normalized YOLO center point."""

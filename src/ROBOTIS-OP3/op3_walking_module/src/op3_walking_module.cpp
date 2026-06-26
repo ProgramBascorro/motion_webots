@@ -88,6 +88,9 @@ WalkingModule::WalkingModule()
   target_position_ = Eigen::MatrixXd::Zero(1, result_.size());
   goal_position_ = Eigen::MatrixXd::Zero(1, result_.size());
   init_position_ = Eigen::MatrixXd::Zero(1, result_.size());
+  captured_init_pose_ = Eigen::MatrixXd::Zero(1, result_.size());
+  walking_bias_ = Eigen::MatrixXd::Zero(1, result_.size());
+  capture_init_pose_ = false;
   joint_axis_direction_ = Eigen::MatrixXi::Zero(1, result_.size());
 
   balancing_idx_ = BalancingPhase0;
@@ -104,18 +107,23 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   control_cycle_msec_ = control_cycle_msec;
 
   // m, s, rad
-  // init pose
-  walking_param_.init_x_offset = -0.010;
-  walking_param_.init_y_offset = 0.005;
-  walking_param_.init_z_offset = 0.020;
+  // init pose — derived from INIT_BARU (action bin page 2) via forward
+  // kinematics on the calibrated joint values, so walking_module's
+  // IK-generated "walking ready" pose matches the user's calibrated standing
+  // pose. Hip yaw/roll/pitch/knee/ankle joints from page 2 → foot at
+  // (0.003, ±0.032, -0.181) relative to hip → z_offset = leg_length(0.2195)
+  // + foot_z = 0.038.
+  walking_param_.init_x_offset = 0.003;
+  walking_param_.init_y_offset = 0.032;
+  walking_param_.init_z_offset = 0.038;
   walking_param_.init_roll_offset = 0.0;
-  walking_param_.init_pitch_offset = 0.0 * DEGREE2RADIAN;
+  walking_param_.init_pitch_offset = 4.0 * DEGREE2RADIAN;
   walking_param_.init_yaw_offset = 0.0 * DEGREE2RADIAN;
-  walking_param_.hip_pitch_offset = 13.0 * DEGREE2RADIAN;
+  walking_param_.hip_pitch_offset = 8.0 * DEGREE2RADIAN;
   // time
-  walking_param_.period_time = 600 * 0.001;
-  walking_param_.dsp_ratio = 0.1;
-  walking_param_.step_fb_ratio = 0.28;
+  walking_param_.period_time = 750 * 0.001;
+  walking_param_.dsp_ratio = 0.35;
+  walking_param_.step_fb_ratio = 0.25;
   // walking
   walking_param_.x_move_amplitude = 0.0;
   walking_param_.y_move_amplitude = 0.0;
@@ -123,12 +131,12 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   walking_param_.angle_move_amplitude = 0.0;
   // balance
   walking_param_.balance_enable = true;
-  walking_param_.balance_hip_roll_gain = 0.5;
-  walking_param_.balance_knee_gain = 0.3;
-  walking_param_.balance_ankle_roll_gain = 1.0;
+  walking_param_.balance_hip_roll_gain = 0.35;
+  walking_param_.balance_knee_gain = 0.4;
+  walking_param_.balance_ankle_roll_gain = 0.7;
   walking_param_.balance_ankle_pitch_gain = 0.9;
   walking_param_.y_swap_amplitude = 0.020;
-  walking_param_.z_swap_amplitude = 0.005;
+  walking_param_.z_swap_amplitude = 0.006;
   walking_param_.pelvis_offset = 3.0 * DEGREE2RADIAN;
   walking_param_.arm_swing_gain = 1.5;
 
@@ -491,6 +499,19 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       goal_position_.coeffRef(0, joint_index) = dxl->dxl_state_->goal_position_;
     }
 
+    if (capture_init_pose_ == true)
+    {
+      captured_init_pose_ = goal_position_;
+      walking_bias_ = goal_position_;
+      double neutral_leg[12];
+      if (computeNeutralLegAngle(neutral_leg) == true)
+      {
+        for (int i = 0; i < 12; i++)
+          walking_bias_.coeffRef(0, i) = goal_position_.coeff(0, i) - neutral_leg[i];
+      }
+      capture_init_pose_ = false;
+    }
+
     processPhase(time_unit);
 
     bool get_angle = false;
@@ -504,14 +525,21 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     sensoryFeedback(rl_gyro_err, fb_gyro_err, balance_angle);
 
     double err_total = 0.0, err_max = 0.0;
+    // Hold captured INIT_BARU when walking is idle (no gait running), so stance
+    // never snaps back to init_position_ zero between Enable and Start. While
+    // running, every joint (including arms) oscillates around the captured
+    // pose via walking_bias_ so the gait centers on INIT_BARU.
+    bool walking_idle = (real_running_ == false);
     // set goal position
     for (int idx = 0; idx < 14; idx++)
     {
       double goal_position = 0.0;
-      if (get_angle == false && idx < 12)
+      if (walking_idle == true)
+        goal_position = captured_init_pose_.coeff(0, idx);
+      else if (get_angle == false && idx < 12)
         goal_position = goal_position_.coeff(0, idx);
       else
-        goal_position = init_position_.coeff(0, idx) + angle[idx] + balance_angle[idx];
+        goal_position = walking_bias_.coeff(0, idx) + angle[idx] + balance_angle[idx];
 
       target_position_.coeffRef(0, idx) = goal_position;
 
@@ -1001,6 +1029,18 @@ bool WalkingModule::computeLegAngle(double *leg_angle)
     return false;
   }
 
+  // Reject non-finite IK results: a NaN would propagate to goal_position_ and
+  // the controller silently discards the cycle, leaving legs frozen mid-gait.
+  for (int i = 0; i < 12; i++)
+  {
+    if (!std::isfinite(leg_angle[i]))
+    {
+      RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                            "IK produced non-finite leg_angle[%d]", i);
+      return false;
+    }
+  }
+
   // std::cout << leg_angle[0] << " " << leg_angle[1] << " " << leg_angle[2] << " " << leg_angle[3] << " " << leg_angle[4] << " " << leg_angle[5] << " "
   //           << leg_angle[6] << " " << leg_angle[7] << " " << leg_angle[8] << " " << leg_angle[9] << " " << leg_angle[10] << " " << leg_angle[11] << " " << std::endl;
 
@@ -1159,6 +1199,8 @@ void WalkingModule::saveWalkingParam(std::string &path)
 void WalkingModule::onModuleEnable()
 {
   walking_state_ = WalkingEnable;
+  // Capture the current dxl goal as INIT_BARU stance on the next process() tick.
+  capture_init_pose_ = true;
   RCLCPP_INFO(this->get_logger(), "Walking Enable");
 }
 
@@ -1168,10 +1210,53 @@ void WalkingModule::onModuleDisable()
   walking_state_ = WalkingDisable;
 }
 
+bool WalkingModule::computeNeutralLegAngle(double *neutral)
+{
+  // IK of the standing pose with zero swap/move amplitudes — used to derive
+  // walking_bias_ so the gait oscillates around the captured INIT_BARU instead
+  // of init_position_ zeros.
+  updatePoseParam();
+
+  double leg_length = op3_kd_->thigh_length_m_ + op3_kd_->calf_length_m_ + op3_kd_->ankle_length_m_;
+  double ep[12];
+  // right leg
+  ep[0] = x_offset_;
+  ep[1] = -y_offset_ / 2;
+  ep[2] = z_offset_ - leg_length;
+  ep[3] = -r_offset_ / 2;
+  ep[4] = p_offset_;
+  ep[5] = -a_offset_ / 2;
+  // left leg
+  ep[6] = x_offset_;
+  ep[7] = y_offset_ / 2;
+  ep[8] = z_offset_ - leg_length;
+  ep[9] = r_offset_ / 2;
+  ep[10] = p_offset_;
+  ep[11] = a_offset_ / 2;
+
+  if (op3_kd_->calcInverseKinematicsForRightLeg(&neutral[0], ep[0], ep[1], ep[2], ep[3], ep[4], ep[5]) == false)
+    return false;
+  if (op3_kd_->calcInverseKinematicsForLeftLeg(&neutral[6], ep[6], ep[7], ep[8], ep[9], ep[10], ep[11]) == false)
+    return false;
+
+  // Match the hip_pitch offset that computeLegAngle applies on top of the IK result.
+  neutral[joint_table_["r_hip_pitch"]] -= op3_kd_->getJointDirection("r_hip_pitch") * hit_pitch_offset_;
+  neutral[joint_table_["l_hip_pitch"]] -= op3_kd_->getJointDirection("l_hip_pitch") * hit_pitch_offset_;
+
+  for (int i = 0; i < 12; i++)
+  {
+    if (!std::isfinite(neutral[i]))
+      return false;
+  }
+  return true;
+}
+
 void WalkingModule::iniPoseTraGene(double mov_time)
 {
   double smp_time = control_cycle_msec_ * 0.001;
-  int all_time_steps = int(mov_time / smp_time) + 1;
+  // Use round() so the row count matches what calcMinimumJerkTra() produces;
+  // an off-by-one here triggers an Eigen assertion and kills op3_manager.
+  int all_time_steps = round(mov_time / smp_time + 1);
   calc_joint_tra_.resize(all_time_steps, result_.size() + 1);
 
   for (int id = 0; id <= result_.size(); id++)

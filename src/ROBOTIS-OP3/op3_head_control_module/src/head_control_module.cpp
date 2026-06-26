@@ -120,10 +120,16 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
     return;
   }
 
-  while(has_goal_position_ == false)
+  // Drop the command if process() hasn't yet populated goal_position_ from
+  // the controller's joint feedback. Blocking-spin here was flooding the
+  // terminal for ~6 s during module-enable handshake. The caller
+  // (head_tracking_node) re-issues SCAN every ~2.5 s, so dropping the
+  // first one is harmless.
+  if (has_goal_position_ == false)
   {
-    std::cout << "wait for receiving current position" << std::endl;
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 2000,
+                         "head_control_module: goal_position not initialized yet, dropping command");
+    return;
   }
 
   // moving time

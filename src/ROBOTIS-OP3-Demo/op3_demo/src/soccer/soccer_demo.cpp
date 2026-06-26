@@ -107,12 +107,11 @@ void SoccerDemo::setUsingHeadControl(bool use_head_control)
 void SoccerDemo::setDemoEnable()
 {
   enable_ = true;
-  if (head_tracker_cmd_pub_)
-  {
-    std_msgs::msg::String cmd;
-    cmd.data = "start";
-    head_tracker_cmd_pub_->publish(cmd);
-  }
+  // Head start publish is owned by startSoccerMode() now (called below) so
+  // the start/stop toggle via the button works symmetrically. Previously
+  // head was started here but on START button re-toggle (stop→start)
+  // startSoccerMode() didn't republish head start, leaving the head stuck
+  // in "stopped" state while the legs walked.
   startSoccerMode();
 }
 
@@ -497,9 +496,22 @@ void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr ms
   if (msg->data == "start")
   {
     if (on_following_ball_ == true)
+    {
       stopSoccerMode();
+    }
     else
+    {
+      // Reject restart during the post-stop debounce window — walking
+      // is still finishing its current step and a button press here
+      // would otherwise immediately re-engage walking.
+      if (std::chrono::steady_clock::now() < stop_debounce_until_)
+      {
+        RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+                    "Ignoring START press: still stopping (debounce)");
+        return;
+      }
       startSoccerMode();
+    }
   }
 }
 
@@ -511,9 +523,19 @@ void SoccerDemo::demoCommandCallback(const std_msgs::msg::String::SharedPtr msg)
   if (msg->data == "start")
   {
     if (on_following_ball_ == true)
+    {
       stopSoccerMode();
+    }
     else
+    {
+      if (std::chrono::steady_clock::now() < stop_debounce_until_)
+      {
+        RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+                    "Ignoring start cmd: still stopping (debounce)");
+        return;
+      }
       startSoccerMode();
+    }
   }
   else if (msg->data == "stop")
   {
@@ -560,13 +582,19 @@ void SoccerDemo::startSoccerMode()
 
   is_start_soccer_running_ = true;
 
-  setModuleToDemo("action_module");
-
-  playMotion(WalkingReady);
-  while(isActionRunning() == true)
-    rclcpp::sleep_for(std::chrono::milliseconds(100));
-
+  // Switch the controller to walking_module FIRST. This is the slow path
+  // (service call, ~100-300 ms) so we get it underway before we tell the
+  // head tracker to scan — the head tracker is fire-and-forget and
+  // starts SCAN-ing within ~30 ms, so order matters for the user-visible
+  // "both started together" feel.
   setBodyModuleToDemo("walking_module");
+
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "start";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
 
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Start Soccer Demo");
   on_following_ball_ = true;
@@ -579,9 +607,40 @@ void SoccerDemo::startSoccerMode()
 void SoccerDemo::stopSoccerMode()
 {
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Stop Soccer Demo");
+
+  // Sequence the stop so it FEELS immediate (~50 ms perceived) instead of
+  // waiting for walking_module to finish its current step (~750 ms).
+  //
+  // 1. Force walking amplitudes to zero FIRST. walking_module reads these
+  //    next gait cycle and decelerates from amplitude → 0 instead of
+  //    completing a full forward step. Visible effect: feet stop swinging
+  //    almost immediately while body finishes settling.
+  // 2. Publish walking "stop" command. Tells walking_module to wind down.
+  // 3. Tell head_tracker to stop + park head at neutral (head_tracking_node
+  //    now sends a final pan=0 / tilt=forward command on "stop" so the
+  //    last in-flight SCAN command doesn't keep the head moving).
+  // 4. Reset internal flags.
+
+  ball_tracker_.stopTracking();
+  ball_follower_.stopFollowing();  // publishes walking "stop" + sets amplitudes via setWalkingParam(0,0,0) next tick
+
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "stop";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
+
   on_following_ball_ = false;
   on_tracking_ball_ = false;
-  stop_following_ = true;
+  stop_following_ = false;
+  wait_count_ = 0;
+
+  // Debounce window: 800 ms = period_time (~750 ms) + 50 ms safety.
+  // Long enough to let walking_module fully wind down its last step,
+  // short enough that a deliberate restart press feels responsive.
+  // Bigger window (1200 ms) caused the press to feel "ignored".
+  stop_debounce_until_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
 }
 
 void SoccerDemo::handleKick(int ball_position)

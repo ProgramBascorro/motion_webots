@@ -18,6 +18,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/int32.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include "op3_demo/soccer_demo.h"
@@ -51,6 +53,15 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr init_pose_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr play_sound_pub;
 rclcpp::Publisher<robotis_controller_msgs::msg::SyncWriteItem>::SharedPtr led_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr dxl_torque_pub;
+// INIT_BARU = action page 2. goInitPose() switches the controller to
+// action_module and triggers this page. The walking_module's IK ready
+// pose is FK-tuned (param.yaml init_x/y/z_offset) to match the geometry
+// of this page, so when soccer_demo later swaps the body to walking_module
+// the transition is smooth.
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr enable_ctrl_module_pub;
+rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_page_pub;
+
+const int INIT_BARU_PAGE_NUM = 2;
 
 std::string default_mp3_path = "";
 Demo_Status current_status = Ready;
@@ -75,6 +86,8 @@ int main(int argc, char **argv)
   play_sound_pub = node->create_publisher<std_msgs::msg::String>("/play_sound_file", 10);
   led_pub = node->create_publisher<robotis_controller_msgs::msg::SyncWriteItem>("/robotis/sync_write_item", 10);
   dxl_torque_pub = node->create_publisher<std_msgs::msg::String>("/robotis/dxl_torque", 10);
+  enable_ctrl_module_pub = node->create_publisher<std_msgs::msg::String>("/robotis/enable_ctrl_module", 10);
+  action_page_pub = node->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
 
   auto button_sub = node->create_subscription<std_msgs::msg::String>("/robotis/open_cr/button", 10, buttonHandlerCallback);
   auto mode_command_sub = node->create_subscription<std_msgs::msg::String>("/robotis/mode_command", 10, demoModeCommandCallback);
@@ -121,6 +134,52 @@ int main(int argc, char **argv)
   playSound(default_mp3_path + "Demonstration ready mode.mp3");
   // turn on R/G/B LED
   setLED(0x01 | 0x02 | 0x04);
+
+  // Boot-time INIT pose. Per user spec: robot lands at INIT_BARU (action
+  // page 2 — calibrated standing pose) when demo launches. Walking-ready
+  // is a separate transition that happens on START button press (handled
+  // by soccer_demo's startSoccerMode, which switches the body to
+  // walking_module). The init_x/y/z_offset in param.yaml are FK-tuned to
+  // match this INIT_BARU geometry, so the boot→walking handoff is smooth
+  // (no jerky pose snap when walking_module takes over).
+  //
+  // Wait sequence:
+  //  (a) ActionModule's page_num subscriber up — modules constructed
+  //  (b) /robotis/present_joint_states publishing — controller running
+  // Both needed before page 2 publish, otherwise the command is dropped.
+  {
+    bool modules_constructed = false;
+    for (int i = 0; i < 150; ++i) {
+      if (action_page_pub->get_subscription_count() > 0) {
+        modules_constructed = true;
+        break;
+      }
+      rclcpp::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    bool controller_running = false;
+    auto js_sub = node->create_subscription<sensor_msgs::msg::JointState>(
+        "/robotis/present_joint_states", 1,
+        [&controller_running](const sensor_msgs::msg::JointState::SharedPtr) {
+          controller_running = true;
+        });
+    for (int i = 0; i < 100 && !controller_running; ++i) {
+      rclcpp::spin_some(node);
+      rclcpp::sleep_for(std::chrono::milliseconds(100));
+    }
+    js_sub.reset();
+
+    if (modules_constructed && controller_running) {
+      RCLCPP_WARN(node->get_logger(),
+                  "controller running — playing INIT_BARU (action page 2)");
+      goInitPose();
+    } else {
+      RCLCPP_WARN(node->get_logger(),
+                  "boot-init skipped: modules_constructed=%d controller_running=%d. "
+                  "Press USER button or publish to /robotis/action/page_num manually.",
+                  modules_constructed, controller_running);
+    }
+  }
 
   rclcpp::Rate loop_rate(SPIN_RATE);
   RCLCPP_WARN(node->get_logger(), "Demo node loop start");
@@ -289,9 +348,30 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
 void goInitPose()
 {
-  std_msgs::msg::String init_msg;
-  init_msg.data = "ini_pose";
-  init_pose_pub->publish(init_msg);
+  // Switch to action_module and play page 2 (INIT_BARU — the user's
+  // calibrated standing pose, recorded in the action editor and stored
+  // in motion_4095_ros1_lama.bin). This is the boot pose AND the return
+  // pose for mode_long → Ready transitions. Walking-ready is a separate
+  // transition done by soccer_demo on START — its module switch to
+  // walking_module engages an IK whose neutral pose matches this
+  // INIT_BARU geometry (param.yaml init_x/y/z_offset are FK-tuned).
+  std_msgs::msg::String enable_msg;
+  enable_msg.data = "action_module";
+  enable_ctrl_module_pub->publish(enable_msg);
+
+  // Let robotis_controller swap joint ownership to action_module before
+  // the page command fires — the page_num subscriber needs the swap to
+  // settle in the rcl layer.
+  rclcpp::sleep_for(std::chrono::milliseconds(300));
+
+  for (int i = 0; i < 30; ++i) {
+    if (action_page_pub->get_subscription_count() > 0) break;
+    rclcpp::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  std_msgs::msg::Int32 page_msg;
+  page_msg.data = INIT_BARU_PAGE_NUM;
+  action_page_pub->publish(page_msg);
 }
 
 void playSound(const std::string &path)

@@ -19,6 +19,7 @@
 /* ROS2 API Header */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
@@ -332,12 +333,13 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // go to init pose
-  std_msgs::msg::String init_msg;
-  init_msg.data = "ini_pose";
-
-  g_init_pose_pub->publish(init_msg);
-  RCLCPP_INFO(node->get_logger(), "Go to init pose");
+  // Boot-time INIT pose is handled by demo_node (after waiting for the
+  // motion modules to load + the controller's first bulkread). It enables
+  // action_module and plays page 2 (INIT_BARU — the user's calibrated
+  // standing pose). Walking-ready is a separate transition triggered by
+  // the START button.
+  RCLCPP_INFO(node->get_logger(),
+              "Boot init pose: deferred to demo_node (will play action page 2)");
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
       "/robotis/health_check",

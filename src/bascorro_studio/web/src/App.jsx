@@ -32,6 +32,7 @@ import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
+import WalkingSimPreview from "./WalkingSimPreview.jsx";
 import {
   computeDefaultRosbridgeUrl,
   normalizeRosbridgeUrl,
@@ -46,6 +47,27 @@ const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
 const DEFAULT_OVERLAY_TOPIC =
   import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
 
+// INIT_BARU is action page 2 (user's calibrated standing pose).
+const INIT_BARU_PAGE_NUM = 2;
+// Time for op3_manager to switch the controller to action_module before
+// publishing the page command (the page_num subscriber needs the swap).
+const ACTION_MODULE_SETTLE_MS = 600;
+// Time for action page 2 (INIT_BARU) to finish playing on the hardware
+// (~1.2 s on this robot; buffer for trajectory tail).
+const INIT_BARU_PLAY_MS = 1800;
+// Time for op3_manager to load the walking_module control_module before we
+// publish "start"; otherwise the start command is dropped silently.
+const WALKING_ENABLE_SETTLE_MS = 1200;
+// robotis_controller merges sync_write_item per port per cycle — sending two
+// items in the same ~8 ms tick silently drops the second. Stagger them.
+const SYNC_ITEM_GAP_MS = 60;
+const TORQUE_SPEED_PRESETS = [
+  { key: "slow",   label: "Lambat", velocity: 15, accel: 6,  restoreMs: 5000 },
+  { key: "medium", label: "Sedang", velocity: 35, accel: 12, restoreMs: 3000 },
+  { key: "fast",   label: "Cepat",  velocity: 70, accel: 25, restoreMs: 2000 },
+];
+const DEFAULT_TORQUE_SPEED_KEY = "medium";
+
 const PARAM_TYPES = {
   bool: 1,
   int: 2,
@@ -59,19 +81,24 @@ const YOLO_PARAM_KEYS = [
   "robot_confidence_threshold",
 ];
 
+// Defaults match the FK-derived INIT_BARU geometry + the proven OP3 gait
+// shape (op3_walking_module/config/param.yaml). init_x/y/z_offset come
+// from forward kinematics on the calibrated INIT_BARU page 2 joint values
+// (see scratchpad init_baru_fk.py): foot at (0.003, ±0.032, -0.181) m
+// relative to hip → z_offset = leg_length(0.2195) + foot_z = 0.038.
 const WALKING_DEFAULT_PARAMS = {
-  init_x_offset: -0.015,
-  init_y_offset: 0.015,
-  init_z_offset: 0.075,
+  init_x_offset: 0.003,
+  init_y_offset: 0.032,
+  init_z_offset: 0.038,
   init_roll_offset: 0,
-  init_pitch_offset: 0.069813,
+  init_pitch_offset: 0.0698,
   init_yaw_offset: 0,
-  period_time: 0.78,
-  dsp_ratio: 0.3,
+  period_time: 0.75,
+  dsp_ratio: 0.35,
   step_fb_ratio: 0.25,
   x_move_amplitude: 0,
   y_move_amplitude: 0,
-  z_move_amplitude: 0.033,
+  z_move_amplitude: 0.04,
   angle_move_amplitude: 0,
   move_aim_on: false,
   balance_enable: true,
@@ -79,12 +106,12 @@ const WALKING_DEFAULT_PARAMS = {
   balance_knee_gain: 0.4,
   balance_ankle_roll_gain: 0.7,
   balance_ankle_pitch_gain: 0.9,
-  y_swap_amplitude: 0.002,
+  y_swap_amplitude: 0.020,
   z_swap_amplitude: 0.006,
-  arm_swing_gain: 0.2,
-  pelvis_offset: 0.008727,
-  hip_pitch_offset: 0.139626,
-  p_gain: 0,
+  arm_swing_gain: 1.5,
+  pelvis_offset: 0.0524,
+  hip_pitch_offset: 0.1396,
+  p_gain: 32,
   i_gain: 0,
   d_gain: 0,
 };
@@ -509,7 +536,7 @@ export default function App() {
   const [rosUrl, setRosUrl] = useState(initialRosUrl);
   const [rosUrlDraft, setRosUrlDraft] = useState(initialRosUrl);
   const [rosState, setRosState] = useState("disconnected");
-  
+
   // Data State
   const [metrics, setMetrics] = useState(null);
   const [events, setEvents] = useState([]);
@@ -528,6 +555,7 @@ export default function App() {
   const [walkingDirty, setWalkingDirty] = useState(false);
   const [walkingLastAppliedAt, setWalkingLastAppliedAt] = useState(null);
   const [walkingError, setWalkingError] = useState("");
+  const [torqueSpeedKey, setTorqueSpeedKey] = useState(DEFAULT_TORQUE_SPEED_KEY);
   const [walkingVersions, setWalkingVersions] = useState(() => readWalkingVersions());
   const [walkingVersionName, setWalkingVersionName] = useState("");
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
@@ -578,13 +606,14 @@ export default function App() {
   const joyPubRef = useRef(null);
   const teleopCommandPubRef = useRef(null);
   const teleopStatusSubRef = useRef(null);
-  const initPosePubRef = useRef(null);
+  const actionPagePubRef = useRef(null);
   const walkingCommandPubRef = useRef(null);
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
   const torquePubRef = useRef(null);
   const headModulePubRef = useRef(null);
   const walkingModulePubRef = useRef(null);
+  const walkingModuleEnabledRef = useRef(false);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
@@ -689,10 +718,10 @@ export default function App() {
       name: TELEOP_COMMAND_TOPIC,
       messageType: "std_msgs/String",
     });
-    initPosePubRef.current = new ROSLIB.Topic({
+    actionPagePubRef.current = new ROSLIB.Topic({
       ros,
-      name: "/robotis/base/ini_pose",
-      messageType: "std_msgs/String",
+      name: "/robotis/action/page_num",
+      messageType: "std_msgs/Int32",
     });
     walkingCommandPubRef.current = new ROSLIB.Topic({
       ros,
@@ -817,6 +846,26 @@ export default function App() {
     return () => overlaySubRef.current?.unsubscribe();
   }, [overlayTopic, rosState]);
 
+  // Auto-enable head_control_module on the real robot so head torque comes
+  // up as soon as the manager is reachable. Without this, INIT_BARU's head
+  // channels are ignored because head joints have no owning module yet.
+  // (Sim head torque-on is handled by the sim_domain_bridge — the Sim Start
+  //  sequence publishes head_control_module via the bridged topic.)
+  const headAutoEnabledRef = useRef({ real: false });
+  useEffect(() => {
+    if (rosState !== "connected") { headAutoEnabledRef.current.real = false; return; }
+    if (headAutoEnabledRef.current.real) return;
+    // Small delay so the manager has time to advertise the topic; if it
+    // isn't up yet the publish is a harmless no-op.
+    const t = window.setTimeout(() => {
+      if (headModulePubRef.current) {
+        headModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
+        headAutoEnabledRef.current.real = true;
+      }
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [rosState]);
+
   // --- Handlers ---
 
   const sendStatus = (msg, isError = false) => {
@@ -930,19 +979,108 @@ export default function App() {
     return true;
   };
 
-  const applyWalkingAndStart = () => {
-    if (applyWalkingParams()) {
-      sendWalkingCommand("start", "Walking params applied and started");
-    }
+  const writeSyncItem = (itemName, value) => {
+    if (!torquePubRef.current || !metrics?.joint_names?.length) return false;
+    const values = metrics.joint_names.map(() => value);
+    torquePubRef.current.publish(new ROSLIB.Message({
+      item_name: itemName,
+      joint_name: metrics.joint_names,
+      value: values,
+    }));
+    return true;
   };
 
-  const enableWalkingModule = () => {
+  const writeSyncItemsSequential = (items, onDone) => {
+    let idx = 0;
+    const next = () => {
+      if (idx >= items.length) { onDone?.(); return; }
+      const [name, val] = items[idx++];
+      writeSyncItem(name, val);
+      window.setTimeout(next, SYNC_ITEM_GAP_MS);
+    };
+    next();
+  };
+
+  const restoreFullSpeed = () => {
+    writeSyncItemsSequential([
+      ["profile_velocity", 0],
+      ["profile_acceleration", 0],
+    ]);
+  };
+
+  // Enable walking_module directly. Used to force a replay of action page 2
+  // (INIT_BARU) first to "stamp" the walking-ready pose, but that added a
+  // ~4 s animation + a jerky module handoff. walking_module's init_x/y/z/
+  // pitch_offset are now FK-tuned (in op3_walking_module/config/param.yaml)
+  // to match INIT_BARU page 2 geometry — its IK parks the legs at the
+  // calibrated pose statically the moment it's enabled, no replay needed.
+  const initThenEnableWalking = (onReady) => {
+    restoreFullSpeed();
+    walkingModuleEnabledRef.current = false;
     if (!walkingModulePubRef.current || rosState !== "connected") {
       sendStatus("Walking module command unavailable", true);
       return;
     }
     walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
-    sendStatus("Walking module enabled");
+    walkingModuleEnabledRef.current = true;
+    sendStatus("Walking module enabled (IK ready pose)…");
+    window.setTimeout(() => { onReady?.(); }, WALKING_ENABLE_SETTLE_MS);
+  };
+
+  const applyWalkingAndStart = () => {
+    if (!applyWalkingParams()) return;
+    initThenEnableWalking(() => {
+      sendWalkingCommand("start", "Walking dimulai dari INIT_BARU");
+    });
+  };
+
+  // ===== SIM-ONLY walking pipeline =====
+  // Publishes through the same rosbridge as the real-robot path, but on the
+  // /bascorro_studio/sim/* namespace. The sim_domain_bridge process running
+  // alongside manager_sim subscribes to those topics on the real domain and
+  // republishes them on the sim ROS_DOMAIN_ID under their /robotis/* names,
+  // so the commands physically cannot reach the real robot's stack.
+  const publishOnSim = (name, messageType, data) => {
+    const ros = rosRef.current;
+    if (!ros) return false;
+    const topic = new ROSLIB.Topic({ ros, name, messageType });
+    topic.publish(new ROSLIB.Message(data));
+    return true;
+  };
+
+  const applyWalkingAndStartOnSim = () => {
+    if (rosState !== "connected") {
+      sendStatus("ROS bridge belum siap", true);
+      return;
+    }
+    const params = normalizeWalkingParams(walkingParams);
+    if (!publishOnSim("/bascorro_studio/sim/walking/set_params", "op3_walking_module_msgs/WalkingParam", params)) return;
+    sendStatus("[SIM] Parameter terkirim — enable walking_module…");
+
+    // Skip the action_module → page 2 → walking_module relay (used to "stamp"
+    // INIT_BARU). walking_module's IK now produces the same calibrated ready
+    // pose statically from init_x/y/z_offset, so we just enable head + walking
+    // and start. Mirror change in op3_demo + real-robot path above.
+    publishOnSim("/bascorro_studio/sim/enable_ctrl_module", "std_msgs/String", { data: "head_control_module" });
+    publishOnSim("/bascorro_studio/sim/enable_ctrl_module", "std_msgs/String", { data: "walking_module" });
+    window.setTimeout(() => {
+      publishOnSim("/bascorro_studio/sim/walking/command", "std_msgs/String", { data: "start" });
+      sendStatus("[SIM] Walking dimulai di simulator (robot asli tidak ikut bergerak)");
+    }, WALKING_ENABLE_SETTLE_MS);
+  };
+
+  const stopWalkingOnSim = () => {
+    if (rosState !== "connected") {
+      sendStatus("ROS bridge belum siap", true);
+      return;
+    }
+    publishOnSim("/bascorro_studio/sim/walking/command", "std_msgs/String", { data: "stop" });
+    sendStatus("[SIM] Stop dikirim ke manager_sim");
+  };
+
+
+  const enableWalkingModule = () => {
+    initThenEnableWalking(() => sendStatus("Walking module enabled di INIT_BARU"));
   };
 
   const applyWalkingPreset = (preset) => {
@@ -1070,10 +1208,22 @@ export default function App() {
   };
 
   const handleInitPose = () => {
-    if (initPosePubRef.current) {
-      initPosePubRef.current.publish(new ROSLIB.Message({ data: "ini_pose" }));
-      sendStatus("Init Pose Sent");
+    // "Init Pose" button literally plays action page 2 (INIT_BARU — the
+    // user's calibrated standing pose recorded in the action editor).
+    // Walking-ready is a separate transition triggered by Apply & Start
+    // (it switches to walking_module, whose FK-tuned IK pose matches
+    // INIT_BARU geometry so the handoff is smooth).
+    if (!walkingModulePubRef.current || !actionPagePubRef.current || rosState !== "connected") {
+      sendStatus("Init Pose: action module unavailable", true);
+      return;
     }
+    walkingModuleEnabledRef.current = false;
+    walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
+    sendStatus(`Init Pose: switching to action_module → page ${INIT_BARU_PAGE_NUM}…`);
+    window.setTimeout(() => {
+      actionPagePubRef.current.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
+      sendStatus(`Init Pose: playing page ${INIT_BARU_PAGE_NUM} (INIT_BARU)`);
+    }, ACTION_MODULE_SETTLE_MS);
   };
 
   const handleSoftStop = () => {
@@ -1081,19 +1231,32 @@ export default function App() {
   };
 
   const handleTorque = (enable) => {
-    if (torquePubRef.current && metrics?.joint_names?.length) {
-      const values = metrics.joint_names.map(() => (enable ? 1 : 0));
-      torquePubRef.current.publish(new ROSLIB.Message({
-        item_name: "torque_enable",
-        joint_name: metrics.joint_names,
-        value: values
-      }));
-      sendStatus(enable ? "Torque ON" : "Torque OFF");
+    if (!torquePubRef.current || !metrics?.joint_names?.length) {
+      sendStatus("Torque command unavailable", true);
+      return;
     }
+    if (!enable) {
+      writeSyncItem("torque_enable", 0);
+      sendStatus("Torque OFF");
+      return;
+    }
+    const preset = TORQUE_SPEED_PRESETS.find(p => p.key === torqueSpeedKey) || TORQUE_SPEED_PRESETS[1];
+    writeSyncItemsSequential(
+      [
+        ["profile_velocity", preset.velocity],
+        ["profile_acceleration", preset.accel],
+        ["torque_enable", 1],
+      ],
+      () => {
+        sendStatus(`Torque ON (${preset.label})`);
+        window.setTimeout(restoreFullSpeed, preset.restoreMs);
+      }
+    );
   };
 
   const handleEnableHeadModule = () => {
     if (headModulePubRef.current) {
+      walkingModuleEnabledRef.current = false;
       headModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
       sendStatus("Head Module Enabled");
     }
@@ -1363,174 +1526,211 @@ export default function App() {
 
     return (
       <div className="h-full p-4 md:p-8 overflow-y-auto">
-        <div className="max-w-7xl mx-auto flex flex-col gap-6">
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-bold font-display text-gray-900">OP3 Walking Parameters</h2>
-                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}>
-                    {walkingDirty ? "Dirty" : "Synced"}
-                  </span>
-                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}>
-                    {walkingLoaded ? "Runtime Loaded" : "Defaults"}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-gray-500">
-                  Runtime units: seconds, meters, radians. Apply always publishes a complete WalkingParam message.
-                </p>
+        <div className="max-w-7xl mx-auto flex flex-col gap-5">
+          {/* HEADER CARD — status, workflow hint, action buttons grouped by intent */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            {/* Title strip */}
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold font-display text-gray-900">Walking</h2>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`} title={walkingDirty ? "Ada perubahan yang belum di-Apply" : "UI sudah sama dengan runtime"}>
+                  {walkingDirty ? "Belum di-Apply" : "Tersinkron"}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`} title={walkingLoaded ? "Nilai diambil dari robot via Load" : "Belum pernah Load — masih nilai default"}>
+                  {walkingLoaded ? "Runtime" : "Default"}
+                </span>
                 {walkingLastAppliedAt && (
-                  <p className="mt-1 text-xs text-gray-400 font-mono">
-                    Last applied: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
-                  </p>
-                )}
-                {walkingError && (
-                  <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
+                  <span className="text-[10px] font-mono text-gray-400" title="Waktu terakhir Apply dipanggil">
+                    Apply: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
+                  </span>
                 )}
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
-                  onClick={loadWalkingParams}
-                  disabled={!rosConnected}
-                >
-                  <RefreshCw size={14} /> Load
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
-                  onClick={applyWalkingParams}
-                  disabled={!rosConnected}
-                >
-                  <Send size={14} /> Apply
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-50`}
-                  onClick={applyWalkingAndRefreshTeleop}
-                  disabled={!rosConnected}
-                >
-                  <Gamepad2 size={14} /> Apply + Teleop Refresh
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`}
-                  onClick={applyWalkingAndStart}
-                  disabled={!rosConnected}
-                >
-                  <Play size={14} /> Apply & Start
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`}
-                  onClick={enableWalkingModule}
-                  disabled={!rosConnected}
-                >
-                  <Cpu size={14} /> Enable Walking Module
-                </button>
-              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Workflow: <b>Enable Module</b> → ubah parameter → <b>Apply</b> → <b>Start</b>. Satuan: detik, meter, radian.
+              </p>
+              {walkingError && (
+                <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
+              )}
             </div>
 
-            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2">
-              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={() => sendWalkingCommand("start")} disabled={!rosConnected}>
+            {/* Apply group — primary actions (kirim parameter ke robot) */}
+            <div className="px-5 py-3 bg-gray-50/60 border-b border-gray-100 flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-1">Parameter</span>
+              <button
+                className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`}
+                onClick={enableWalkingModule}
+                disabled={!rosConnected}
+                title="Aktifkan walking_module pada controller (wajib sebelum Apply/Start)"
+              >
+                <Cpu size={14} /> Enable Module
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={loadWalkingParams}
+                disabled={!rosConnected}
+                title="Tarik parameter walking yang sedang aktif dari robot"
+              >
+                <RefreshCw size={14} /> Load
+              </button>
+              <div className="h-5 w-px bg-gray-300 mx-1" />
+              <button
+                className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                onClick={applyWalkingParams}
+                disabled={!rosConnected}
+                title="Kirim parameter UI ke robot tanpa menjalankan walking"
+              >
+                <Send size={14} /> Apply
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`}
+                onClick={applyWalkingAndStart}
+                disabled={!rosConnected}
+                title="Apply parameter + langsung jalan (gabungan Apply + Start)"
+              >
+                <Play size={14} /> Apply &amp; Start
+              </button>
+              <details className="ml-auto">
+                <summary className="text-xs font-semibold text-gray-500 hover:text-undip-blue cursor-pointer select-none">Advanced</summary>
+                <div className="absolute right-5 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-1 min-w-[220px]">
+                  <button
+                    className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 justify-start`}
+                    onClick={applyWalkingAndRefreshTeleop}
+                    disabled={!rosConnected}
+                    title="Apply + minta teleop publish baseline parameter baru"
+                  >
+                    <Gamepad2 size={14} /> Apply + Teleop Refresh
+                  </button>
+                </div>
+              </details>
+            </div>
+
+            {/* Control group — runtime commands */}
+            <div className="px-5 py-3 flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-1">Kontrol</span>
+              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={() => sendWalkingCommand("start")} disabled={!rosConnected} title="Mulai jalan dengan parameter yang sudah di-Apply">
                 <Play size={14} /> Start
               </button>
-              <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
+              <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected} title="Berhenti jalan (parameter tetap aktif)">
                 <Square size={14} /> Stop
               </button>
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected}>
+              <div className="h-5 w-px bg-gray-300 mx-1" />
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected} title="Aktifkan balance IMU feedback">
                 Balance On
               </button>
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected}>
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected} title="Matikan balance IMU feedback">
                 Balance Off
               </button>
-              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>
-                <Save size={14} /> Save
+              <div className="h-5 w-px bg-gray-300 mx-1" />
+              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected} title="Simpan parameter runtime ke config robot (persistent)">
+                <Save size={14} /> Save to Robot
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-bold text-gray-900">Walking Versions</h3>
-                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase text-gray-500">
-                    Browser local
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Saved versions are browser-local only. Loading a version updates the UI and waits for Apply before publishing to ROS.
-                </p>
-              </div>
-              <div className="grid w-full grid-cols-1 gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto_auto_auto] xl:max-w-4xl">
-                <input
-                  type="text"
-                  value={walkingVersionName}
-                  onChange={(e) => setWalkingVersionName(e.target.value)}
-                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
-                  placeholder="Version name"
-                />
-                <select
-                  value={activeWalkingVersionId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    const version = walkingVersions.find((item) => item.id === id);
-                    setActiveWalkingVersionId(id);
-                    setWalkingVersionName(version?.name || "");
-                  }}
-                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
-                >
-                  <option value="">Select version</option>
-                  {walkingVersions.map((version) => (
-                    <option key={version.id} value={version.id}>
-                      {version.name} - {new Date(version.updatedAt).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
-                  onClick={saveWalkingVersion}
-                >
-                  <Save size={14} /> Save Version
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
-                  onClick={loadWalkingVersion}
-                  disabled={!selectedWalkingVersion}
-                >
-                  Load Version
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
-                  onClick={deleteWalkingVersion}
-                  disabled={!selectedWalkingVersion}
-                >
-                  <Trash2 size={14} /> Delete
-                </button>
-              </div>
+          {/* QUICK PRESETS — single inline row */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-gray-800">Preset Cepat</h3>
+              <span className="text-[10px] text-gray-400">Klik untuk isi UI dengan nilai preset (belum di-Apply)</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("tiny")}
+              >
+                <div className="text-xs font-bold text-gray-900">Tiny Test</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">Slow 0.85s, 3mm maju, balance on.</div>
+              </button>
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("stop")}
+              >
+                <div className="text-xs font-bold text-gray-900">Stop Motion</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">x/y/turn = 0, posture &amp; gain tetap.</div>
+              </button>
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("balance")}
+              >
+                <div className="text-xs font-bold text-gray-900">Balance Defaults</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">Hip 0.35, knee 0.4, ankle 0.7/0.9.</div>
+              </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("tiny")}
-            >
-              <div className="text-sm font-bold text-gray-900">Tiny Test</div>
-              <div className="mt-1 text-xs text-gray-500">Slow 0.85s period, 3mm forward, balance on.</div>
-            </button>
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("stop")}
-            >
-              <div className="text-sm font-bold text-gray-900">Stop Motion</div>
-              <div className="mt-1 text-xs text-gray-500">Zero x/y/turn amplitudes while keeping posture and gains.</div>
-            </button>
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("balance")}
-            >
-              <div className="text-sm font-bold text-gray-900">Balance Defaults</div>
-              <div className="mt-1 text-xs text-gray-500">Restore repo balance gains: hip 0.35, knee 0.4, ankle 0.7/0.9.</div>
-            </button>
+          {/* SAVED VERSIONS — single compact row */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-gray-800">Versi Tersimpan</h3>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                Tersimpan di browser
+              </span>
+              <span className="text-[10px] text-gray-400">Load Version mengisi UI — tetap perlu Apply untuk kirim ke robot</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
+              <input
+                type="text"
+                value={walkingVersionName}
+                onChange={(e) => setWalkingVersionName(e.target.value)}
+                className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none"
+                placeholder="Nama versi…"
+              />
+              <select
+                value={activeWalkingVersionId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const version = walkingVersions.find((item) => item.id === id);
+                  setActiveWalkingVersionId(id);
+                  setWalkingVersionName(version?.name || "");
+                }}
+                className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none"
+              >
+                <option value="">— Pilih versi —</option>
+                {walkingVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.name} · {new Date(version.updatedAt).toLocaleString()}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                onClick={saveWalkingVersion}
+                title="Simpan nilai UI saat ini sebagai versi baru di browser"
+              >
+                <Save size={14} /> Save
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={loadWalkingVersion}
+                disabled={!selectedWalkingVersion}
+                title="Isi UI dengan parameter dari versi terpilih"
+              >
+                Load
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
+                onClick={deleteWalkingVersion}
+                disabled={!selectedWalkingVersion}
+                title="Hapus versi terpilih dari browser"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          </div>
+
+          {/* WALKING SIMULATION PREVIEW — renders the standalone-sim joint
+              stream (relayed onto /bascorro_studio/sim_preview/joint_states
+              by sim_domain_bridge) in a 3D viewer, with sim Start/Stop
+              wired against the cross-domain bridge so the real robot stays
+              still. */}
+          <div className="h-[420px]">
+            <WalkingSimPreview
+              rosRef={rosRef}
+              rosState={rosState}
+              isActive={activeTab === "walking"}
+              onStartSimWalk={applyWalkingAndStartOnSim}
+              onStopSimWalk={stopWalkingOnSim}
+            />
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -1800,7 +2000,16 @@ export default function App() {
             <StopCircle size={18} /> Soft Stop
           </button>
           <div className="flex-1 hidden sm:block"></div>
-          <div className="flex gap-2 w-full sm:w-auto">
+          <div className="flex gap-2 w-full sm:w-auto items-center flex-wrap">
+            <div className="flex bg-blue-50 border border-blue-200 rounded-lg p-1 text-xs font-medium" title="Kecepatan saat Torque ON (anti nyentak)">
+              {TORQUE_SPEED_PRESETS.map(p => (
+                <button
+                  key={p.key}
+                  className={`px-3 py-1 rounded-md transition-all font-semibold ${torqueSpeedKey === p.key ? "bg-undip-blue text-white shadow-sm" : "text-undip-blue hover:bg-blue-100"}`}
+                  onClick={() => setTorqueSpeedKey(p.key)}
+                >{p.label}</button>
+              ))}
+            </div>
             <button className="flex-1 sm:flex-none px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50 text-sm" onClick={() => handleTorque(false)}>Torque OFF</button>
             <button className="flex-1 sm:flex-none px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all text-sm" onClick={() => handleTorque(true)}>Torque ON</button>
           </div>
