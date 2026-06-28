@@ -28,6 +28,13 @@
   <depend>ament_index_cpp</depend>
   <exec_depend>usb_cam</exec_depend>
   <exec_depend>uvc_camera</exec_depend>
+  <!-- YOLO ball detector (Python node: scripts/yolo_ball_detector.py).
+       NOTE: the "ultralytics" / torch wheels have no rosdep key and must be
+       installed manually, e.g.  pip3 install ultralytics -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <export>
     <build_type>ament_cmake</build_type>
   </export>

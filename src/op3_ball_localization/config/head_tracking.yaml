@@ -25,10 +25,12 @@ head_tracking_node:
     # When no ball is seen, sweep the head through forward + downward positions.
     # Up-facing angles are intentionally excluded — the ball sits on the floor.
     scan_enabled: true
-    scan_period_sec: 2.5           # seconds per position (move + focus dwell)
+    scan_period_sec: 1.8           # seconds per position (move + focus dwell) — a bit faster
     scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
-    scan_tilt_forward_rad: -0.10   # forward/horizon tilt (~-6°, slight down)
-    scan_tilt_down_rad: -0.35      # down tilt (~-20°, looking toward floor)
+    # NOTE on this robot the head_tilt sign for the absolute scan command is
+    # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
+    scan_tilt_forward_rad: 0.25    # forward tilt (~+14°, looking a little down)
+    scan_tilt_down_rad: 0.55       # down tilt (~+31°, looking toward floor near the feet)
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2

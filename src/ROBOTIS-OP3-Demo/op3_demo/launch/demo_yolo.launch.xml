@@ -17,14 +17,8 @@
     <param name="auto_start" value="false"/>
   </node>
 
-  <!-- face tracking -->
-  <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml"/>
-
   <!-- camera setting tool -->
   <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml"/>
-
-  <!-- web setting -->
-  <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml"/>
 
   <!-- robotis op3 demo: keep FSM + walking + kicking, disable internal head control -->
   <node pkg="op3_demo" exec="op_demo_node" output="screen">

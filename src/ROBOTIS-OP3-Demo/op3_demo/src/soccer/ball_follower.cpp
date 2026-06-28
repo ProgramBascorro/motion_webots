@@ -108,6 +108,10 @@ void BallFollower::stopFollowing()
 //  accum_ball_position_ = 0;
   RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Stop Ball following");
 
+  // Zero the walking amplitudes first so walking_module's next cycle reads
+  // x/y/angle = 0 and decelerates to an in-place stop instead of completing
+  // the current step, then publish the stop command.
+  setWalkingParam(0.0, 0.0, 0.0);
   setWalkingCommand("stop");
 }
 

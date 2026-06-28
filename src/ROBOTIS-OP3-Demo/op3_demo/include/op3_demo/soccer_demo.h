@@ -20,6 +20,7 @@
 #define SOCCER_DEMO_H
 
 #include <rclcpp/rclcpp.hpp>
+#include <chrono>
 #include <std_msgs/msg/string.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <boost/thread.hpp>
@@ -139,6 +140,9 @@ class SoccerDemo : public OPDemo
   int tracking_status_;
   int stand_state_;
   double present_pitch_;
+
+  // Reject START toggles until this time after a STOP (debounce window).
+  std::chrono::steady_clock::time_point stop_debounce_until_;
 
   // std::unique_ptr<std::thread> spin_thread_;
   // std::thread process_thread_;

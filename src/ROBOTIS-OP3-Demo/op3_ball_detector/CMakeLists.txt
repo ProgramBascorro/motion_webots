@@ -66,7 +66,14 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
 )
 
-install(DIRECTORY config launch rviz 
+# YOLO ball detector (Python). Installed alongside the C++ executable so it can
+# be launched with `ros2 run op3_ball_detector yolo_ball_detector.py`.
+install(PROGRAMS
+  scripts/yolo_ball_detector.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY config launch rviz model
   DESTINATION share/${PROJECT_NAME}
 )
 

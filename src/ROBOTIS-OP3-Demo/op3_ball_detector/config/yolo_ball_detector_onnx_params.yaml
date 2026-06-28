@@ -1,0 +1,50 @@
+# Parameters for the YOLO ball detector running an ONNX model.
+# Same node (yolo_ball_detector.py) as the .pt setup — only the weights differ.
+# Applied via the "/**" wildcard so they reach the node regardless of the
+# namespace/name it is launched under.
+/**:
+  ros__parameters:
+    # ONNX weights, relative to the package share dir (install/.../share/
+    # op3_ball_detector/) or an absolute path. ultralytics runs these through
+    # onnxruntime (CPUExecutionProvider). v8n.onnx is the light "nano" model,
+    # exported at imgsz 320 for low CPU load (~26 ms/frame on an i5-1340P vs
+    # ~120 ms for v8s @ 640). Rebuild after editing so it lands in install/.
+    model_path: "model/v8s.onnx"
+
+    # .onnx carries no task metadata; set it explicitly so ultralytics does not
+    # warn and guess. This is a detection model.
+    model_task: "detect"
+
+    # Subscribe to a CompressedImage (true) or a raw Image (false) on image_in.
+    use_compressed: true
+
+    # Detection thresholds / inference settings.
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+
+    # MUST match the imgsz the ONNX was exported with. v8n.onnx here is exported
+    # at 320. A mismatch makes onnxruntime reject the input tensor shape. To
+    # change it, re-export: yolo export model=model/v8n.pt format=onnx imgsz=NNN
+    imgsz: 320
+
+    # ONNX here is the CPU build → keep device "cpu" and half false. FP16 / GPU
+    # would require an onnxruntime-gpu or onnxruntime-openvino build.
+    device: "cpu"
+    half: false
+    max_detections: 10
+
+    # Model class names to treat as "the ball". The model exposes "Bola-baru".
+    # If none of these match the model, every class is treated as a ball.
+    target_classes: ["Bola-baru"]
+
+    # Inference loop rate (Hz). Always uses the freshest camera frame. Capped at
+    # 15 Hz: the ball_follower does not need more, and it keeps the CPU free for
+    # walking instead of running inference flat-out.
+    detection_rate: 15.0
+
+    # Publish an annotated debug image on image_out.
+    publish_image: true
+    detection_frame_id: "detector"
+
+    # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
+    enable_at_start: true

@@ -18,6 +18,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include "op3_demo/soccer_demo.h"
@@ -47,10 +48,17 @@ void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
 const int SPIN_RATE = 30;
 const bool DEBUG_PRINT = false;
 
+// INIT_BARU = the user's calibrated standing pose, stored on this action page.
+const int INIT_BARU_PAGE_NUM = 2;
+// Time to let action_module take over before sending the page play command.
+const int ACTION_MODULE_SETTLE_MS = 500;
+
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr init_pose_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr play_sound_pub;
 rclcpp::Publisher<robotis_controller_msgs::msg::SyncWriteItem>::SharedPtr led_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr dxl_torque_pub;
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr enable_ctrl_pub;
+rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_page_pub;
 
 std::string default_mp3_path = "";
 Demo_Status current_status = Ready;
@@ -75,6 +83,8 @@ int main(int argc, char **argv)
   play_sound_pub = node->create_publisher<std_msgs::msg::String>("/play_sound_file", 10);
   led_pub = node->create_publisher<robotis_controller_msgs::msg::SyncWriteItem>("/robotis/sync_write_item", 10);
   dxl_torque_pub = node->create_publisher<std_msgs::msg::String>("/robotis/dxl_torque", 10);
+  enable_ctrl_pub = node->create_publisher<std_msgs::msg::String>("/robotis/enable_ctrl_module", 10);
+  action_page_pub = node->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
 
   auto button_sub = node->create_subscription<std_msgs::msg::String>("/robotis/open_cr/button", 10, buttonHandlerCallback);
   auto mode_command_sub = node->create_subscription<std_msgs::msg::String>("/robotis/mode_command", 10, demoModeCommandCallback);
@@ -121,6 +131,11 @@ int main(int argc, char **argv)
   playSound(default_mp3_path + "Demonstration ready mode.mp3");
   // turn on R/G/B LED
   setLED(0x01 | 0x02 | 0x04);
+
+  // NOTE: boot-time INIT_BARU (action page 2) is already played by op3_manager
+  // itself (op3_manager.cpp goToInitActionPage() at the end of main()), so
+  // demo_node does NOT repeat it here — doing so would double-fire the page.
+  // goInitPose() below (action page 2) is still used when returning to Ready.
 
   rclcpp::Rate loop_rate(SPIN_RATE);
   RCLCPP_WARN(node->get_logger(), "Demo node loop start");
@@ -289,9 +304,17 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
 void goInitPose()
 {
-  std_msgs::msg::String init_msg;
-  init_msg.data = "ini_pose";
-  init_pose_pub->publish(init_msg);
+  // INIT_BARU = action page 2 (user's calibrated standing pose). Switch to
+  // action_module, let it settle, then play the page.
+  std_msgs::msg::String module_msg;
+  module_msg.data = "action_module";
+  enable_ctrl_pub->publish(module_msg);
+
+  rclcpp::sleep_for(std::chrono::milliseconds(ACTION_MODULE_SETTLE_MS));
+
+  std_msgs::msg::Int32 page_msg;
+  page_msg.data = INIT_BARU_PAGE_NUM;
+  action_page_pub->publish(page_msg);
 }
 
 void playSound(const std::string &path)

@@ -156,7 +156,9 @@ void SoccerDemo::process()
     ball_follower_.startFollowing();
     start_following_ = false;
 
-    wait_count_ = 1 * SPIN_RATE;
+    // Short settle after Start before the robot begins tracking/following, so it
+    // reacts quickly to the Start button (was 1 * SPIN_RATE = ~1s, now ~0.3s).
+    wait_count_ = SPIN_RATE * 3 / 10;
   }
 
   // check to stop
@@ -499,7 +501,15 @@ void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr ms
     if (on_following_ball_ == true)
       stopSoccerMode();
     else
+    {
+      // Ignore a restart press while still inside the stop debounce window.
+      if (std::chrono::steady_clock::now() < stop_debounce_until_)
+      {
+        RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Ignoring START press: still stopping (debounce)");
+        return;
+      }
       startSoccerMode();
+    }
   }
 }
 
@@ -513,7 +523,15 @@ void SoccerDemo::demoCommandCallback(const std_msgs::msg::String::SharedPtr msg)
     if (on_following_ball_ == true)
       stopSoccerMode();
     else
+    {
+      // Ignore a restart command while still inside the stop debounce window.
+      if (std::chrono::steady_clock::now() < stop_debounce_until_)
+      {
+        RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Ignoring START command: still stopping (debounce)");
+        return;
+      }
       startSoccerMode();
+    }
   }
   else if (msg->data == "stop")
   {
@@ -560,12 +578,9 @@ void SoccerDemo::startSoccerMode()
 
   is_start_soccer_running_ = true;
 
-  setModuleToDemo("action_module");
-
-  playMotion(WalkingReady);
-  while(isActionRunning() == true)
-    rclcpp::sleep_for(std::chrono::milliseconds(100));
-
+  // Robot is already at INIT_BARU (boot pose). walking_module's IK-derived
+  // ready pose (from the FK-tuned init offsets) matches INIT_BARU, so enable
+  // walking_module DIRECTLY — no action page 2 / WalkingReady replay.
   setBodyModuleToDemo("walking_module");
 
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Start Soccer Demo");
@@ -579,9 +594,30 @@ void SoccerDemo::startSoccerMode()
 void SoccerDemo::stopSoccerMode()
 {
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Stop Soccer Demo");
+
   on_following_ball_ = false;
   on_tracking_ball_ = false;
+
+  // Stop walking right away: stopFollowing() zeroes the walking amplitudes
+  // before publishing "stop", so the gait decelerates this cycle instead of
+  // finishing the current step. Call stop directly (not only via the
+  // stop_following_ flag) so it lands the same tick the button was pressed.
+  ball_follower_.stopFollowing();
+  ball_tracker_.stopTracking();
+
+  // Snap the head out of SCAN to a neutral pose.
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "stop";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
+
   stop_following_ = true;
+
+  // Debounce: reject a START toggle for a short window (period_time 750ms plus
+  // a little safety) so a fast double-press doesn't immediately restart walking.
+  stop_debounce_until_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
 }
 
 void SoccerDemo::handleKick(int ball_position)

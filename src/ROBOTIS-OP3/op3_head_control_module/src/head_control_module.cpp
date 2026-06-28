@@ -120,10 +120,11 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
     return;
   }
 
-  while(has_goal_position_ == false)
+  if (has_goal_position_ == false)
   {
-    std::cout << "wait for receiving current position" << std::endl;
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 2000,
+                         "head_control_module: goal_position not initialized yet, dropping command");
+    return;
   }
 
   // moving time

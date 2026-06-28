@@ -181,6 +181,15 @@ class HeadTrackingNode(Node):
         elif cmd == "stop" and self._active:
             self._active = False
             self._reset_pid()
+            self._scan_active = False
+            self._last_scan_cmd_time = 0.0
+            # Snap the head to a neutral forward pose so it doesn't keep
+            # executing the last SCAN target after the stop.
+            neutral = JointState()
+            neutral.name = [self._head_pan_joint, self._head_tilt_joint]
+            neutral.position = [0.0, self._scan_tilt_forward_rad]
+            neutral.header.stamp = self.get_clock().now().to_msg()
+            self._head_abs_pub.publish(neutral)
             self.get_logger().info("[CMD] deactivated by stop command")
 
     def _ball_center_callback(self, msg: PointStamped) -> None:

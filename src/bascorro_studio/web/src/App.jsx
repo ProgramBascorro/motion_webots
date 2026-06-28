@@ -22,6 +22,8 @@ import {
   Gamepad2,
   Info,
   Play,
+  Power,
+  Download,
   RefreshCw,
   Save,
   Send,
@@ -29,6 +31,7 @@ import {
   Trash2
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
+import WalkingSim from "./WalkingSim.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
@@ -339,6 +342,20 @@ const TORQUE_SPEED_PRESETS = [
 // Space successive items well past one cycle so each lands in its own batch.
 const SYNC_ITEM_GAP_MS = 60;
 
+// Parse a walking field value robustly. Accepts both "0.014" and the
+// Indonesian decimal form "0,014". Blank/partial input ("", " ", ".", "-")
+// falls back to `fallback` instead of 0 -- Number("") === 0 was silently
+// turning cleared or comma-typed fields into 0, which is why edited walking
+// values reset to 0 after Save/Load/Apply.
+function parseWalkingNumber(raw, fallback) {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : fallback;
+  if (raw === null || raw === undefined) return fallback;
+  const text = String(raw).trim().replace(",", ".");
+  if (text === "" || text === "." || text === "-" || text === "-.") return fallback;
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function normalizeWalkingParams(params = {}) {
   const next = { ...WALKING_DEFAULT_PARAMS, ...params };
   Object.keys(WALKING_DEFAULT_PARAMS).forEach((key) => {
@@ -346,10 +363,8 @@ function normalizeWalkingParams(params = {}) {
       next[key] = Boolean(next[key]);
       return;
     }
-    const numeric = Number(next[key]);
-    next[key] = Number.isFinite(numeric)
-      ? (WALKING_INT_FIELDS.has(key) ? Math.round(numeric) : numeric)
-      : WALKING_DEFAULT_PARAMS[key];
+    const numeric = parseWalkingNumber(next[key], WALKING_DEFAULT_PARAMS[key]);
+    next[key] = WALKING_INT_FIELDS.has(key) ? Math.round(numeric) : numeric;
   });
   return next;
 }
@@ -551,6 +566,7 @@ export default function App() {
   const [walkingDirty, setWalkingDirty] = useState(false);
   const [walkingLastAppliedAt, setWalkingLastAppliedAt] = useState(null);
   const [walkingError, setWalkingError] = useState("");
+  const [showWalkingAdvanced, setShowWalkingAdvanced] = useState(false);
   const [walkingVersions, setWalkingVersions] = useState(() => readWalkingVersions());
   const [walkingVersionName, setWalkingVersionName] = useState("");
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
@@ -1450,7 +1466,7 @@ export default function App() {
     const isFieldDirty = (field) => {
       if (!walkingCurrentParams) return walkingLoaded;
       if (field.type === "bool") return Boolean(walkingParams[field.key]) !== Boolean(walkingCurrentParams[field.key]);
-      return Number(walkingParams[field.key]) !== Number(walkingCurrentParams[field.key]);
+      return parseWalkingNumber(walkingParams[field.key], NaN) !== parseWalkingNumber(walkingCurrentParams[field.key], NaN);
     };
     const selectedWalkingVersion = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     const renderWalkingHelp = (field) => (
@@ -1477,84 +1493,69 @@ export default function App() {
       <div className="h-full p-4 md:p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto flex flex-col gap-6">
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-bold font-display text-gray-900">OP3 Walking Parameters</h2>
-                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}>
-                    {walkingDirty ? "Dirty" : "Synced"}
-                  </span>
-                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}>
-                    {walkingLoaded ? "Runtime Loaded" : "Defaults"}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-gray-500">
-                  Runtime units: seconds, meters, radians. Apply always publishes a complete WalkingParam message.
-                </p>
-                {walkingLastAppliedAt && (
-                  <p className="mt-1 text-xs text-gray-400 font-mono">
-                    Last applied: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
-                  </p>
-                )}
-                {walkingError && (
-                  <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
-                )}
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-bold font-display text-gray-900">Walking</h2>
+              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}>
+                {walkingDirty ? "Dirty" : "Synced"}
+              </span>
+              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}>
+                {walkingLoaded ? "Runtime Loaded" : "Defaults"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-gray-500">
+              Alur: <b>Enable Module</b> → atur parameter → <b>Apply</b> → <b>Start</b>. Satuan runtime: detik, meter, radian.
+            </p>
+            {walkingLastAppliedAt && (
+              <p className="mt-1 text-xs text-gray-400 font-mono">
+                Terakhir Apply: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
+              </p>
+            )}
+            {walkingError && (
+              <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
+            )}
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
-                  onClick={loadWalkingParams}
-                  disabled={!rosConnected}
-                >
-                  <RefreshCw size={14} /> Load
+            {/* PARAMETER row */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="w-20 shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400">Parameter</span>
+              <button title="Aktifkan walking_module dulu, supaya parameter & perintah jalan diterima robot." className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`} onClick={enableWalkingModule} disabled={!rosConnected}>
+                <Power size={14} /> Enable Module
+              </button>
+              <button title="Baca parameter yang sedang aktif di robot ke tabel." className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`} onClick={loadWalkingParams} disabled={!rosConnected}>
+                <Download size={14} /> Load
+              </button>
+              <button title="Kirim semua parameter ke runtime robot (tanpa langsung jalan)." className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`} onClick={() => applyWalkingParams()} disabled={!rosConnected}>
+                <Send size={14} /> Apply
+              </button>
+              <button title="Kirim parameter lalu langsung mulai berjalan." className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`} onClick={applyWalkingAndStart} disabled={!rosConnected}>
+                <Play size={14} /> Apply &amp; Start
+              </button>
+              {showWalkingAdvanced && (
+                <button title="Kirim parameter lalu segarkan baseline teleop joystick agar ikut gaya jalan yang sama." className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={applyWalkingAndRefreshTeleop} disabled={!rosConnected}>
+                  <RefreshCw size={14} /> + Teleop
                 </button>
-                <button
-                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
-                  onClick={applyWalkingParams}
-                  disabled={!rosConnected}
-                >
-                  <Send size={14} /> Apply
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-50`}
-                  onClick={applyWalkingAndRefreshTeleop}
-                  disabled={!rosConnected}
-                >
-                  <Gamepad2 size={14} /> Apply + Teleop Refresh
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`}
-                  onClick={applyWalkingAndStart}
-                  disabled={!rosConnected}
-                >
-                  <Play size={14} /> Apply & Start
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`}
-                  onClick={enableWalkingModule}
-                  disabled={!rosConnected}
-                >
-                  <Cpu size={14} /> Enable Walking Module
-                </button>
-              </div>
+              )}
+              <button onClick={() => setShowWalkingAdvanced((v) => !v)} className="ml-auto shrink-0 text-xs font-bold text-undip-blue hover:underline">
+                {showWalkingAdvanced ? "− Advanced" : "+ Advanced"}
+              </button>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2">
-              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalking} disabled={!rosConnected}>
+            {/* CONTROL row */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="w-20 shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400">Control</span>
+              <button title="Mulai gait berjalan (pastikan modul aktif & parameter sudah dikirim)." className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalking} disabled={!rosConnected}>
                 <Play size={14} /> Start
               </button>
-              <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
+              <button title="Hentikan jalan dengan halus." className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
                 <Square size={14} /> Stop
               </button>
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected}>
+              <button title="Aktifkan balance control (koreksi pakai IMU saat berjalan)." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected}>
                 Balance On
               </button>
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected}>
+              <button title="Matikan balance control." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected}>
                 Balance Off
               </button>
-              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>
-                <Save size={14} /> Save
+              <button title="Simpan parameter ke file di robot supaya tetap dipakai setelah restart." className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>
+                <Save size={14} /> Save to Robot
               </button>
             </div>
           </div>
@@ -1645,6 +1646,8 @@ export default function App() {
             </button>
           </div>
 
+          <WalkingSim rosUrl={rosUrl} active={activeTab === "walking"} />
+
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {WALKING_PARAM_GROUPS.map((group) => (
               <div key={group.title} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
@@ -1685,9 +1688,9 @@ export default function App() {
                           </button>
                         ) : (
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
                             value={walkingParams[field.key]}
-                            step={field.step || 0.001}
                             onChange={(e) => updateWalkingParam(field.key, e.target.value)}
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
                           />

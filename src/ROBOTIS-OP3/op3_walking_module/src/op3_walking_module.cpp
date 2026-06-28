@@ -557,9 +557,12 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       if (DEBUG)
         std::cout << "Check Err : " << err_max << std::endl;
 
-      // make trajecotry for init pose (slower transition: 15 deg/s, min 2.5 s)
-      double mov_time = err_max / 15.0;
-      iniPoseTraGene(mov_time < 2.5 ? 2.5 : mov_time);
+      // make trajectory for init pose (faster transition: 30 deg/s, min 1.5 s).
+      // This is the lag between enabling/acquiring walking_module and the first
+      // step; the robot is already near the ready pose (capture/bias) so the
+      // motion is small and a quicker ramp is still smooth.
+      double mov_time = err_max / 30.0;
+      iniPoseTraGene(mov_time < 1.5 ? 1.5 : mov_time);
 
       // set target to goal
       target_position_ = goal_position_;
