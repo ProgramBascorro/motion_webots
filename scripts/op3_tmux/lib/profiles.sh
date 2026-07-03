@@ -11,7 +11,7 @@ apply_profile() {
       BALL_HEAD_TRACKING_CMD="ros2 launch op3_ball_localization yolo_scan_only.launch.py"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
-      DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml"
       START_DELAY_SEC="4.0"
       ROS_DOMAIN_ID_DEFAULT="0"
       ;;
@@ -25,7 +25,7 @@ apply_profile() {
       BALL_HEAD_TRACKING_CMD="ros2 launch op3_ball_localization yolo_scan_only.launch.py"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
-      DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml"
       START_DELAY_SEC="1.0"
       ROS_DOMAIN_ID_DEFAULT="1"
       ;;
@@ -34,8 +34,8 @@ apply_profile() {
       ;;
   esac
 
-  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095.bin}"
-  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_custom.bin}"
+  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ros1_lama.bin}"
+  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ros1_lama.bin}"
 
   # Apply env overrides after profile defaults
   WEBOTS_CMD="${OP3_WEBOTS_CMD:-$WEBOTS_CMD}"

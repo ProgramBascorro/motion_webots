@@ -1,0 +1,52 @@
+# Parameters for the YOLO ball detector running an OpenVINO model.
+# Same node (yolo_ball_detector.py) as the .pt/.onnx setups — only the weights
+# differ. OpenVINO is the Intel-CPU runtime and is typically faster than
+# onnxruntime on Intel boxes (e.g. the i5-1340P here).
+# Applied via the "/**" wildcard so they reach the node regardless of the
+# namespace/name it is launched under.
+/**:
+  ros__parameters:
+    # OpenVINO model is a DIRECTORY (.xml + .bin + metadata.yaml), not a single
+    # file. Relative to the package share dir or an absolute path. Re-export
+    # with: yolo export model=model/v8n.pt format=openvino imgsz=320
+    model_path: "model/v8n_openvino_model"
+
+    # OpenVINO carries no task in the way ultralytics auto-detects reliably;
+    # set it explicitly. This is a detection model.
+    model_task: "detect"
+
+    # Subscribe to a CompressedImage (true) or a raw Image (false) on image_in.
+    use_compressed: true
+
+    # Detection thresholds / inference settings.
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+
+    # MUST match the imgsz the model was exported with (320 here). Re-export to
+    # change it (see model_path comment).
+    imgsz: 320
+
+    # OpenVINO runs on the Intel CPU; keep device "cpu" and half false. (FP16 is
+    # handled inside the OpenVINO IR, not via this flag.)
+    device: "cpu"
+    half: false
+    max_detections: 10
+
+    # Model class names to treat as "the ball". The model exposes "Bola-baru".
+    # If none of these match the model, every class is treated as a ball.
+    target_classes: ["Bola-baru"]
+
+    # Inference loop rate (Hz). Always uses the freshest camera frame. Bumped
+    # from 15 → 25 Hz for a sharper head-tracker response: at 15 Hz the head
+    # was chasing a ball position that was already ~67 ms stale. 25 Hz cuts
+    # that to ~40 ms and OpenVINO on the i5-1340P still fits inside the
+    # cpu_affinity=0-3 budget, leaving the walking loop untouched. Lower it
+    # back to 15 (or drop cpu_affinity) if you see CPU thermal throttling.
+    detection_rate: 25.0
+
+    # Publish an annotated debug image on image_out.
+    publish_image: true
+    detection_frame_id: "detector"
+
+    # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
+    enable_at_start: true

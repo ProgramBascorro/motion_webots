@@ -1,28 +1,56 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="with_manager" default="true"/>
+  <!-- Auxiliaries below are OFF by default: the soccer demo does not need
+       face tracking, the browser tuning UI, or the on-the-fly camera tuner
+       to run — enabling any of them adds seconds of import/discovery time
+       to boot. Opt back in with e.g. with_face:=true. -->
+  <arg name="with_face" default="false"/>
+  <arg name="with_web_setting" default="false"/>
+  <arg name="with_camera_setting" default="false"/>
+
   <!-- robotis op3 manager -->
   <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
 
-  <!-- Camera and Ball detector -->
-  <include file="$(find-pkg-share op3_ball_detector)/launch/ball_detector_from_usb_cam.launch.py"/> 
-   
-  <!-- face tracking -->
-  <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml" />
+  <!-- Camera + YOLO ball detector (drop-in for the Hough-circle node:
+       publishes the same /ball_detector_node/circle_set that BallTracker
+       subscribes to). -->
+  <include file="$(find-pkg-share op3_ball_detector)/launch/yolo_ball_detector_openvino.launch.py"/>
 
-  <!-- camera setting tool -->
-  <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml" />
-  
-  <!-- sound player -->
-  <!-- <node pkg="ros_madplay_player" exec="ros_madplay_player" output="screen"/> -->
-    
-  <!-- web setting -->
-  <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml" />
-  
-  <!-- robotis op3 demo -->
+  <!-- External head tracker. Owns head_pan/head_tilt while the soccer
+       demo owns walking + kicking. Uses ABSOLUTE set_joint_states for
+       scan poses (so a new target instantly replaces the running
+       trajectory, unlike head_control_module's chained scan pattern)
+       and tuned forward+down scan positions (no ceiling-facing poses).
+       auto_start=false so it stays paused until SoccerDemo publishes
+       "start" on /ball_tracker/command via the START button. -->
+  <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen">
+    <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
+    <param name="auto_start" value="false"/>
+  </node>
+
+  <!-- face tracking — opt-in with with_face:=true -->
+  <group if="$(var with_face)">
+    <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml"/>
+  </group>
+
+  <!-- camera tuning tool — opt-in with with_camera_setting:=true -->
+  <group if="$(var with_camera_setting)">
+    <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml"/>
+  </group>
+
+  <!-- web setting UI — opt-in with with_web_setting:=true -->
+  <group if="$(var with_web_setting)">
+    <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml"/>
+  </group>
+
+  <!-- robotis op3 demo. use_head_control:=false hands the head off to the
+       external head_tracking_node above; SoccerDemo still owns the FSM,
+       walking module switching, ball following, and kicking. -->
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
-    <param name="grass_demo" value="False" />
-    <param name="p_gain" value="0.45" />
-    <param name="d_gain" value="0.045" />
+    <param name="grass_demo" value="False"/>
+    <param name="p_gain" value="0.45"/>
+    <param name="d_gain" value="0.045"/>
+    <param name="use_head_control" value="false"/>
   </node>
 </launch>

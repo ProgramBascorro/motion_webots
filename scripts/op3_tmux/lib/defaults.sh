@@ -40,8 +40,8 @@ BALL_LOCALIZER_CMD="${OP3_BALL_LOCALIZER_CMD:-ros2 launch op3_ball_localization 
 OFFSET_TUNER_CMD="${OP3_OFFSET_TUNER_CMD:-ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml}"
 
 # Action editor
-ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095.bin}"
-ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_custom.bin}"
+ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ros1_lama.bin}"
+ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ros1_lama.bin}"
 ACTION_EDITOR_LOG="${OP3_ACTION_EDITOR_LOG:-/tmp/op3_action_editor_bridge.log}"
 ACTION_EDITOR_CMD="${OP3_ACTION_EDITOR_CMD:-bridge_log='${ACTION_EDITOR_LOG}'; bridge_pid=0; ros2 run op3_action_editor bridge_webots.py >\"\$bridge_log\" 2>&1 & bridge_pid=\$!; ros2 run op3_action_editor webots_executor.py; if [ \$bridge_pid -ne 0 ]; then kill \$bridge_pid; wait \$bridge_pid 2>/dev/null; fi}"
 
@@ -50,7 +50,7 @@ ACTION_WEB_CMD="${OP3_ACTION_WEB_CMD:-${OP3_STUDIO_CMD:-$WS/scripts/bascorro_stu
 VISION_LAB_CMD="${OP3_VISION_LAB_CMD:-$WS/scripts/vision_lab.sh}"
 
 # Demo
-DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo_yolo.launch.xml}"
+DEMO_CMD="${OP3_DEMO_CMD:-ros2 launch op3_demo demo.launch.xml}"
 DEMO_MODE="${OP3_DEMO_MODE:-}"
 DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-0.5}"
 DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-40}"

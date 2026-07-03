@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import datetime
 import json
 import os
 import shutil
@@ -17,14 +18,14 @@ def resolve_action_file() -> str:
     env_path = os.environ.get("OP3_ACTION_FILE", "").strip()
     if env_path:
         return env_path
-    return get_package_share_directory("op3_action_module") + "/data/motion_4095.bin"
+    return get_package_share_directory("op3_action_module") + "/data/motion_4095_ros1_lama.bin"
 
 
 def resolve_seed_file() -> str:
     env_path = os.environ.get("OP3_ACTION_FILE_SEED", "").strip()
     if env_path:
         return env_path
-    return get_package_share_directory("op3_action_module") + "/data/motion_4095.bin"
+    return get_package_share_directory("op3_action_module") + "/data/motion_4095_ros1_lama.bin"
 
 
 def resolve_robot_file() -> str:
@@ -64,6 +65,10 @@ class ActionWebNode(Node):
         self.action_file = resolve_action_file()
         self.seed_file = resolve_seed_file()
         self.robot_file = resolve_robot_file()
+        # Directory that holds the action .bin files. The web "Bin File" panel can
+        # list/select/delete bins here; self.action_file is the launch-active one
+        # (the bin the running op3_action_module actually loaded) and is protected.
+        self.data_dir = os.path.dirname(self.action_file)
         raw_backup = self.declare_parameter("create_backup", False).value
         if isinstance(raw_backup, bool):
             self.create_backup = raw_backup
@@ -137,11 +142,29 @@ class ActionWebNode(Node):
         try:
             action = str(payload.get("action", "apply"))
             request_id = payload.get("request_id")
+            target = payload.get("target")
             if action == "apply":
-                self.apply_yaml(str(payload.get("yaml", "")), request_id)
+                self.apply_yaml(str(payload.get("yaml", "")), request_id, target)
             elif action == "export":
                 pages = str(payload.get("pages", "used"))
-                self.export_yaml(pages, request_id)
+                self.export_yaml(pages, request_id, target)
+            elif action == "stat":
+                # cheap query: which bin will be written and when it last changed,
+                # so the UI can warn before overwriting it with a stale draft.
+                path, err = self.resolve_target(target, must_exist=True)
+                if err:
+                    self.publish_result({"ok": False, "action": "stat", "message": err, "request_id": request_id})
+                else:
+                    self.publish_result(
+                        {"ok": True, "action": "stat", "request_id": request_id, **self.file_info(path)}
+                    )
+            elif action == "list":
+                result = self.list_bins()
+                result["action"] = "list"
+                result["request_id"] = request_id
+                self.publish_result(result)
+            elif action == "delete":
+                self.delete_bin(target, request_id)
             else:
                 self.publish_result(
                     {
@@ -154,7 +177,7 @@ class ActionWebNode(Node):
         finally:
             self._busy = False
 
-    def apply_yaml(self, yaml_text: str, request_id=None) -> None:
+    def apply_yaml(self, yaml_text: str, request_id=None, target=None) -> None:
         if not yaml_text.strip():
             self.publish_result(
                 {
@@ -163,6 +186,13 @@ class ActionWebNode(Node):
                     "message": "YAML is empty",
                     "request_id": request_id,
                 }
+            )
+            return
+
+        action_file, err = self.resolve_target(target, must_exist=True)
+        if err:
+            self.publish_result(
+                {"ok": False, "action": "apply", "message": err, "request_id": request_id}
             )
             return
 
@@ -176,7 +206,7 @@ class ActionWebNode(Node):
             if not self.create_backup:
                 args.append("--no-backup")
 
-            code, stdout, stderr = run_action_yaml(self.action_file, self.robot_file, args)
+            code, stdout, stderr = run_action_yaml(action_file, self.robot_file, args)
             ok = code == 0
             if not ok:
                 err_text = stderr.strip() or stdout.strip()
@@ -190,6 +220,7 @@ class ActionWebNode(Node):
                     "stdout": stdout.strip(),
                     "stderr": stderr.strip(),
                     "request_id": request_id,
+                    **self.file_info(action_file),
                 }
             )
         except Exception as exc:  # pylint: disable=broad-except
@@ -205,14 +236,21 @@ class ActionWebNode(Node):
             if tmp_path and os.path.isfile(tmp_path):
                 os.unlink(tmp_path)
 
-    def export_yaml(self, pages: str, request_id=None) -> None:
+    def export_yaml(self, pages: str, request_id=None, target=None) -> None:
+        action_file, err = self.resolve_target(target, must_exist=True)
+        if err:
+            self.publish_result(
+                {"ok": False, "action": "export", "message": err, "request_id": request_id}
+            )
+            return
+
         tmp_path = ""
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml") as handle:
                 tmp_path = handle.name
 
             args = ["export", "--out", tmp_path, "--pages", pages]
-            code, stdout, stderr = run_action_yaml(self.action_file, self.robot_file, args)
+            code, stdout, stderr = run_action_yaml(action_file, self.robot_file, args)
             ok = code == 0
             if not ok:
                 err_text = stderr.strip() or stdout.strip()
@@ -232,6 +270,7 @@ class ActionWebNode(Node):
                     "stderr": stderr.strip(),
                     "yaml": yaml_text,
                     "request_id": request_id,
+                    **self.file_info(action_file),
                 }
             )
         except Exception as exc:  # pylint: disable=broad-except
@@ -247,7 +286,108 @@ class ActionWebNode(Node):
             if tmp_path and os.path.isfile(tmp_path):
                 os.unlink(tmp_path)
 
+    def resolve_target(self, target, must_exist=False) -> Tuple[str, str]:
+        """Resolve a user-supplied bin name to a full path inside the data dir.
+
+        Only a bare ``*.bin`` filename is allowed (no path separators, no ``..``),
+        so the web cannot read/write/delete outside the action data directory.
+        Returns ``(path, error)`` -- error is "" on success. When target is empty
+        the launch-active action file is used.
+        """
+        if not target:
+            return self.action_file, ""
+        name = str(target)
+        base = os.path.basename(name)
+        if base != name or base in ("", ".", ".."):
+            return "", "Invalid target name"
+        if not base.endswith(".bin"):
+            return "", "Target must be a .bin file"
+        path = os.path.join(self.data_dir, base)
+        if must_exist and not os.path.isfile(path):
+            return "", f"Bin not found: {base}"
+        return path, ""
+
+    def list_bins(self) -> Dict[str, object]:
+        """List the *.bin files in the action data dir for the Bin File picker.
+        Marks the launch-active bin so the UI can protect it from deletion."""
+        active = os.path.basename(self.action_file)
+        bins = []
+        try:
+            for name in sorted(os.listdir(self.data_dir)):
+                if not name.endswith(".bin"):
+                    continue
+                path = os.path.join(self.data_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    mtime = os.path.getmtime(path)
+                    mtime_iso = datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+                    size = os.path.getsize(path)
+                except OSError:
+                    mtime, mtime_iso, size = None, None, None
+                bins.append(
+                    {
+                        "name": name,
+                        "mtime": mtime,
+                        "mtime_iso": mtime_iso,
+                        "size": size,
+                        "active": name == active,
+                    }
+                )
+            return {"ok": True, "bins": bins, "active": active}
+        except OSError as exc:
+            return {"ok": False, "bins": [], "active": active, "message": f"List error: {exc}"}
+
+    def delete_bin(self, target, request_id=None) -> None:
+        path, err = self.resolve_target(target, must_exist=True)
+        if err:
+            self.publish_result({"ok": False, "action": "delete", "message": err, "request_id": request_id})
+            return
+        if os.path.abspath(path) == os.path.abspath(self.action_file):
+            self.publish_result(
+                {
+                    "ok": False,
+                    "action": "delete",
+                    "message": "Refusing to delete the active action file",
+                    "request_id": request_id,
+                }
+            )
+            return
+        name = os.path.basename(path)
+        try:
+            os.remove(path)
+            ok, message = True, f"Deleted {name}"
+        except OSError as exc:
+            ok, message = False, f"Delete error: {exc}"
+        result = {"ok": ok, "action": "delete", "message": message, "request_id": request_id}
+        # include a refreshed bin list so the dropdown updates immediately
+        listing = self.list_bins()
+        result["bins"] = listing.get("bins", [])
+        result["active"] = listing.get("active")
+        self.publish_result(result)
+
+    def file_info(self, path=None) -> Dict[str, object]:
+        """Target bin path + when it was last modified on disk, so the UI can show
+        'this bin was last updated at X' and warn if a draft is older than that."""
+        if not path:
+            path = self.action_file
+        info: Dict[str, object] = {
+            "action_file": path,
+            "action_file_name": os.path.basename(path),
+        }
+        try:
+            mtime = os.path.getmtime(path)
+            info["mtime"] = mtime  # epoch seconds
+            info["mtime_iso"] = datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+        except OSError:
+            info["mtime"] = None
+            info["mtime_iso"] = None
+        return info
+
     def publish_result(self, payload: Dict[str, object]) -> None:
+        # always attach current bin file info so the UI knows the on-disk state
+        if "action_file" not in payload:
+            payload = {**payload, **self.file_info()}
         msg = String()
         msg.data = json.dumps(payload)
         self.result_pub.publish(msg)

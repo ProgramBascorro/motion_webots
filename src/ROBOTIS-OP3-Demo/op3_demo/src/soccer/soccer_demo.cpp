@@ -155,7 +155,10 @@ void SoccerDemo::process()
     ball_follower_.startFollowing();
     start_following_ = false;
 
-    wait_count_ = 1 * SPIN_RATE;
+    // Short settle after Start before the robot begins tracking/following, so
+    // it reacts quickly to the Start button (was 1 * SPIN_RATE = ~1s,
+    // now ~0.3s). Matched from CHRONUS_NEW.
+    wait_count_ = SPIN_RATE * 3 / 10;
   }
 
   // check to stop
@@ -404,7 +407,12 @@ void SoccerDemo::callServiceSettingModule(const robotis_controller_msgs::msg::Jo
   request->joint_name = modules.joint_name;
   request->module_name = modules.module_name;
 
-  if (!set_joint_module_client_->wait_for_service(std::chrono::seconds(1))) {
+  // 200 ms timeout (was 1 s). robotis_controller's
+  // /robotis/set_present_joint_ctrl_modules service is advertised on
+  // op3_manager boot — by the time the user can press the START button it's
+  // been up for seconds. The old 1 s timeout sat in the START button's
+  // critical path before walking_module could even receive its first command.
+  if (!set_joint_module_client_->wait_for_service(std::chrono::milliseconds(200))) {
     RCLCPP_ERROR(rclcpp::get_logger("SoccerDemo"), "[SoccerDemo::callServiceSettingModule] Service not available");
     return;
   }
@@ -633,8 +641,12 @@ void SoccerDemo::stopSoccerMode()
 
   on_following_ball_ = false;
   on_tracking_ball_ = false;
-  stop_following_ = false;
-  wait_count_ = 0;
+  // Set stop_following_ = true so the process() loop re-asserts the stop on the
+  // next tick (~33 ms later). This double-publish protects against the
+  // throwaway-publisher race in ball_follower (auto pub = create_publisher;
+  // pub->publish; pub goes out of scope before DDS discovery completes →
+  // message can be silently dropped on the first try). Matched from CHRONUS_NEW.
+  stop_following_ = true;
 
   // Debounce window: 800 ms = period_time (~750 ms) + 50 ms safety.
   // Long enough to let walking_module fully wind down its last step,

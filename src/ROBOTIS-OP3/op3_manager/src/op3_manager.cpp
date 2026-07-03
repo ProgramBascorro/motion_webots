@@ -333,13 +333,21 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // Boot-time INIT pose is handled by demo_node (after waiting for the
-  // motion modules to load + the controller's first bulkread). It enables
-  // action_module and plays page 2 (INIT_BARU — the user's calibrated
-  // standing pose). Walking-ready is a separate transition triggered by
-  // the START button.
-  RCLCPP_INFO(node->get_logger(),
-              "Boot init pose: deferred to demo_node (will play action page 2)");
+  // Boot-time INIT pose. Publishes to /robotis/base/ini_pose so base_module
+  // moves the robot into the pose stored in op3_base_module/data/ini_pose.yaml.
+  // That yaml's target_pose has been retuned (2026-07-01) to mirror the
+  // INIT_BARU (action page 2) calibrated stance — including the splayed
+  // hip_roll spread ~10.4° — so a manager-only launch (no demo_node) still
+  // lands the robot in the correct standing pose.
+  //
+  // g_init_pose_pub is pre-existing (declared line 71, created line 240,
+  // also used by dxlTorqueCheckCallback), so this is a restore of the
+  // pre-4ac51f8 boot publish — not a new-publisher addition (safe wrt the
+  // stack smash we hit last time we added init logic here).
+  std_msgs::msg::String init_msg;
+  init_msg.data = "ini_pose";
+  g_init_pose_pub->publish(init_msg);
+  RCLCPP_INFO(node->get_logger(), "Go to init pose (ini_pose → base_module)");
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
       "/robotis/health_check",

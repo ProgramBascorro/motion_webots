@@ -31,6 +31,7 @@ BallTracker::BallTracker()
     use_head_control_(true),
     count_not_found_(0),
     on_tracking_(false),
+    was_scanning_(false),
     current_ball_pan_(0),
     current_ball_tilt_(0),
     x_error_sum_(0),
@@ -72,6 +73,17 @@ void BallTracker::setNode(rclcpp::Node::SharedPtr node)
   if (node_ != nullptr)
   {
     ball_position_sub_ = node_->create_subscription<op3_ball_detector_msgs::msg::CircleSetStamped>("/ball_detector_node/circle_set", 10, std::bind(&BallTracker::ballPositionCallback, this, std::placeholders::_1));
+
+    // Head-control publishers live for the lifetime of the tracker so DDS
+    // discovery completes long before the first send. Previous code created
+    // these inline per call, which occasionally silently dropped the very
+    // command that would have stopped the scan.
+    head_joint_offset_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
+        "/robotis/head_control/set_joint_states_offset", 10);
+    head_joint_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
+        "/robotis/head_control/set_joint_states", 10);
+    head_scan_pub_ = node_->create_publisher<std_msgs::msg::String>(
+        "/robotis/head_control/scan_command", 10);
   }
   else
   {
@@ -128,6 +140,10 @@ void BallTracker::stopTracking()
   current_ball_tilt_ = 0;
   x_error_sum_ = 0;
   y_error_sum_ = 0;
+  // Fresh start next time — do not leave was_scanning_ stale from a
+  // scan that head_control_module already dropped on stop.
+  was_scanning_ = false;
+  count_not_found_ = 0;
 }
 
 void BallTracker::setUsingHeadScan(bool use_scan)
@@ -200,6 +216,23 @@ int BallTracker::processTracking()
     return tracking_status;
 
   case Found:
+    // First frame the ball reappears after a scan was fired: tell
+    // head_control_module to abandon any queued scan-corner trajectory
+    // (finishMoving() chains the 4 corners until scan_state_ == NoScan).
+    // The offset command sent below also clears scan_state_, but the
+    // "stop" is a defensive belt-and-suspenders — the offset is filtered
+    // by the 1° deadband, so a near-centered ball would otherwise leave
+    // the last scan queued.
+    if (was_scanning_)
+    {
+      if (head_scan_pub_)
+      {
+        std_msgs::msg::String stop_msg;
+        stop_msg.data = "stop";
+        head_scan_pub_->publish(stop_msg);
+      }
+      was_scanning_ = false;
+    }
     x_error = -atan(ball_position_.x * tan(FOV_WIDTH));
     y_error = -atan(ball_position_.y * tan(FOV_HEIGHT));
     ball_size = ball_position_.z;
@@ -266,22 +299,16 @@ void BallTracker::publishHeadJoint(double pan, double tilt)
   if (use_head_control_ == false)
     return;
 
-  if (node_ == nullptr)
-  {
-    RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot publish head joint");
+  if (!head_joint_offset_pub_)
     return;
-  }
 
   double min_angle = 1 * M_PI / 180;
   if (fabs(pan) < min_angle && fabs(tilt) < min_angle)
     return;
 
-  auto head_joint_offset_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/robotis/head_control/set_joint_states_offset", 10);
   sensor_msgs::msg::JointState head_angle_msg;
-
   head_angle_msg.name.push_back("head_pan");
   head_angle_msg.name.push_back("head_tilt");
-
   head_angle_msg.position.push_back(pan);
   head_angle_msg.position.push_back(tilt);
 
@@ -293,17 +320,12 @@ void BallTracker::goInit()
   if (use_head_control_ == false)
     return;
 
-  if (node_ == nullptr)
-  {
-    RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot go init");
+  if (!head_joint_pub_)
     return;
-  }
-  auto head_joint_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/robotis/head_control/set_joint_states", 10);
-  sensor_msgs::msg::JointState head_angle_msg;
 
+  sensor_msgs::msg::JointState head_angle_msg;
   head_angle_msg.name.push_back("head_pan");
   head_angle_msg.name.push_back("head_tilt");
-
   head_angle_msg.position.push_back(0.0);
   head_angle_msg.position.push_back(0.0);
 
@@ -318,20 +340,16 @@ void BallTracker::scanBall()
   if (use_head_scan_ == false)
     return;
 
-  // check head control module enabled
-  // ...
-
-  // send message to head control module
-  if (node_ == nullptr)
-  {
-    RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot scan ball");
+  if (!head_scan_pub_)
     return;
-  }
-  auto head_scan_pub_ = node_->create_publisher<std_msgs::msg::String>("/robotis/head_control/scan_command", 10);
+
   std_msgs::msg::String scan_msg;
   scan_msg.data = "scan";
-
   head_scan_pub_->publish(scan_msg);
+
+  // Remember we asked head_control_module to scan so processTracking() can
+  // send a matching "stop" as soon as the ball is found again.
+  was_scanning_ = true;
 }
 
 }

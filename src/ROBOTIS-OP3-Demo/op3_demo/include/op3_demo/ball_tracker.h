@@ -88,18 +88,16 @@ protected:
   void publishHeadJoint(double pan, double tilt);
   void scanBall();
 
-  //image publisher/subscriber
-  // rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
-  // rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_joint_offset_pub_;
-  // rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_joint_pub_;
-  // rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_scan_pub_;
-
-  //  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr error_pub_;
-
-  // rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;
+  // Member publishers (created ONCE in setNode). Inline create_publisher +
+  // publish drops messages on the first send because DDS discovery has not
+  // completed yet — that regression made the head keep scanning even after
+  // the ball was detected (the offset command that would have cleared
+  // scan_state_ in head_control_module was silently dropped).
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_joint_offset_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_joint_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_scan_pub_;
 
   rclcpp::Subscription<op3_ball_detector_msgs::msg::CircleSetStamped>::SharedPtr ball_position_sub_;
-  // rclcpp::Subscription<std_msgs::msg::String>::SharedPtr ball_tracking_command_sub_;
 
   // (x, y) is the center position of the ball in image coordinates
   // z is the ball radius
@@ -110,6 +108,11 @@ protected:
   bool use_head_control_;
   int count_not_found_;
   bool on_tracking_;
+  // True when scanBall() sent "scan" to head_control_module but the module
+  // has not yet been told to stop. Used to fire a single "stop" command on
+  // the first Found frame so the queued scan trajectory does not keep the
+  // head moving past the ball.
+  bool was_scanning_;
   double current_ball_pan_, current_ball_tilt_;
   double current_ball_bottom_;
   double x_error_sum_, y_error_sum_;

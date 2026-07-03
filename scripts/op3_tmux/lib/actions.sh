@@ -265,6 +265,8 @@ action_docker_run() {
 
   [[ -e /dev/input ]] && cmd+=(--device=/dev/input)
   [[ -e /dev/uinput ]] && cmd+=(--device=/dev/uinput)
+  [[ -e /dev/video0 ]] && cmd+=(--device=/dev/video0)
+  [[ -e /dev/video1 ]] && cmd+=(--device=/dev/video1)
 
   local input_gid=""
   local dialout_gid=""

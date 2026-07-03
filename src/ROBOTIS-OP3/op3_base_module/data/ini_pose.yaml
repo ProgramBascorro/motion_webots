@@ -1,9 +1,14 @@
 # time parameter
-
-mov_time : 4.0    # movement time
+#
+# Turun 4.0 → 2.0 (2026-07-03) untuk mempercepat boot INIT. Di dalam container
+# Docker non-RT loop kontrol base_module jalan ~45 Hz (bukan 125 Hz), jadi
+# durasi wall-clock membengkak ~2.75×: mov_time 4.0 → gerak nyata ~11 s.
+# Dengan 2.0, gerak nyata ~5.5 s — masih LEBIH LAMBAT dari desain 4.0 s di
+# hardware RT, jadi kecepatan servo tetap aman (tidak menyentak).
+mov_time : 2.0    # movement time
 
 via_num : 0   # via-point number
-via_time : [ 4.0 ] # via-point time
+via_time : [ 2.0 ] # via-point time
 
 
 # via-point pose [deg]
@@ -32,25 +37,35 @@ via_pose :
 
 
 # target pose [deg]
+#
+# Retuned 2026-07-01 to mirror INIT_BARU (action page 2 step[0] of
+# motion_4095_ros1_lama.bin) so base_module's boot INIT lands in the same
+# splayed standing stance as action_module INIT_BARU. Values are converted
+# from raw DXL positions via (raw - 2048) * 360 / 4096. Key changes vs the
+# original ROBOTIS defaults:
+#   - hip_roll (ID 9/10):   splayed  +3.52° / -6.86°  (spread 10.4°)
+#   - shoulder/elbow: arms rest lower, matching INIT_BARU's relaxed pose.
+# Head, knee, ankle_pitch stayed at ROBOTIS defaults (already matched
+# INIT_BARU joint-for-joint).
 
 tar_pose :
-  1 : 35.771484        # r_sho_pitch
-  2 : -36.650391       # l_sho_pitch
-  3 : -12.919922       # r_sho_roll
-  4 : 16.259766        # l_sho_roll
-  5 : 170.419922       # r_el
-  6 : -174.375         # l_el
-  7 : -0.263672        # r_hip_yaw
-  8 : -0.263672        # l_hip_yaw
-  9 : -0.527344        # r_hip_roll
-  10 : -3.164062       # l_hip_roll
-  11 : 37.001953       # r_hip_pitch
-  12 : -38.232422      # l_hip_pitch
-  13 : -59.501953      # r_knee
-  14 : 59.589844       # l_knee
-  15 : -28.300781      # r_ank_pitch
-  16 : 29.003906       # l_ank_pitch
-  17 : 1.142578        # r_ank_roll
-  18 : 0.0             # l_ank_roll
-  19 : 0.087891        # head_pan 
-  20 : -10.634766      # head_tilt
+  1 : 7.646484         # r_sho_pitch   (raw 2135)
+  2 : -13.007812       # l_sho_pitch   (raw 1900)
+  3 : -13.095703       # r_sho_roll    (raw 1899)
+  4 : 15.908203        # l_sho_roll    (raw 2229)
+  5 : 167.607422       # r_el          (raw 3955)
+  6 : -172.177734      # l_el          (raw   89 = -172° after wrap)
+  7 : -0.263672        # r_hip_yaw     (raw 2045)
+  8 : -0.263672        # l_hip_yaw     (raw 2045)
+  9 : 3.515625         # r_hip_roll    (raw 2088) — splayed
+  10 : -6.855469       # l_hip_roll    (raw 1970) — splayed
+  11 : 37.001953       # r_hip_pitch   (raw 2469)
+  12 : -40.781250      # l_hip_pitch   (raw 1584)
+  13 : -59.501953      # r_knee        (raw 1371)
+  14 : 59.589844       # l_knee        (raw 2726)
+  15 : -28.300781      # r_ank_pitch   (raw 1726)
+  16 : 29.003906       # l_ank_pitch   (raw 2378)
+  17 : 1.142578        # r_ank_roll    (raw 2061)
+  18 : 0.0             # l_ank_roll    (raw 2048)
+  19 : 0.087891        # head_pan      (raw 2049)
+  20 : -10.634766      # head_tilt     (raw 1927)

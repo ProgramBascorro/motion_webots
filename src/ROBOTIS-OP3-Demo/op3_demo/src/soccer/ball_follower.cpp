@@ -85,16 +85,23 @@ void BallFollower::startFollowing()
   on_tracking_ = true;
   RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Start Ball following");
 
+  // setWalkingCommand("start") already calls getWalkingParam() internally and
+  // populates current_walking_param_ before publishing the "start" command.
+  // We READ THE CACHED VALUES instead of calling getWalkingParam() a second
+  // time — the original code did a back-to-back service call that added
+  // ~service-roundtrip + up-to-1s wait_for_service to the START button
+  // latency. period_time and hip_pitch_offset aren't touched by
+  // setWalkingParam(), so the cached values are valid.
   setWalkingCommand("start");
 
-  bool result = getWalkingParam();
-  if (result == true)
+  if (current_walking_param_.period_time > 0.1)
   {
     hip_pitch_offset_ = current_walking_param_.hip_pitch_offset;
     curr_period_time_ = current_walking_param_.period_time;
   }
   else
   {
+    // Service unavailable or returned garbage — fall back to known defaults.
     hip_pitch_offset_ = 7.0 * M_PI / 180;
     curr_period_time_ = 0.6;
   }
@@ -376,7 +383,11 @@ bool BallFollower::getWalkingParam()
   auto get_walking_param_client_ = temp_node->create_client<op3_walking_module_msgs::srv::GetWalkingParam>("/robotis/walking/get_params");
   auto request = std::make_shared<op3_walking_module_msgs::srv::GetWalkingParam::Request>();
 
-  if (!get_walking_param_client_->wait_for_service(std::chrono::seconds(1)))
+  // 200 ms timeout (was 1 s). walking_module's service is already advertised
+  // by the time op3_manager is up; 1 s was just dead latency added to every
+  // START press. If service legitimately isn't available, the fallback path
+  // in startFollowing() kicks in with sensible defaults.
+  if (!get_walking_param_client_->wait_for_service(std::chrono::milliseconds(200)))
   {
     RCLCPP_ERROR(rclcpp::get_logger("BallFollower"), "BallFollower::getWalkingParam - Service not available");
     return false;

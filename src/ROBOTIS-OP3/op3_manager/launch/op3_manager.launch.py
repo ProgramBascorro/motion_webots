@@ -1,5 +1,10 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 from launch.substitutions import LaunchConfiguration
@@ -10,7 +15,7 @@ def generate_launch_description():
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_ros1.bin'
+    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_ros1_lama.bin'
     device_name_default = '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT8J0QK9-if00-port0'
 
     return LaunchDescription([

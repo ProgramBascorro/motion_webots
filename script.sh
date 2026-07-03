@@ -170,7 +170,7 @@ EOF
 }
 
 action_default_path() {
-  echo "$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_custom.bin"
+  echo "$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ros1_lama.bin"
 }
 
 action_picker_root() {
