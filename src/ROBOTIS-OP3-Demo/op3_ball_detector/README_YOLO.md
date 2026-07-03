@@ -32,14 +32,16 @@ Because it publishes on `/ball_detector_node/circle_set`, the `op3_demo`
 
 ## Dependencies
 
-`ultralytics` (and `torch`) have **no rosdep key** and must be installed
-manually in the runtime environment — i.e. **inside the Docker container where
-ROS runs**, not on the host. The image ships without `pip`, so bootstrap it
-first:
+`ultralytics` (and `torch`) have **no rosdep key**. In the project Docker image
+they are **already baked in** — the project `Dockerfile` installs CPU `torch`/
+`torchvision` plus `requirements_yolo.txt`, so when you build/run via
+`./script.sh` nothing extra is needed inside the container.
+
+If you ever run outside that image, install them manually in the runtime
+environment (CPU-only example):
 
 ```bash
-apt-get update && apt-get install -y python3-pip
-# CPU-only machine (no NVIDIA GPU):
+apt-get update && apt-get install -y python3-pip   # if pip is missing
 python3 -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 python3 -m pip install -r src/ROBOTIS-OP3-Demo/op3_ball_detector/requirements_yolo.txt
 ```
@@ -58,9 +60,10 @@ python3 -m pip install -r src/ROBOTIS-OP3-Demo/op3_ball_detector/requirements_yo
 
 `rclpy`, `cv_bridge` and OpenCV/numpy from ROS are declared in `package.xml`.
 
-To make the install **persistent** (it lives only in the running container
-otherwise) either `docker commit <container> <new-image>` or add the same
-`pip install` steps to the project `Dockerfile` and rebuild.
+In the project image this is already persistent (baked into the `Dockerfile`).
+If you installed manually into a running container instead, make it persistent
+with `docker commit <container> <new-image>` or add the `pip install` steps to
+the `Dockerfile` and rebuild.
 
 ## Build
 

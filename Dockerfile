@@ -111,29 +111,48 @@ RUN set -eux; \
     -DWITH_GTK=ON \
     -DWITH_V4L=ON \
     -DBUILD_LIST=core,imgproc,imgcodecs,videoio,highgui,objdetect,video,dnn; \
-  cmake --build build --parallel "$(nproc)"; \
+  mem_gb="$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)"; \
+  if [ "$mem_gb" -lt 10 ]; then ocv_jobs=2; else ocv_jobs="$(nproc)"; fi; \
+  echo "Building OpenCV with ${ocv_jobs} parallel jobs (host RAM ~${mem_gb}GB)"; \
+  cmake --build build --parallel "$ocv_jobs"; \
   cmake --install build; \
   rm -rf /tmp/opencv
 
 # ---- OpenVINO Runtime (archive install, CPU-ready in Docker) ----
+# Intel ships this toolkit for x86_64 only; the arm64 archive for 2025.4 is not
+# published. Our imported op3_ball_detector YOLO node needs only the Python
+# "openvino" wheel (installed further below), not the system runtime, so on arm64
+# we skip the archive; on amd64 we install it exactly as CHRONUS did.
 RUN set -eux; \
   arch="$(dpkg --print-architecture)"; \
-  case "$arch" in \
-    amd64) \
-      ov_archive="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64.tgz"; \
-      ov_dir="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64" ;; \
-    arm64) \
-      ov_archive="openvino_toolkit_ubuntu20_${OPENVINO_FULL_VERSION}_arm64.tgz"; \
-      ov_dir="openvino_toolkit_ubuntu20_${OPENVINO_FULL_VERSION}_arm64" ;; \
-    *) echo "Unsupported arch for OpenVINO: $arch" >&2; exit 1 ;; \
-  esac; \
-  mkdir -p /opt/intel; \
-  curl -fsSL -o /tmp/openvino.tgz \
-    "https://storage.openvinotoolkit.org/repositories/openvino/packages/2025.4/linux/${ov_archive}"; \
-  tar -xf /tmp/openvino.tgz -C /tmp; \
-  mv "/tmp/${ov_dir}" "/opt/intel/openvino_${OPENVINO_VERSION}"; \
-  /opt/intel/openvino_${OPENVINO_VERSION}/install_dependencies/install_openvino_dependencies.sh -y; \
-  rm -rf /tmp/openvino.tgz "/tmp/${ov_dir}"
+  if [ "$arch" = "amd64" ]; then \
+    ov_archive="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64.tgz"; \
+    ov_dir="openvino_toolkit_ubuntu22_${OPENVINO_FULL_VERSION}_x86_64"; \
+    mkdir -p /opt/intel; \
+    curl -fsSL -o /tmp/openvino.tgz \
+      "https://storage.openvinotoolkit.org/repositories/openvino/packages/2025.4/linux/${ov_archive}"; \
+    tar -xf /tmp/openvino.tgz -C /tmp; \
+    mv "/tmp/${ov_dir}" "/opt/intel/openvino_${OPENVINO_VERSION}"; \
+    /opt/intel/openvino_${OPENVINO_VERSION}/install_dependencies/install_openvino_dependencies.sh -y; \
+    rm -rf /tmp/openvino.tgz "/tmp/${ov_dir}"; \
+  else \
+    echo "arch=${arch}: skipping system OpenVINO archive (using the Python 'openvino' wheel instead)"; \
+  fi
+
+# ---- YOLO ball detector Python deps (op3_ball_detector, imported from ALPHONSE) ----
+# CPU torch/torchvision + ultralytics/onnxruntime/openvino wheels used by
+# scripts/yolo_ball_detector.py. numpy MUST stay <2 so ROS Humble cv_bridge
+# (compiled against NumPy 1.x) keeps importing; opencv-python is pinned to a
+# NumPy-1.x-compatible build for the same reason (see requirements_yolo.txt).
+# The PyTorch CPU channel serves CPU-only wheels for BOTH x86_64 and aarch64
+# (verified: torch 2.12.x cp310 aarch64 present). Using it avoids the multi-GB
+# NVIDIA CUDA deps that the default PyPI aarch64 wheel now drags in — we only need
+# torch so ultralytics can load the OpenVINO YOLO model; inference runs on OpenVINO.
+RUN python3 -m pip install --no-cache-dir torch torchvision \
+      --index-url https://download.pytorch.org/whl/cpu \
+ && python3 -m pip install --no-cache-dir \
+      "ultralytics>=8.3.0" "numpy<2" "opencv-python==4.10.0.84" \
+      "onnxruntime>=1.17,<2" "openvino>=2024.0"
 
 # ---- Install Node.js from official tarball (no apt repos) ----
 RUN set -eux; \
@@ -230,6 +249,13 @@ ENV OpenCV_DIR=${OPENCV_PREFIX}/lib/cmake/opencv4
 ENV CMAKE_PREFIX_PATH=${OpenVINO_DIR}:${CMAKE_PREFIX_PATH}
 ENV LD_LIBRARY_PATH=${OPENVINO_ROOT}/runtime/lib/intel64:${OPENVINO_ROOT}/runtime/3rdparty/tbb/lib:${OPENCV_PREFIX}/lib:${LD_LIBRARY_PATH}
 
+# Point find_package(OpenVINO) and the runtime linker at the pip 'openvino' wheel
+# installed above. This is what lets op3_yolo_vision (C++) build AND run without the
+# system OpenVINO archive — required on arm64/Jetson, harmless on x86_64 (overrides
+# the system OpenVINO_DIR above; the pip wheel ships its own OpenVINOConfig.cmake).
+ENV OpenVINO_DIR=/usr/local/lib/python3.10/dist-packages/openvino/cmake
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/openvino/libs:${LD_LIBRARY_PATH}
+
 # Workspace
 WORKDIR /ros2_ws
 RUN mkdir -p /ros2_ws/src
@@ -242,6 +268,7 @@ RUN chmod +x /ros2_ws/script.sh 2>/dev/null || true && \
 
 # Global bash rc convenience
 RUN echo "source /opt/ros/humble/setup.bash" >> /etc/bash.bashrc && \
+    echo "[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash" >> /etc/bash.bashrc && \
     echo "export PNPM_HOME=/root/.local/share/pnpm" >> /etc/bash.bashrc && \
     echo "export PATH=\$PNPM_HOME:\$PATH" >> /etc/bash.bashrc
 

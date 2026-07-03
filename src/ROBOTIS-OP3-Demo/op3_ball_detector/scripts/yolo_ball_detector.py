@@ -77,6 +77,12 @@ class YoloBallDetector(Node):
         self.imgsz = int(self.declare_parameter('imgsz', 640).value)
         self.device = str(self.declare_parameter('device', 'cpu').value)
         self.half = bool(self.declare_parameter('half', False).value)
+        # Ultralytics deprecated the predict-time 'half' argument: passing it at
+        # all (even =False) prints a "'half' is deprecated, use 'quantize'"
+        # warning on every inference call. Forward an FP16 request only when half
+        # is explicitly enabled; otherwise omit the kwarg so the default path
+        # stays quiet. (OpenVINO CPU precision is fixed at export time anyway.)
+        self._predict_precision = {'half': True} if self.half else {}
         self.max_detections = int(
             self.declare_parameter('max_detections', 10).value)
         # Class names (from the model) that should be treated as "the ball".
@@ -179,7 +185,7 @@ class YoloBallDetector(Node):
             import numpy as np
             dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
             model.predict(dummy, imgsz=self.imgsz, device=self.device,
-                          half=self.half, verbose=False)
+                          verbose=False, **self._predict_precision)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().warn('Model warm-up skipped: %s' % exc)
 
@@ -260,14 +266,27 @@ class YoloBallDetector(Node):
                 iou=self.iou_threshold,
                 imgsz=self.imgsz,
                 device=self.device,
-                half=self.half,
                 max_det=self.max_detections,
                 classes=self.target_class_ids,
-                verbose=False)
+                verbose=False,
+                **self._predict_precision)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error('YOLO inference failed: %s' % exc,
                                     throttle_duration_sec=2.0)
             return
+
+        # Periodic latency readout (ultralytics reports per-stage ms in
+        # results[].speed). Throttled so it never floods the console; use it to
+        # measure the effect of imgsz / INT8 / thread changes.
+        speed = getattr(results[0], 'speed', None) if results else None
+        if speed:
+            pre = speed.get('preprocess', 0.0)
+            inf = speed.get('inference', 0.0)
+            post = speed.get('postprocess', 0.0)
+            self.get_logger().info(
+                'latency: pre=%.1f infer=%.1f post=%.1f ms (total=%.1f ms)'
+                % (pre, inf, post, pre + inf + post),
+                throttle_duration_sec=5.0)
 
         height, width = cv_img.shape[:2]
         circles = self._extract_circles(results, width, height)
@@ -317,7 +336,10 @@ class YoloBallDetector(Node):
                                    throttle_duration_sec=3.0)
 
     def _publish_annotated(self, results, cv_img, header):
-        if self.image_pub is None:
+        # Skip the costly plot()/encode/publish entirely when nobody subscribes
+        # to image_out, so the debug overlay is free during real operation yet
+        # still available on demand (open it in rqt/foxglove to resume).
+        if self.image_pub is None or self.image_pub.get_subscription_count() == 0:
             return
         try:
             annotated = results[0].plot() if results else cv_img
@@ -326,7 +348,7 @@ class YoloBallDetector(Node):
         self._publish_image(annotated, header)
 
     def _publish_image(self, cv_img, header):
-        if self.image_pub is None:
+        if self.image_pub is None or self.image_pub.get_subscription_count() == 0:
             return
         try:
             out = self.bridge.cv2_to_imgmsg(cv_img, 'bgr8')

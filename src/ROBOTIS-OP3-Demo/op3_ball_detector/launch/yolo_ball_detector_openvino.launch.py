@@ -53,6 +53,21 @@ def _launch_setup(context, *args, **kwargs):
     if overrides:
         node_params.append(overrides)
 
+    # Keep YOLO from monopolising the CPU so the walking controller stays
+    # responsive. omp_threads caps the torch/numpy pre/post-processing threads;
+    # cpu_affinity (taskset) optionally pins ALL detector threads - including
+    # OpenVINO's TBB pool - to a core subset, leaving the rest for walking.
+    cpu_affinity = LaunchConfiguration('cpu_affinity').perform(context)
+    omp_threads = LaunchConfiguration('omp_threads').perform(context)
+    yolo_extra = {}
+    if omp_threads:
+        yolo_extra['additional_env'] = {
+            'OMP_NUM_THREADS': omp_threads,
+            'OPENBLAS_NUM_THREADS': omp_threads,
+        }
+    if cpu_affinity:
+        yolo_extra['prefix'] = 'taskset -c %s' % cpu_affinity
+
     usb_cam_node = Node(
         package='usb_cam',
         namespace='usb_cam_node',
@@ -70,6 +85,7 @@ def _launch_setup(context, *args, **kwargs):
         output='screen',
         parameters=node_params,
         remappings=[('image_in', LaunchConfiguration('image_topic'))],
+        **yolo_extra,
     )
 
     return [usb_cam_node, yolo_node]
@@ -97,5 +113,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'device', default_value='',
             description='Override YAML device (cpu). Empty = use YAML.'),
+        DeclareLaunchArgument(
+            'omp_threads', default_value='2',
+            description='Cap torch/numpy (OpenMP/BLAS) threads for pre/post-'
+                        'processing so YOLO leaves CPU for walking. Empty = no cap.'),
+        DeclareLaunchArgument(
+            'cpu_affinity', default_value='0-3',
+            description='taskset core list to pin ALL detector threads, leaving '
+                        'the rest for the controller. Default "0-3" measured ~2x '
+                        'faster inference on this 4c/8t i5 (avoids HT contention). '
+                        'Set empty to disable, or adjust for other CPUs.'),
         OpaqueFunction(function=_launch_setup),
     ])

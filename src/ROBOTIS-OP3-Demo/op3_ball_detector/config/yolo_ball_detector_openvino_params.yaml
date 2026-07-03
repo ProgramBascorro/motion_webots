@@ -36,9 +36,13 @@
     # If none of these match the model, every class is treated as a ball.
     target_classes: ["Bola-baru"]
 
-    # Inference loop rate (Hz). Always uses the freshest camera frame. Capped at
-    # 15 Hz to leave the CPU free for walking instead of running flat-out.
-    detection_rate: 15.0
+    # Inference loop rate (Hz). Always uses the freshest camera frame. Bumped
+    # from 15 → 25 Hz for a sharper head-tracker response: at 15 Hz the head
+    # was chasing a ball position that was already ~67 ms stale. 25 Hz cuts
+    # that to ~40 ms and OpenVINO on the i5-1340P still fits inside the
+    # cpu_affinity=0-3 budget, leaving the walking loop untouched. Lower it
+    # back to 15 (or drop cpu_affinity) if you see CPU thermal throttling.
+    detection_rate: 25.0
 
     # Publish an annotated debug image on image_out.
     publish_image: true

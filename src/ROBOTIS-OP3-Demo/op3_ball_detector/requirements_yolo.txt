@@ -1,10 +1,10 @@
 # Python dependencies for the YOLO ball detector (scripts/yolo_ball_detector.py).
-# These have no rosdep keys, so install them in the runtime environment
-# (e.g. INSIDE the Docker container where ROS actually runs).
+# These have no rosdep keys. The project Dockerfile already installs this file
+# (plus CPU torch/torchvision), so inside the project image nothing extra is
+# needed. This file is kept as the single source of truth for those deps and for
+# running outside that image:
 #
-# The image ships without pip; bootstrap it first, then install:
-#
-#   apt-get update && apt-get install -y python3-pip
+#   apt-get update && apt-get install -y python3-pip   # if pip is missing
 #   # CPU-only machine (no NVIDIA GPU):
 #   python3 -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 #   python3 -m pip install -r requirements_yolo.txt

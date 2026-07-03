@@ -2,3 +2,7 @@ build/
 install/
 log/
 .git/
+# JS/pnpm artifacts — not needed inside the image, keep build context lean
+**/node_modules/
+.pnpm-store/
+docs/
