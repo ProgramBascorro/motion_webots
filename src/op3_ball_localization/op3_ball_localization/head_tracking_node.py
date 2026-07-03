@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """
-Head-only ball tracking node for the OpenVINO YOLO stack.
+Head-only ball tracking node for the OP3 ball detector stack.
 
-Uses /vision/yolo/ball_center directly and follows the original OP3 head
-tracking convention: the node publishes head joint offsets that drive the ball
+Subscribes to the classic /ball_detector_node/circle_set (drop-in for both
+the Hough-circle detector and our OpenVINO YOLO detector, which publishes
+the same CircleSetStamped topic) and follows the original OP3 head tracking
+convention: the node publishes head joint offsets that drive the ball
 toward the center of the camera image.
+
+The scan sweep is driven from head_tracking.yaml (forward + down positions
+only, no ceiling-facing poses) and uses ABSOLUTE set_joint_states so a new
+target immediately replaces whatever the module was executing — this is the
+key difference from the internal ball_tracker + head_control_module scan
+pattern, which chains scan corners until finishMoving() checks scan_state_.
 """
 
 import math
@@ -12,12 +20,12 @@ import time
 from typing import Optional
 
 import rclpy
-from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 from robotis_controller_msgs.msg import JointCtrlModule
+from op3_ball_detector_msgs.msg import CircleSetStamped
 
 
 class HeadTrackingNode(Node):
@@ -26,8 +34,11 @@ class HeadTrackingNode(Node):
     def __init__(self) -> None:
         super().__init__("head_tracking_node")
 
+        # /ball_detector_node/circle_set is what the YOLO detector (and the
+        # legacy Hough detector) publishes. Coordinates are already in the
+        # [-1, +1] image-frame convention, so no rescale needed downstream.
         self._ball_center_topic = str(
-            self.declare_parameter("ball_center_topic", "/vision/yolo/ball_center").value
+            self.declare_parameter("ball_center_topic", "/ball_detector_node/circle_set").value
         )
 
         # PID gains copied from the original OP3 ball tracker defaults.
@@ -49,6 +60,18 @@ class HeadTrackingNode(Node):
         self._lost_timeout = float(self.declare_parameter("lost_timeout", 0.8).value)
         self._scan_enabled = bool(self.declare_parameter("scan_enabled", True).value)
         self._scan_period_sec = float(self.declare_parameter("scan_period_sec", 2.5).value)
+        # Warmup right after activation: head_control_module drops commands until
+        # its first process() cycle populates goal_position_ (enable handshake).
+        # During this window re-issue the *current* scan target every
+        # scan_warmup_retry_sec so the head starts moving within a fraction of a
+        # second of the module becoming ready — instead of idling up to a full
+        # scan_period_sec (the ~5 s dead time seen after pressing START).
+        self._scan_warmup_sec = float(
+            self.declare_parameter("scan_warmup_sec", 6.0).value
+        )
+        self._scan_warmup_retry_sec = float(
+            self.declare_parameter("scan_warmup_retry_sec", 0.4).value
+        )
         self._scan_pan_rad = float(self.declare_parameter("scan_pan_rad", 0.7).value)
         self._scan_tilt_forward_rad = float(
             self.declare_parameter("scan_tilt_forward_rad", -0.10).value
@@ -112,7 +135,7 @@ class HeadTrackingNode(Node):
         )
 
         self.create_subscription(
-            PointStamped,
+            CircleSetStamped,
             self._ball_center_topic,
             self._ball_center_callback,
             10,
@@ -139,6 +162,9 @@ class HeadTrackingNode(Node):
         self._scan_active = False
         self._last_scan_cmd_time = 0.0
         self._scan_idx = 0
+        # Wall-clock of the last activation ("start" command, or boot when
+        # auto_start). Drives the post-activation scan warmup (see _ensure_scan_mode).
+        self._activated_at: Optional[float] = time.monotonic() if self._active else None
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -176,6 +202,11 @@ class HeadTrackingNode(Node):
             self._last_ball_time = None
             self._last_head_enable_time = 0.0
             self._joint_ctrl_modules_sent = False
+            # Restart the scan sweep from the first position and open the warmup
+            # window so the first SCAN retries fast until head_control is ready.
+            self._activated_at = time.monotonic()
+            self._scan_idx = 0
+            self._last_scan_cmd_time = 0.0
             self._ensure_head_module_enabled(force=True)
             self.get_logger().info("[CMD] activated by start command")
         elif cmd == "stop" and self._active:
@@ -183,30 +214,42 @@ class HeadTrackingNode(Node):
             self._reset_pid()
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
-            # Snap the head to a neutral forward pose so it doesn't keep
-            # executing the last SCAN target after the stop.
-            neutral = JointState()
-            neutral.name = [self._head_pan_joint, self._head_tilt_joint]
-            neutral.position = [0.0, self._scan_tilt_forward_rad]
-            neutral.header.stamp = self.get_clock().now().to_msg()
-            self._head_abs_pub.publish(neutral)
-            self.get_logger().info("[CMD] deactivated by stop command")
+            # Park head at neutral (pan=0, tilt=forward) immediately so the
+            # robot stops mid-scan instead of completing the last SCAN target.
+            # Without this, the servos finish executing the last commanded
+            # SCAN pose, making the head visually "keep scanning" for a
+            # second or two after STOP was pressed.
+            msg = JointState()
+            msg.name = [self._head_pan_joint, self._head_tilt_joint]
+            msg.position = [0.0, self._scan_tilt_forward_rad]
+            msg.header.stamp = self.get_clock().now().to_msg()
+            self._head_abs_pub.publish(msg)
+            self.get_logger().info("[CMD] deactivated by stop command (head parked at neutral)")
 
-    def _ball_center_callback(self, msg: PointStamped) -> None:
-        """Track the latest normalized YOLO center point."""
-        x_norm = float(msg.point.x)
-        y_norm = float(msg.point.y)
+    def _ball_center_callback(self, msg: CircleSetStamped) -> None:
+        """Track the largest ball reported by the detector.
 
-        if math.isnan(x_norm) or math.isnan(y_norm):
+        CircleSetStamped.circles[i].(x, y) already use the OP3 convention:
+        (-1, -1) = image top-left, (+1, +1) = image bottom-right. z is the
+        radius in pixels — we pick the biggest one so a stray small false
+        positive doesn't hijack the head from the real ball.
+        """
+        if not msg.circles:
             return
 
-        # /vision/yolo/ball_center is normalized to [0, 1]. Convert to the same
-        # [-1, 1] image coordinate convention used by the original OP3 tracker:
-        # (-1, -1) = top-left, (+1, +1) = bottom-right.
-        self._last_x_norm = x_norm
-        self._last_y_norm = y_norm
-        raw_x = (x_norm * 2.0) - 1.0
-        raw_y = (y_norm * 2.0) - 1.0
+        best = max(msg.circles, key=lambda c: c.z)
+        # Radius <= 0 is the "no ball" sentinel the C++ Hough detector uses.
+        if best.z <= 0:
+            return
+
+        raw_x = float(best.x)
+        raw_y = float(best.y)
+        if math.isnan(raw_x) or math.isnan(raw_y):
+            return
+
+        # Log the value in [0, 1] like the old topic did, for readability.
+        self._last_x_norm = (raw_x + 1.0) * 0.5
+        self._last_y_norm = (raw_y + 1.0) * 0.5
 
         a = max(0.0, min(1.0, self._input_smoothing))
         if self._last_ball_x is None or self._last_ball_y is None:
@@ -311,10 +354,23 @@ class HeadTrackingNode(Node):
             now = time.monotonic()
         # Custom sweep: move head through forward + down positions only (no
         # ceiling-facing poses), dwelling at each so YOLO has time to detect.
-        if (now - self._last_scan_cmd_time) < self._scan_period_sec:
+        #
+        # During the warmup window right after activation, head_control_module is
+        # still finishing its enable handshake and drops commands until its first
+        # process() cycle. Re-issue the *current* target at scan_warmup_retry_sec
+        # (fast) instead of scan_period_sec so the head starts moving as soon as
+        # the module is ready. We do NOT advance _scan_idx during warmup, so the
+        # head parks at the first scan pose rather than sweeping too fast to see.
+        in_warmup = (
+            self._activated_at is not None
+            and (now - self._activated_at) < self._scan_warmup_sec
+        )
+        period = self._scan_warmup_retry_sec if in_warmup else self._scan_period_sec
+        if (now - self._last_scan_cmd_time) < period:
             return
         pan, tilt = self._scan_positions[self._scan_idx]
-        self._scan_idx = (self._scan_idx + 1) % len(self._scan_positions)
+        if not in_warmup:
+            self._scan_idx = (self._scan_idx + 1) % len(self._scan_positions)
 
         msg = JointState()
         msg.name = [self._head_pan_joint, self._head_tilt_joint]
