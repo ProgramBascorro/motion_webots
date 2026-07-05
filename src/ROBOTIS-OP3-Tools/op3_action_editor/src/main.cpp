@@ -21,7 +21,9 @@
 const int BAUD_RATE = 2000000;
 const double PROTOCOL_VERSION = 2.0;
 const int SUB_CONTROLLER_ID = 200;
-const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyUSB0";
+// Stable alias provisioned by ensure_opencr_port (executor.py / op3_tmux) that always
+// points at whichever /dev/ttyUSB* the OpenCR is live on. Same name used by OP3.robot.
+const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOP3";
 const int POWER_CTRL_TABLE = 24;
 
 void sighandler(int sig)
@@ -47,21 +49,30 @@ bool turnOnDynamixelPower(rclcpp::Node::SharedPtr node, const std::string &devic
   }
   dynamixel::PacketHandler *_packet_h = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
 
-  int _return = _packet_h->write1ByteTxRx(_port_h, SUB_CONTROLLER_ID, POWER_CTRL_TABLE, 1);
-
-  if(_return != COMM_SUCCESS)
+  int torque_on_count = 0;
+  while (torque_on_count < 5)
   {
-    RCLCPP_ERROR(node->get_logger(), "Failed to turn on the Power of DXLs!");
-    return false;
-  }
-  else
-  {
-    RCLCPP_INFO(node->get_logger(), "Power on DXLs!");
+    int _return = _packet_h->write1ByteTxRx(_port_h, SUB_CONTROLLER_ID, POWER_CTRL_TABLE, 1);
+
+    if(_return != 0)
+    {
+      RCLCPP_ERROR(node->get_logger(), "Failed to turn on Power (attempt %d/5) [%s]", torque_on_count + 1, _packet_h->getRxPacketError(_return));
+    }
+    else
+    {
+      RCLCPP_INFO(node->get_logger(), "Power on DXLs!");
+      rclcpp::sleep_for(std::chrono::milliseconds(100));
+      return true;
+    }
+
+    if (_return == 0)
+      break;
+    else
+      torque_on_count++;
   }
 
-  rclcpp::sleep_for(std::chrono::milliseconds(100));
-
-  return true;
+  RCLCPP_ERROR(node->get_logger(), "Failed to turn on the Power of DXLs after 5 attempts!");
+  return false;
 }
 
 int main(int argc, char **argv)
