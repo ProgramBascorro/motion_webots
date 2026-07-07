@@ -48,3 +48,9 @@
 
     # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
     enable_at_start: true
+
+    # Also publish the ball center as geometry_msgs/PointStamped in [0,1] image
+    # coords on this topic (only while a ball is seen), feeding
+    # op3_ball_localization/head_tracking_node in demo.launch.xml. Set "" to
+    # disable. Leave absolute (leading /) so it is global across namespaces.
+    ball_center_topic: "/vision/yolo/ball_center"

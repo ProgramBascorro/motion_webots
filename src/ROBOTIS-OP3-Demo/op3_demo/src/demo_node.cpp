@@ -117,7 +117,8 @@ int main(int argc, char **argv)
   std::string manager_name = "/op3_manager";
   while (rclcpp::ok())
   {
-    rclcpp::sleep_for(std::chrono::seconds(1));
+    // Poll at 250 ms (was 1 s) so the demo connects to the manager sooner.
+    rclcpp::sleep_for(std::chrono::milliseconds(250));
     if (checkManagerRunning(manager_name) == true)
     {
       if (DEBUG_PRINT)

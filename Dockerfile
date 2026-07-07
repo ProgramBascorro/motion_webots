@@ -230,6 +230,18 @@ ENV OpenCV_DIR=${OPENCV_PREFIX}/lib/cmake/opencv4
 ENV CMAKE_PREFIX_PATH=${OpenVINO_DIR}:${CMAKE_PREFIX_PATH}
 ENV LD_LIBRARY_PATH=${OPENVINO_ROOT}/runtime/lib/intel64:${OPENVINO_ROOT}/runtime/3rdparty/tbb/lib:${OPENCV_PREFIX}/lib:${LD_LIBRARY_PATH}
 
+# ---- YOLO ball detector runtime deps (src/.../op3_ball_detector/scripts/yolo_ball_detector.py) ----
+# torch comes from the CPU wheel index (this image targets CPU inference).
+# numpy is held < 2 because ROS Humble's cv_bridge is built against NumPy 1.x
+# (NumPy 2.x makes it fail with "_ARRAY_API not found"); opencv-python is pinned
+# to a matching NumPy-1.x build. Keep in sync with
+# src/ROBOTIS-OP3-Demo/op3_ball_detector/requirements_yolo.txt
+RUN python3 -m pip install --no-cache-dir \
+        torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+ && python3 -m pip install --no-cache-dir \
+        "numpy<2" "opencv-python==4.10.0.84" "ultralytics>=8.3.0" \
+        "onnxruntime>=1.17,<2" "openvino>=2024.0"
+
 # Workspace
 WORKDIR /ros2_ws
 RUN mkdir -p /ros2_ws/src

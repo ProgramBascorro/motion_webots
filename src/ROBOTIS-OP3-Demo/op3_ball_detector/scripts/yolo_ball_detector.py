@@ -49,7 +49,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from std_msgs.msg import Bool
 from sensor_msgs.msg import Image, CompressedImage
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PointStamped
 from op3_ball_detector_msgs.msg import CircleSetStamped
 
 from cv_bridge import CvBridge
@@ -90,6 +90,15 @@ class YoloBallDetector(Node):
             self.declare_parameter('detection_frame_id', 'detector').value)
         self.enabled = bool(
             self.declare_parameter('enable_at_start', True).value)
+        # Head-tracking feed. Also publish the best ball's center as a
+        # geometry_msgs/PointStamped in [0, 1] image coordinates (0 = left/top,
+        # 1 = right/bottom) on this topic, matching op3_yolo_vision so that
+        # op3_ball_localization/head_tracking_node can drive the head scan/track.
+        # Only published when a ball is seen (absence -> the tracker scans).
+        # Empty string disables this extra publisher.
+        self.ball_center_topic = str(
+            self.declare_parameter(
+                'ball_center_topic', '/vision/yolo/ball_center').value).strip()
 
         if self.detection_rate <= 0.0:
             self.get_logger().warn('detection_rate <= 0, defaulting to 30 Hz')
@@ -106,6 +115,13 @@ class YoloBallDetector(Node):
 
         self.circles_pub = self.create_publisher(
             CircleSetStamped, 'circle_set', 10)
+        # Absolute topic (leading '/') stays global regardless of the node's
+        # namespace, so head_tracking_node finds it at /vision/yolo/ball_center.
+        if self.ball_center_topic:
+            self.ball_center_pub = self.create_publisher(
+                PointStamped, self.ball_center_topic, 10)
+        else:
+            self.ball_center_pub = None
         if self.publish_image:
             self.image_pub = self.create_publisher(Image, 'image_out', 1)
         else:
@@ -308,6 +324,15 @@ class YoloBallDetector(Node):
 
         if circles:
             best = circles[0]
+            if self.ball_center_pub is not None:
+                # circles carry x,y in [-1, 1]; head_tracking_node wants [0, 1].
+                center = PointStamped()
+                center.header.stamp = header.stamp
+                center.header.frame_id = self.detection_frame_id
+                center.point.x = (best[0] + 1.0) / 2.0
+                center.point.y = (best[1] + 1.0) / 2.0
+                center.point.z = best[3]   # confidence
+                self.ball_center_pub.publish(center)
             self.get_logger().info(
                 'ball: center=(%.2f, %.2f) radius=%.1fpx conf=%.2f (%d total)'
                 % (best[0], best[1], best[2], best[3], len(circles)),

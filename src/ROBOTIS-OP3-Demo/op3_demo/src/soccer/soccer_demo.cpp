@@ -588,6 +588,19 @@ void SoccerDemo::startSoccerMode()
   on_tracking_ball_ = true;
   start_following_ = true;
 
+  // (Re)activate the external head tracker / scan. startSoccerMode() runs on
+  // EVERY (re)start of walking — the initial enable, button toggle-on, and
+  // post-kick/getup restarts — so publishing "start" here (mirroring
+  // stopSoccerMode()'s "stop") keeps the head scan in sync. Without it, toggling
+  // the demo off then on again left head_tracking_node deactivated: the robot
+  // walked but the head never scanned.
+  if (head_tracker_cmd_pub_)
+  {
+    std_msgs::msg::String cmd;
+    cmd.data = "start";
+    head_tracker_cmd_pub_->publish(cmd);
+  }
+
   is_start_soccer_running_ = false;
 }
 

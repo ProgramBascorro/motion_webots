@@ -1,0 +1,34 @@
+# Convenience compose file for the YOLO ball detector.
+#
+# Uses the committed image op3-webots-ros2:humble-yolo (which already contains
+# torch(cpu) + ultralytics + numpy<2 + opencv-python pinned). The image's
+# entrypoint auto-sources /opt/ros/humble + /ros2_ws/install.
+#
+#   xhost +local:root                                   # once, for the GUI
+#   # run the detector directly:
+#   docker compose -f docker-compose.yolo.yml up
+#   # or get an interactive shell instead:
+#   docker compose -f docker-compose.yolo.yml run --rm op3_yolo
+#
+services:
+  op3_yolo:
+    image: op3-webots-ros2:humble-yolo
+    container_name: op3_yolo
+    privileged: true            # gives access to /dev/video* etc.
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=0
+    volumes:
+      - .:/ros2_ws                              # whole workspace (build/install persist to host)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
+    # ENTRYPOINT is /bin/bash; this CMD sources the workspace then launches.
+    command:
+      - -lc
+      - >
+        source /opt/ros/humble/setup.bash &&
+        source /ros2_ws/install/setup.bash &&
+        ros2 launch op3_ball_detector yolo_ball_detector.launch.py

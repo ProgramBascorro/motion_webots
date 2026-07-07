@@ -216,9 +216,13 @@ action_docker_run() {
     --cap-add SYS_RESOURCE
   )
 
-  [[ -e /dev/ttyUSB0 ]] && cmd+=(--device=/dev/ttyUSB0)
-  [[ -e /dev/input ]] && cmd+=(--device=/dev/input)
-  [[ -e /dev/uinput ]] && cmd+=(--device=/dev/uinput)
+  # Bind the host's live /dev instead of pinning specific device nodes. Docker
+  # --device freezes a node at its container-start major:minor, so a re-flashed
+  # or swapped OpenCR that re-enumerates to a new ttyUSB minor goes stale
+  # ("Error opening serial port"). The whole /dev (container is --privileged)
+  # stays live and exposes the udev symlink /dev/ttyOP3 that OP3.robot uses, so
+  # op3_manager and the action editor both track whichever board is plugged in.
+  cmd+=(-v /dev:/dev)
 
   local input_gid=""
   local dialout_gid=""

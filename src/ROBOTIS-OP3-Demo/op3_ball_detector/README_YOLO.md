@@ -30,6 +30,29 @@ the existing `op3_demo` soccer pipeline expects.
 Because it publishes on `/ball_detector_node/circle_set`, the `op3_demo`
 `ball_tracker` / `ball_follower` work unchanged.
 
+## Use in the op3_demo soccer pipeline
+
+`op3_demo/launch/demo.launch.xml` runs this detector by **default** (the newest
+OpenVINO backend). It brings up `usb_cam` + the detector, so the soccer demo
+gets ball positions with no extra steps:
+
+```bash
+ros2 launch op3_demo demo.launch.xml
+```
+
+The detector is selectable via the `ball_detector_launch` arg — every option
+starts `usb_cam` and publishes `/ball_detector_node/circle_set`, so nothing
+downstream changes:
+
+```bash
+# ONNX backend
+ros2 launch op3_demo demo.launch.xml ball_detector_launch:=yolo_ball_detector_onnx.launch.py
+# PyTorch .pt backend
+ros2 launch op3_demo demo.launch.xml ball_detector_launch:=yolo_ball_detector.launch.py
+# original Hough-circle C++ detector
+ros2 launch op3_demo demo.launch.xml ball_detector_launch:=ball_detector_from_usb_cam.launch.py
+```
+
 ## Dependencies
 
 `ultralytics` (and `torch`) have **no rosdep key** and must be installed

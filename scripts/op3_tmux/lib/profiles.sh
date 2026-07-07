@@ -13,6 +13,8 @@ apply_profile() {
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
       DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
       START_DELAY_SEC="4.0"
+      # No real Dynamixel bus in sim, so no init contention to stagger around.
+      STACK_STAGGER_SEC="0.0"
       ROS_DOMAIN_ID_DEFAULT="0"
       ;;
     real_robot)
@@ -27,6 +29,9 @@ apply_profile() {
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
       DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
       START_DELAY_SEC="1.0"
+      # Let op3_manager finish its Dynamixel init (~3.5 s) before the vision/web/
+      # studio panes start, so they don't steal CPU/USB during the init.
+      STACK_STAGGER_SEC="5.0"
       ROS_DOMAIN_ID_DEFAULT="1"
       ;;
     *)
@@ -54,5 +59,6 @@ apply_profile() {
   DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-$DEMO_WAIT_STEP_SEC}"
   DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-$DEMO_WAIT_STEPS}"
   START_DELAY_SEC="${OP3_START_DELAY_SEC:-$START_DELAY_SEC}"
+  STACK_STAGGER_SEC="${OP3_STACK_STAGGER_SEC:-$STACK_STAGGER_SEC}"
   ROS_DOMAIN_ID_DEFAULT="${ROS_DOMAIN_ID_DEFAULT_ENV:-$ROS_DOMAIN_ID_DEFAULT}"
 }

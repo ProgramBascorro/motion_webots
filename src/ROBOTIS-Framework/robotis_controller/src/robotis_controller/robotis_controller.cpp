@@ -479,31 +479,53 @@ void RobotisController::initializeDevice(const std::string init_file_path)
     {
       if (dxl->bulk_read_items_.size() != 0)
       {
-        uint16_t  data16 = 0;
-
         bulkread_start_addr = dxl->bulk_read_items_[0]->address_;
-        bulkread_data_length = 0;
 
         // set indirect address
         int indirect_addr = indirect_addr_it->second->address_;
+
+        // Each mapped byte needs one 2-byte indirect entry. Reading them back
+        // one-by-one (read2Byte per byte) was the dominant boot cost: ~15 ms per
+        // round-trip x ~200 entries on this OpenCR USB bus. Instead read the
+        // whole indirect block in ONE transaction, compare in memory, and write
+        // only the (normally zero) entries that differ. Behavior is identical.
+        int total_bytes = 0;
+        for (int i = 0; i < dxl->bulk_read_items_.size(); i++)
+          total_bytes += dxl->bulk_read_items_[i]->data_length_;
+        bulkread_data_length = total_bytes;
+
+        uint8_t indirect_buf[128] = {0, };
+        bool have_block = false;
+        if (total_bytes * 2 <= (int) sizeof(indirect_buf))
+        {
+          dynamixel::PacketHandler *pkt  = dynamixel::PacketHandler::getPacketHandler(dxl->protocol_version_);
+          dynamixel::PortHandler   *port = robot_->ports_[dxl->port_name_];
+          if (pkt->readTxRx(port, dxl->id_, indirect_addr,
+                            (uint16_t)(total_bytes * 2), indirect_buf) == COMM_SUCCESS)
+            have_block = true;
+        }
+
+        int entry = 0;  // running index of 2-byte indirect entries
         for (int i = 0; i < dxl->bulk_read_items_.size(); i++)
         {
           int addr_leng = dxl->bulk_read_items_[i]->data_length_;
-
-          bulkread_data_length += addr_leng;
           for (int l = 0; l < addr_leng; l++)
           {
-            read2Byte(joint_name, indirect_addr, &data16);
-            if (data16 != dxl->ctrl_table_[dxl->bulk_read_items_[i]->item_name_]->address_ + l)
+            uint16_t expected = dxl->ctrl_table_[dxl->bulk_read_items_[i]->item_name_]->address_ + l;
+            // If the block read failed, force a rewrite (0xFFFF never matches).
+            uint16_t current  = have_block
+              ? (uint16_t)(indirect_buf[entry * 2] | (indirect_buf[entry * 2 + 1] << 8))
+              : (uint16_t) 0xFFFF;
+            if (current != expected)
             {
               if (torque_enabled == 1)
               {
                 RCLCPP_ERROR(this->get_logger(), "################\nThe indirect address of the EEPROM area has been changed. \nTurn off Torque Enable and try again.");
                 exit(-1);
               }
-              write2Byte(joint_name, indirect_addr, dxl->ctrl_table_[dxl->bulk_read_items_[i]->item_name_]->address_ + l);
+              write2Byte(joint_name, indirect_addr + entry * 2, expected);
             }
-            indirect_addr += 2;
+            entry++;
           }
         }
       }

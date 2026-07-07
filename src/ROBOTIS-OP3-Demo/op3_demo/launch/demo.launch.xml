@@ -1,12 +1,34 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="with_manager" default="true"/>
+
+  <!-- Which ball-detector launch to run. Default = newest OpenVINO YOLO detector.
+       Every option below starts usb_cam (namespace usb_cam_node) and publishes on
+       /ball_detector_node/circle_set, so the soccer pipeline is unchanged. Swap
+       without editing this file, e.g.:
+         ball_detector_launch:=yolo_ball_detector_onnx.launch.py     (ONNX)
+         ball_detector_launch:=yolo_ball_detector.launch.py          (PyTorch .pt)
+         ball_detector_launch:=ball_detector_from_usb_cam.launch.py  (classic Hough) -->
+  <arg name="ball_detector_launch" default="yolo_ball_detector_openvino.launch.py"/>
+
   <!-- robotis op3 manager -->
   <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
 
   <!-- Camera and Ball detector -->
-  <include file="$(find-pkg-share op3_ball_detector)/launch/ball_detector_from_usb_cam.launch.py"/> 
-   
+  <include file="$(find-pkg-share op3_ball_detector)/launch/$(var ball_detector_launch)"/>
+
+  <!-- Head scan/track (same behavior as demo_yolo.launch.xml).
+       The demo's internal head control is disabled below (use_head_control=false),
+       so THIS node owns the head: it sweeps forward + down when no ball is seen
+       (up-facing angles excluded, per head_tracking.yaml) and PID-tracks the ball
+       otherwise. It consumes /vision/yolo/ball_center (published by the YOLO
+       detector) and is started/stopped by SoccerDemo via /ball_tracker/command,
+       so it stays paused until the soccer demo is enabled. -->
+  <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen">
+    <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
+    <param name="auto_start" value="false"/>
+  </node>
+
   <!-- face tracking -->
   <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml" />
 
@@ -24,5 +46,7 @@
     <param name="grass_demo" value="False" />
     <param name="p_gain" value="0.45" />
     <param name="d_gain" value="0.045" />
+    <!-- Hand head control to head_tracking_node above (forward+down scan). -->
+    <param name="use_head_control" value="false" />
   </node>
 </launch>
