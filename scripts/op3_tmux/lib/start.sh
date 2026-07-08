@@ -56,6 +56,23 @@ start_stack() {
   fi
   demo_wrapped="$(wrap_cmd "$demo_cmd")"
 
+  # Startup stagger: give op3_manager a head start so its (real-robot) Dynamixel
+  # init runs WITHOUT CPU/USB contention from the vision/web/studio panes that
+  # otherwise co-start (which inflated init from ~3.5 s to ~8 s + big variance).
+  # Non-manager, non-webots panes wait STACK_STAGGER_SEC before launching.
+  # STACK_STAGGER_SEC=0 (webots profile / env override) disables it.
+  if awk "BEGIN{exit !(${STACK_STAGGER_SEC:-0} > 0)}" 2>/dev/null; then
+    local _staggered_var
+    for _staggered_var in offset_tuner_wrapped teleop_wrapped fox_wrapped \
+                          tools_wrapped rqt_wrapped yolo_vision_wrapped \
+                          localization_wrapped ball_head_tracking_wrapped \
+                          ball_localizer_wrapped action_editor_wrapped \
+                          action_web_wrapped vision_lab_wrapped demo_wrapped; do
+      local -n _staggered_ref="$_staggered_var"
+      _staggered_ref="sleep ${STACK_STAGGER_SEC}; ${_staggered_ref}"
+    done
+  fi
+
   if [[ "$dry_run" -eq 1 ]]; then
     banner
     echo "${DIM}[dry-run] session: $SESSION${RST}"

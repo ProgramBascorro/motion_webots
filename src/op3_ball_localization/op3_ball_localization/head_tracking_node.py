@@ -58,6 +58,12 @@ class HeadTrackingNode(Node):
 
         self._control_rate = float(self.declare_parameter("control_rate", 20.0).value)
         self._lost_timeout = float(self.declare_parameter("lost_timeout", 0.8).value)
+        # Lock-hold: once the head has locked onto a detected ball, keep holding
+        # its last position for this long after the ball is (briefly) lost before
+        # resuming the scan sweep. Stops the head from wandering back into a scan
+        # on momentary YOLO dropouts — it "locks" onto the ball and stays there.
+        # Effective stickiness ~= lost_timeout + lock_hold_sec. 0 = old behavior.
+        self._lock_hold_sec = float(self.declare_parameter("lock_hold_sec", 1.5).value)
         self._scan_enabled = bool(self.declare_parameter("scan_enabled", True).value)
         self._scan_period_sec = float(self.declare_parameter("scan_period_sec", 2.5).value)
         # Warmup right after activation: head_control_module drops commands until
@@ -165,6 +171,9 @@ class HeadTrackingNode(Node):
         # Wall-clock of the last activation ("start" command, or boot when
         # auto_start). Drives the post-activation scan warmup (see _ensure_scan_mode).
         self._activated_at: Optional[float] = time.monotonic() if self._active else None
+        # Wall-clock of the last cycle we actively tracked (locked onto) the ball.
+        # Drives the lock-hold grace in _control_loop.
+        self._last_locked_time: Optional[float] = None
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -207,6 +216,7 @@ class HeadTrackingNode(Node):
             self._activated_at = time.monotonic()
             self._scan_idx = 0
             self._last_scan_cmd_time = 0.0
+            self._last_locked_time = None
             self._ensure_head_module_enabled(force=True)
             self.get_logger().info("[CMD] activated by start command")
         elif cmd == "stop" and self._active:
@@ -214,6 +224,7 @@ class HeadTrackingNode(Node):
             self._reset_pid()
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
+            self._last_locked_time = None
             # Park head at neutral (pan=0, tilt=forward) immediately so the
             # robot stops mid-scan instead of completing the last SCAN target.
             # Without this, the servos finish executing the last commanded
@@ -275,10 +286,20 @@ class HeadTrackingNode(Node):
 
         if ball_visible:
             self._track_ball(now)
+            self._last_locked_time = now
         else:
             self._reset_pid()
             self._ensure_head_module_enabled(now)  # retry only when idle
-            if self._scan_enabled:
+            # Lock-hold: if we very recently had a lock, hold the current head
+            # pose (issue no scan command) so it stays fixed on the ball's last
+            # position through brief detection gaps. Resume the scan sweep only
+            # once the hold window has lapsed.
+            in_lock_hold = (
+                self._lock_hold_sec > 0.0
+                and self._last_locked_time is not None
+                and (now - self._last_locked_time) < self._lock_hold_sec
+            )
+            if self._scan_enabled and not in_lock_hold:
                 self._ensure_scan_mode(now)
 
     def _track_ball(self, now: float) -> None:

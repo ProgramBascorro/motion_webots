@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import rclpy
@@ -23,55 +22,6 @@ def has_ros_package(package_name: str) -> bool:
         check=False,
     )
     return result.returncode == 0
-
-
-def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> None:
-    """Point ``link_path`` at whichever /dev/ttyUSB* the OpenCR is currently on.
-
-    OP3.robot references a single stable port name (/dev/ttyOP3). But inside the
-    docker container the serial node is a fixed --device from container-start time,
-    so after the board re-enumerates (unplug/re-flash, or swapping between the two
-    OpenCR boards) it lands on a different ttyUSB minor and the old node/symlink goes
-    stale -> "Error opening serial port". We run as root in the privileged container,
-    so recreate the raw ttyUSB nodes and repoint the symlink at the port that actually
-    opens. Idempotent; safe to call on every launch. Degrades quietly off-hardware.
-    """
-    TTY_MAJOR = 188
-    # Ensure raw nodes exist so a re-enumerated board is reachable in the container.
-    for minor in range(max_minor + 1):
-        dev = f'/dev/ttyUSB{minor}'
-        if not os.path.exists(dev):
-            try:
-                os.mknod(dev, 0o666 | stat.S_IFCHR, os.makedev(TTY_MAJOR, minor))
-            except OSError:
-                pass  # not permitted / already exists — fall through to open probe
-
-    # First node that actually opens is the live board (dead minors return ENXIO).
-    live = None
-    for minor in range(max_minor + 1):
-        dev = f'/dev/ttyUSB{minor}'
-        try:
-            fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        except OSError:
-            continue
-        os.close(fd)
-        live = dev
-        break
-
-    if live is None:
-        print(f'ensure_opencr_port: no live /dev/ttyUSB* found; leaving {link_path} as-is',
-              file=sys.stderr)
-        return
-
-    try:
-        if os.path.realpath(link_path) == live:
-            return
-        if os.path.islink(link_path) or os.path.exists(link_path):
-            os.remove(link_path)
-        os.symlink(live, link_path)
-        print(f'ensure_opencr_port: {link_path} -> {live}', file=sys.stderr)
-    except OSError as e:
-        print(f'ensure_opencr_port: could not set {link_path}: {e}', file=sys.stderr)
 
 
 def ensure_action_file(action_file_path: str, default_path: str) -> None:
@@ -103,11 +53,7 @@ def main(args=None):
     # so edits survive rebuilds.
     action_file_path_default = os.path.realpath(share_data_path)
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
-    device_name_default = '/dev/ttyOP3'
-
-    # Make OP3.robot's stable /dev/ttyOP3 track whichever board is plugged in now.
-    if not gazebo_default:
-        ensure_opencr_port()
+    device_name_default = '/dev/ttyUSB0'
 
     if action_file_path != action_file_path_default:
         ensure_action_file(action_file_path, action_file_path_default)

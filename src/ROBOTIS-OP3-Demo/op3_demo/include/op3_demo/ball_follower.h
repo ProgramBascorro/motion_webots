@@ -103,8 +103,15 @@ class BallFollower // : public rclcpp::Node
   // rclcpp::Publisher<std_msgs::msg::String>::SharedPtr module_control_pub_;
   // rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_joint_pub_;
   // rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_scan_pub_;
-  // rclcpp::Publisher<std_msgs::msg::String>::SharedPtr set_walking_command_pub_;
-  // rclcpp::Publisher<op3_walking_module_msgs::msg::WalkingParam>::SharedPtr set_walking_param_pub_;
+  // Persistent member publishers (NOT throwaway locals). A publisher created
+  // inside setWalkingCommand()/setWalkingParam() and destroyed on function
+  // return can drop its message when DDS discovery/matching with walking_module
+  // hasn't finished yet — this intermittently lost the walking "stop" command,
+  // so the legs kept walking after the STOP button ("kadang jalan terus"), and
+  // likewise dropped "start". Created once in setNode(), they are matched with
+  // walking_module long before the first button press, so every command lands.
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr set_walking_command_pub_;
+  rclcpp::Publisher<op3_walking_module_msgs::msg::WalkingParam>::SharedPtr set_walking_param_pub_;
 
   // rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;
   // rclcpp::Client<op3_walking_module_msgs::srv::GetWalkingParam>::SharedPtr get_walking_param_client_;

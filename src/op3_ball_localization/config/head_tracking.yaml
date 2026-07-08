@@ -28,6 +28,12 @@ head_tracking_node:
     # every fresh detection is consumed the same tick.
     control_rate: 25.0
     lost_timeout: 0.8
+    # Lock-hold: setelah kepala mengunci (lock) bola yang terdeteksi, tahan
+    # posisi kepala selama ini sebelum kembali menyapu (scan) ketika deteksi
+    # sempat hilang. Mencegah kepala langsung ngeloyor scan gara-gara YOLO
+    # drop 1-2 frame — begitu bola terdeteksi kepala mengunci dan diam di situ.
+    # Stickiness efektif ~= lost_timeout + lock_hold_sec (~2.3 s). 0 = nonaktif.
+    lock_hold_sec: 1.5
 
     # When no ball is seen, sweep the head through forward + downward positions.
     # Up-facing angles are intentionally excluded — the ball sits on the floor.

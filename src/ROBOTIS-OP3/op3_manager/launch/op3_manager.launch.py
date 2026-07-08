@@ -16,7 +16,7 @@ def generate_launch_description():
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
     action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_ros1_lama.bin'
-    device_name_default = '/dev/ttyOP3'
+    device_name_default = '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT8J0QK9-if00-port0'
 
     return LaunchDescription([
         DeclareLaunchArgument(

@@ -429,8 +429,15 @@ void WalkingModule::startWalking()
   ctrl_running_ = true;
   real_running_ = true;
 
-  //updateTimeParam(1.5); // hs
-  //time_ = control_cycle_msec_ * 0.001;
+  // Reset the gait clock to the start of a cycle. This node keeps calling
+  // processPhase() while idle, so time_ drifts to an arbitrary phase; without
+  // this reset a restart-after-stop resumes mid-cycle and the move amplitudes
+  // (applied only at PHASE1 via updateMovementParam) may not take effect until
+  // the NEXT full cycle — the robot looked like it "didn't move again" after
+  // pressing START a second time. Soft-start stretches that first cycle 1.5x so
+  // the first foot-lift is a gentle ramp, not a slam. (Matched from CHRONUS_NEW.)
+  updateTimeParam(1.5);
+  time_ = control_cycle_msec_ * 0.001;
 
   publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_INFO, "Start walking");
 }

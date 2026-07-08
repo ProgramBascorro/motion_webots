@@ -73,6 +73,12 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
   {
     current_joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         "/robotis/goal_joint_states", 10, std::bind(&BallFollower::currentJointStatesCallback, this, std::placeholders::_1));
+
+    // Persistent publishers to walking_module — created ONCE here so DDS
+    // discovery is done well before any button press and no walking "start"/
+    // "stop" is ever silently dropped (see the header note).
+    set_walking_command_pub_ = node_->create_publisher<std_msgs::msg::String>("/robotis/walking/command", 10);
+    set_walking_param_pub_ = node_->create_publisher<op3_walking_module_msgs::msg::WalkingParam>("/robotis/walking/set_params", 10);
   }
   else
   {
@@ -349,7 +355,6 @@ void BallFollower::setWalkingCommand(const std::string &command)
     setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
   }
 
-  auto set_walking_command_pub_ = node_->create_publisher<std_msgs::msg::String>("/robotis/walking/command", 10);
   std_msgs::msg::String _command_msg;
   _command_msg.data = command;
   set_walking_command_pub_->publish(_command_msg);
@@ -370,7 +375,6 @@ void BallFollower::setWalkingParam(double x_move, double y_move, double rotation
     RCLCPP_ERROR(rclcpp::get_logger("BallFollower"), "Node is not set, cannot set walking parameters");
     return;
   }
-  auto set_walking_param_pub_ = node_->create_publisher<op3_walking_module_msgs::msg::WalkingParam>("/robotis/walking/set_params", 10);
   set_walking_param_pub_->publish(current_walking_param_);
 
   current_x_move_ = x_move;
