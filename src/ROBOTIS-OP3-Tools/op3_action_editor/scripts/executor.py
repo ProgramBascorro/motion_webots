@@ -92,16 +92,19 @@ def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> N
     recreate the raw device nodes and repoint the symlink at the port that actually
     opens. Idempotent; safe on every launch. Degrades quietly off-hardware.
 
-    Port choice matters, not just liveness. The OpenCR bridge enumerates as
-    /dev/ttyACM* and is the *only* port where sub controller ID 200 answers -- that
-    is what carries the IMU, button, buzzer and DXL power control. A U2D2 enumerates
-    as /dev/ttyUSB* and is wired straight to the DXL bus, so it reaches the servos
-    but never ID 200. We therefore prefer a port that answers ID 200 *and* a servo;
-    a port with ID 200 but no servo would mean the OpenCR is not on the servo bus,
-    which would be worse than what we have, so it is rejected.
+    Port choice matters, not just liveness. In the opencr_op3 firmware the sub
+    controller (ID 200 -- IMU, button, buzzer, DXL power) is served on
+    DXL_PORT = Serial3, i.e. on the TTL bus at 2 Mbps protocol 2.0, alongside the
+    servos; the OpenCR's own micro-USB is only a 115200 debug console. So the right
+    port is the TTL adapter, and ID 200 answering there is what tells us the OpenCR
+    is present and running that firmware. Pick by probing, not by liveness: prefer a
+    port where ID 200 *and* a servo answer, else fall back to servos only (OpenCR
+    absent or not flashed -> no IMU). ttyUSB* is probed first for that reason;
+    ttyACM* is probed too so a board that does bridge over USB still works, but it
+    is never preferred.
     """
     candidates = []
-    for major, prefix in ((166, 'ttyACM'), (188, 'ttyUSB')):
+    for major, prefix in ((188, 'ttyUSB'), (166, 'ttyACM')):
         for minor in range(max_minor + 1):
             dev = f'/dev/{prefix}{minor}'
             if not os.path.exists(dev):
@@ -143,10 +146,10 @@ def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> N
 
     if chosen is None:
         chosen = with_servos or live[0]
-        print(f'ensure_opencr_port: no OpenCR bridge found (ID {SUB_CONTROLLER_ID} '
+        print(f'ensure_opencr_port: OpenCR not answering (ID {SUB_CONTROLLER_ID} '
               f'silent on {", ".join(live)}); using {chosen} -- servos only, no IMU. '
-              f'Connect the PC to the OpenCR micro-USB to get ID {SUB_CONTROLLER_ID}.',
-              file=sys.stderr)
+              f'Check the OpenCR is powered, on the TTL bus, and flashed with the '
+              f'opencr_op3 firmware.', file=sys.stderr)
 
     try:
         if os.path.realpath(link_path) == chosen:
