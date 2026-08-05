@@ -10,7 +10,10 @@ def generate_launch_description():
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    device_name_default = '/dev/ttyUSB0'
+    # Same stable name OP3.robot uses. This is the port op3_manager writes the DXL
+    # power and RGB LED through (sub controller ID 200), so it must follow the
+    # OpenCR rather than being pinned to a ttyUSB minor.
+    device_name_default = '/dev/ttyOP3'
 
     return LaunchDescription([
         Node(

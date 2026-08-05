@@ -5,6 +5,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import termios
 import rclpy
 import time
 from rclpy.node import Node
@@ -34,46 +35,126 @@ def ensure_action_file(action_file_path: str, default_path: str) -> None:
     os.makedirs(os.path.dirname(action_file_path), exist_ok=True)
     shutil.copyfile(default_path, action_file_path)
 
+SUB_CONTROLLER_ID = 200
+FIRST_SERVO_ID = 1
+
+
+def dxl_ping(dev: str, dxl_id: int, baud_flag: int = termios.B2000000) -> bool:
+    """True if ``dxl_id`` answers a protocol 2.0 ping on ``dev``.
+
+    Pure stdlib on purpose: this runs before the workspace is fully up and the
+    container has no pyserial. Baud is nominal on a CDC port (the OpenCR bridge
+    ignores it) and mandatory on an FTDI one, so 2 Mbps works for both.
+    """
+    body = bytes([0xFF, 0xFF, 0xFD, 0x00, dxl_id, 3, 0, 0x01])
+    crc = 0
+    for byte in body:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x8005) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    packet = body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+    try:
+        fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[0] = attrs[1] = attrs[3] = 0
+        attrs[2] = termios.CS8 | termios.CLOCAL | termios.CREAD
+        attrs[4] = attrs[5] = baud_flag
+        attrs[6][termios.VMIN] = 0
+        attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        os.write(fd, packet)
+        reply = b''
+        deadline = time.time() + 0.3
+        while time.time() < deadline and len(reply) < 14:
+            try:
+                reply += os.read(fd, 64)
+            except BlockingIOError:
+                time.sleep(0.002)
+        return len(reply) >= 14
+    except (OSError, termios.error):
+        return False
+    finally:
+        os.close(fd)
+
+
 def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> None:
-    """Point ``link_path`` at whichever /dev/ttyUSB* the OpenCR is currently on.
+    """Point ``link_path`` at the OpenCR bridge, or failing that at whatever is live.
 
     OP3.robot references a single stable port name (/dev/ttyOP3). But inside the
     docker container the serial node is a fixed --device from container-start time,
     so after the board re-enumerates (unplug/re-flash, or swapping between two OpenCR
-    boards) it lands on a different ttyUSB minor and the old node/symlink goes stale
+    boards) it lands on a different minor and the old node/symlink goes stale
     -> "Error opening serial port". We run as root in the privileged container, so
-    recreate the raw ttyUSB nodes and repoint the symlink at the port that actually
+    recreate the raw device nodes and repoint the symlink at the port that actually
     opens. Idempotent; safe on every launch. Degrades quietly off-hardware.
+
+    Port choice matters, not just liveness. The OpenCR bridge enumerates as
+    /dev/ttyACM* and is the *only* port where sub controller ID 200 answers -- that
+    is what carries the IMU, button, buzzer and DXL power control. A U2D2 enumerates
+    as /dev/ttyUSB* and is wired straight to the DXL bus, so it reaches the servos
+    but never ID 200. We therefore prefer a port that answers ID 200 *and* a servo;
+    a port with ID 200 but no servo would mean the OpenCR is not on the servo bus,
+    which would be worse than what we have, so it is rejected.
     """
-    TTY_MAJOR = 188
-    for minor in range(max_minor + 1):
-        dev = f'/dev/ttyUSB{minor}'
-        if not os.path.exists(dev):
-            try:
-                os.mknod(dev, 0o666 | stat.S_IFCHR, os.makedev(TTY_MAJOR, minor))
-            except OSError:
-                pass
-    live = None
-    for minor in range(max_minor + 1):
-        dev = f'/dev/ttyUSB{minor}'
+    candidates = []
+    for major, prefix in ((166, 'ttyACM'), (188, 'ttyUSB')):
+        for minor in range(max_minor + 1):
+            dev = f'/dev/{prefix}{minor}'
+            if not os.path.exists(dev):
+                try:
+                    os.mknod(dev, 0o666 | stat.S_IFCHR, os.makedev(major, minor))
+                except OSError:
+                    pass
+            candidates.append(dev)
+
+    live = []
+    for dev in candidates:
         try:
             fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError:
             continue
         os.close(fd)
-        live = dev
-        break
-    if live is None:
-        print(f'ensure_opencr_port: no live /dev/ttyUSB* found; leaving {link_path} as-is',
+        live.append(dev)
+
+    if not live:
+        print(f'ensure_opencr_port: no live serial port found; leaving {link_path} as-is',
               file=sys.stderr)
         return
+
+    chosen = None
+    with_servos = None
+    for dev in live:
+        has_servo = dxl_ping(dev, FIRST_SERVO_ID)
+        if has_servo and with_servos is None:
+            with_servos = dev
+        if dxl_ping(dev, SUB_CONTROLLER_ID):
+            if has_servo:
+                chosen = dev
+                print(f'ensure_opencr_port: OpenCR found on {dev} '
+                      f'(ID {SUB_CONTROLLER_ID} + servos) -- IMU available',
+                      file=sys.stderr)
+                break
+            print(f'ensure_opencr_port: {dev} answers ID {SUB_CONTROLLER_ID} but no '
+                  f'servo is reachable through it; skipping', file=sys.stderr)
+
+    if chosen is None:
+        chosen = with_servos or live[0]
+        print(f'ensure_opencr_port: no OpenCR bridge found (ID {SUB_CONTROLLER_ID} '
+              f'silent on {", ".join(live)}); using {chosen} -- servos only, no IMU. '
+              f'Connect the PC to the OpenCR micro-USB to get ID {SUB_CONTROLLER_ID}.',
+              file=sys.stderr)
+
     try:
-        if os.path.realpath(link_path) == live:
+        if os.path.realpath(link_path) == chosen:
             return
         if os.path.islink(link_path) or os.path.exists(link_path):
             os.remove(link_path)
-        os.symlink(live, link_path)
-        print(f'ensure_opencr_port: {link_path} -> {live}', file=sys.stderr)
+        os.symlink(chosen, link_path)
+        print(f'ensure_opencr_port: {link_path} -> {chosen}', file=sys.stderr)
     except OSError as e:
         print(f'ensure_opencr_port: could not set {link_path}: {e}', file=sys.stderr)
 
