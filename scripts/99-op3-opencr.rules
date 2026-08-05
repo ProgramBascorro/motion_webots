@@ -4,18 +4,16 @@
 #   sudo cp scripts/99-op3-opencr.rules /etc/udev/rules.d/99-op3-opencr.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# Two boards can provide the bus, and they are NOT equivalent:
-#
-#   OpenCR (CDC, /dev/ttyACM*) - sub controller ID 200 answers here, which is the
-#     only way to reach the IMU, button, buzzer and DXL power control.
-#   U2D2   (FTDI, /dev/ttyUSB*) - wired straight to the DXL bus: servos reply,
-#     ID 200 never does.
-#
-# So the OpenCR must win /dev/ttyOP3 whenever both are plugged in. link_priority
-# makes that deterministic instead of last-one-enumerated-wins.
+# The whole bus lives behind ONE TTL adapter. In the opencr_op3 firmware the
+# sub controller (ID 200 -- IMU, button, buzzer, DXL power) is served on
+# DXL_PORT = Serial3, i.e. the TTL bus at 2 Mbps protocol 2.0, NOT over USB:
+# the OpenCR's own micro-USB is only a 115200 debug console (Serial.begin in
+# opencr_op3.ino). So /dev/ttyOP3 must follow the TTL adapter, and a ttyACM
+# from the OpenCR must never claim it.
 
-# OpenCR 1.0 (STM32 virtual COM port) - preferred
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", SYMLINK+="ttyOP3", OPTIONS+="link_priority=10", MODE="0666"
-
-# U2D2 (FT232H) - fallback, servos only
+# U2D2 (FT232H) on the DXL bus -- servos AND sub controller ID 200
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", SYMLINK+="ttyOP3", MODE="0666"
+
+# OpenCR debug console, if its micro-USB is plugged in. Named, but deliberately
+# NOT ttyOP3 -- it carries no Dynamixel traffic.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", SYMLINK+="ttyOpenCRdebug", MODE="0666"
