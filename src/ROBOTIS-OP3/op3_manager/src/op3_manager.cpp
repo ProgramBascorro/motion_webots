@@ -56,7 +56,8 @@ const double PROTOCOL_VERSION = 2.0;
 const int SUB_CONTROLLER_ID = 200;
 const int DXL_BROADCAST_ID = 254;
 const int DEFAULT_DXL_ID = 1;
-const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyUSB0";
+const std::string SERVO_DEVICE = "/dev/ttyOP3";
+const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOpenCR";
 const int POWER_CTRL_TABLE = 24;
 const int RGB_LED_CTRL_TABLE = 26;
 const int TORQUE_ON_CTRL_TABLE = 64;
@@ -67,6 +68,9 @@ std::string g_offset_file;
 std::string g_robot_file;
 std::string g_init_file;
 std::string g_device_name;
+// Port carrying sub controller ID 200. Separate from g_device_name because this
+// OpenCR serves it over micro-USB while the servos stay on the TTL bus.
+std::string g_sub_controller_device;
 
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_init_pose_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_enable_ctrl_pub;
@@ -249,13 +253,15 @@ int main(int argc, char **argv)
   node->declare_parameter<std::string>("offset_file_path", "");
   node->declare_parameter<std::string>("robot_file_path", "");
   node->declare_parameter<std::string>("init_file_path", "");
-  node->declare_parameter<std::string>("device_name", SUB_CONTROLLER_DEVICE);
+  node->declare_parameter<std::string>("device_name", SERVO_DEVICE);
+  node->declare_parameter<std::string>("sub_controller_device_name", SUB_CONTROLLER_DEVICE);
   node->declare_parameter<int>("baud_rate", BAUD_RATE);
 
   node->get_parameter("offset_file_path", g_offset_file);
   node->get_parameter("robot_file_path", g_robot_file);
   node->get_parameter("init_file_path", g_init_file);
   node->get_parameter("device_name", g_device_name);
+  node->get_parameter("sub_controller_device_name", g_sub_controller_device);
   node->get_parameter("baud_rate", g_baudrate);
 
   auto button_sub = node->create_subscription<std_msgs::msg::String>("/robotis/open_cr/button", 1, buttonHandlerCallback);
@@ -272,8 +278,11 @@ int main(int argc, char **argv)
   /* real robot */
   if (g_is_simulation == false)
   {
-    // open port
-    PortHandler *port_handler = (PortHandler *) PortHandler::getPortHandler(g_device_name.c_str());
+    // Open the sub controller's port, not the servo one: ID 200 is served over the
+    // OpenCR's micro-USB here (see OP3.robot), while g_device_name is the servo bus
+    // that the torque check above talks to. They are the same name only with stock
+    // opencr_op3 wiring.
+    PortHandler *port_handler = (PortHandler *) PortHandler::getPortHandler(g_sub_controller_device.c_str());
     bool set_port_result = port_handler->setBaudRate(g_baudrate);
     if (set_port_result == false)
       RCLCPP_ERROR(node->get_logger(), "Error Set port");

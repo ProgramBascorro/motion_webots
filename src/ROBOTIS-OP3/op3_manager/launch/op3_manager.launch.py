@@ -125,10 +125,13 @@ def generate_launch_description():
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    # Same stable name OP3.robot uses. This is the port op3_manager writes the DXL
-    # power and RGB LED through (sub controller ID 200), so it must follow the
-    # OpenCR rather than being pinned to a ttyUSB minor.
+    # Same stable names OP3.robot uses. Two of them, because the servo bus and the
+    # sub controller are on different adapters here: device_name is the servo port
+    # (the startup torque check reads joint ID 1 through it), while the DXL power-on
+    # and RGB LED writes go to ID 200 on the OpenCR's own port. With stock
+    # opencr_op3 wiring both would simply be /dev/ttyOP3.
     device_name_default = '/dev/ttyOP3'
+    sub_controller_device_name_default = '/dev/ttyOpenCR'
 
     return LaunchDescription([
         Node(
@@ -143,7 +146,8 @@ def generate_launch_description():
                 'offset_file_path': offset_file_path_default,
                 'robot_file_path': robot_file_path_default,
                 'init_file_path': init_file_path_default,
-                'device_name': device_name_default
+                'device_name': device_name_default,
+                'sub_controller_device_name': sub_controller_device_name_default
             }]
         )
         # Node(
