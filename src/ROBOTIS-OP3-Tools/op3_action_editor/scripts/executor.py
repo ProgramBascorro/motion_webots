@@ -208,9 +208,10 @@ def main(args=None):
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
     action_file_path_default = resolve_action_file_default()
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
-    # Both power-on (device_name) and the controller (OP3.robot) open this one
-    # stable name; ensure_opencr_port() makes it track the board plugged in now.
-    device_name_default = '/dev/ttyOP3'
+    # device_name is only the port used to power on sub controller ID 200, which
+    # lives on the OpenCR's own port here; the servos come from OP3.robot. Both
+    # names are resolved by ensure_opencr_port() just below.
+    device_name_default = '/dev/ttyOpenCR'
     if not gazebo_default:
         ensure_opencr_port()
 

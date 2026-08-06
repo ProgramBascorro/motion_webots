@@ -21,7 +21,10 @@
 const int BAUD_RATE = 2000000;
 const double PROTOCOL_VERSION = 2.0;
 const int SUB_CONTROLLER_ID = 200;
-const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOP3";
+// device_name is used for exactly one thing here: the ID 200 power-on below. On
+// this robot the sub controller answers on the OpenCR's own port, not the servo
+// bus -- with stock opencr_op3 wiring this would be /dev/ttyOP3 instead.
+const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOpenCR";
 const int POWER_CTRL_TABLE = 24;
 
 void sighandler(int sig)
