@@ -210,6 +210,15 @@ void dxlTorqueCheckCallback(const std_msgs::msg::String::SharedPtr msg)
        map_it != controller->robot_->port_default_device_.end(); map_it++)
   {
     std::string default_device_name = map_it->second;
+
+    // A port's default device may be a sensor, not a joint: the OpenCR sub
+    // controller sits on its own port here. Sensors have no torque register, and
+    // read1Byte() would not only fail but insert a NULL into dxls_ (it indexes the
+    // map with operator[]), so every check would decide torque was off and
+    // re-initialize the whole robot. Only joints can answer this question.
+    if (controller->robot_->dxls_.find(default_device_name) == controller->robot_->dxls_.end())
+      continue;
+
     controller->read1Byte(default_device_name, TORQUE_ON_CTRL_TABLE, &torque_result);
 
     // if not, torque on
