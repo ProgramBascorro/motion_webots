@@ -81,27 +81,43 @@ def dxl_ping(dev: str, dxl_id: int, baud_flag: int = termios.B2000000) -> bool:
         os.close(fd)
 
 
-def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> None:
-    """Point ``link_path`` at the OpenCR bridge, or failing that at whatever is live.
+def _point_link(link_path: str, target: str) -> None:
+    """Repoint ``link_path`` at ``target``, quietly and idempotently."""
+    try:
+        if os.path.realpath(link_path) == target:
+            return
+        if os.path.islink(link_path) or os.path.exists(link_path):
+            os.remove(link_path)
+        os.symlink(target, link_path)
+        print(f'ensure_opencr_port: {link_path} -> {target}', file=sys.stderr)
+    except OSError as e:
+        print(f'ensure_opencr_port: could not set {link_path}: {e}', file=sys.stderr)
 
-    OP3.robot references a single stable port name (/dev/ttyOP3). But inside the
-    docker container the serial node is a fixed --device from container-start time,
-    so after the board re-enumerates (unplug/re-flash, or swapping between two OpenCR
-    boards) it lands on a different minor and the old node/symlink goes stale
-    -> "Error opening serial port". We run as root in the privileged container, so
-    recreate the raw device nodes and repoint the symlink at the port that actually
-    opens. Idempotent; safe on every launch. Degrades quietly off-hardware.
 
-    Port choice matters, not just liveness. In the opencr_op3 firmware the sub
-    controller (ID 200 -- IMU, button, buzzer, DXL power) is served on
-    DXL_PORT = Serial3, i.e. on the TTL bus at 2 Mbps protocol 2.0, alongside the
-    servos; the OpenCR's own micro-USB is only a 115200 debug console. So the right
-    port is the TTL adapter, and ID 200 answering there is what tells us the OpenCR
-    is present and running that firmware. Pick by probing, not by liveness: prefer a
-    port where ID 200 *and* a servo answer, else fall back to servos only (OpenCR
-    absent or not flashed -> no IMU). ttyUSB* is probed first for that reason;
-    ttyACM* is probed too so a board that does bridge over USB still works, but it
-    is never preferred.
+def ensure_opencr_port(servo_link: str = '/dev/ttyOP3',
+                       sub_link: str = '/dev/ttyOpenCR',
+                       max_minor: int = 15) -> None:
+    """Point the two stable port names at whatever is actually plugged in now.
+
+    OP3.robot references stable names, but inside the docker container the serial
+    node is a fixed --device from container-start time, so after a board
+    re-enumerates (unplug/re-flash, or swapping boards) it lands on a different
+    minor and the old node/symlink goes stale -> "Error opening serial port". We run
+    as root in the privileged container, so recreate the raw device nodes and
+    repoint the symlinks at the ports that actually answer. Idempotent; safe on
+    every launch; degrades quietly off-hardware.
+
+    Two names because on CHRONUS the buses are split. Stock opencr_op3 serves the
+    sub controller (ID 200 -- IMU, button, buzzer, DXL power) on DXL_PORT = Serial3,
+    i.e. the TTL bus alongside the servos. This robot's OpenCR cannot: its TTL
+    transceiver is deaf, so it runs opencr_op3_usb and serves ID 200 over its
+    micro-USB. Hence servo_link = the TTL adapter, sub_link = the OpenCR CDC.
+
+    Pick by probing, not by liveness -- who answers decides, so the same code keeps
+    working if a healthy OpenCR is ever put back on the TTL bus. In that case both
+    roles land on one port, and sub_link is deliberately left alone: pointing two
+    PortHandlers at one tty would put two fds on it. OP3.robot must move the sensor
+    back onto ttyOP3 for that wiring.
     """
     candidates = []
     for major, prefix in ((188, 'ttyUSB'), (166, 'ttyACM')):
@@ -124,42 +140,40 @@ def ensure_opencr_port(link_path: str = '/dev/ttyOP3', max_minor: int = 15) -> N
         live.append(dev)
 
     if not live:
-        print(f'ensure_opencr_port: no live serial port found; leaving {link_path} as-is',
-              file=sys.stderr)
+        print(f'ensure_opencr_port: no live serial port found; leaving {servo_link} '
+              f'and {sub_link} as-is', file=sys.stderr)
         return
 
-    chosen = None
-    with_servos = None
+    servo_port = None
+    sub_port = None
     for dev in live:
-        has_servo = dxl_ping(dev, FIRST_SERVO_ID)
-        if has_servo and with_servos is None:
-            with_servos = dev
-        if dxl_ping(dev, SUB_CONTROLLER_ID):
-            if has_servo:
-                chosen = dev
-                print(f'ensure_opencr_port: OpenCR found on {dev} '
-                      f'(ID {SUB_CONTROLLER_ID} + servos) -- IMU available',
-                      file=sys.stderr)
-                break
-            print(f'ensure_opencr_port: {dev} answers ID {SUB_CONTROLLER_ID} but no '
-                  f'servo is reachable through it; skipping', file=sys.stderr)
+        if servo_port is None and dxl_ping(dev, FIRST_SERVO_ID):
+            servo_port = dev
+        if sub_port is None and dxl_ping(dev, SUB_CONTROLLER_ID):
+            sub_port = dev
+        if servo_port is not None and sub_port is not None:
+            break
 
-    if chosen is None:
-        chosen = with_servos or live[0]
+    if servo_port is None:
+        servo_port = live[0]
+        print(f'ensure_opencr_port: no servo answered on {", ".join(live)}; '
+              f'falling back to {servo_port}', file=sys.stderr)
+    _point_link(servo_link, servo_port)
+
+    if sub_port is None:
         print(f'ensure_opencr_port: OpenCR not answering (ID {SUB_CONTROLLER_ID} '
-              f'silent on {", ".join(live)}); using {chosen} -- servos only, no IMU. '
-              f'Check the OpenCR is powered, on the TTL bus, and flashed with the '
-              f'opencr_op3 firmware.', file=sys.stderr)
-
-    try:
-        if os.path.realpath(link_path) == chosen:
-            return
-        if os.path.islink(link_path) or os.path.exists(link_path):
-            os.remove(link_path)
-        os.symlink(chosen, link_path)
-        print(f'ensure_opencr_port: {link_path} -> {chosen}', file=sys.stderr)
-    except OSError as e:
-        print(f'ensure_opencr_port: could not set {link_path}: {e}', file=sys.stderr)
+              f'silent on {", ".join(live)}) -- no IMU, no button. Check it is '
+              f'powered and flashed with opencr_op3_usb (ID 200 over micro-USB).',
+              file=sys.stderr)
+    elif sub_port == servo_port:
+        print(f'ensure_opencr_port: ID {SUB_CONTROLLER_ID} answers on {sub_port}, the '
+              f'same port as the servos -- stock opencr_op3 wiring. Leaving {sub_link} '
+              f'alone; move the OPEN-CR sensor line in OP3.robot back onto {servo_link}.',
+              file=sys.stderr)
+    else:
+        print(f'ensure_opencr_port: OpenCR found on {sub_port} '
+              f'(ID {SUB_CONTROLLER_ID}) -- IMU available', file=sys.stderr)
+        _point_link(sub_link, sub_port)
 
 
 def resolve_action_file_default() -> str:
