@@ -193,3 +193,6 @@ coverage/
 # Misc
 # =========================
 *.local
+
+# Editor/tool leftovers
+.codex
