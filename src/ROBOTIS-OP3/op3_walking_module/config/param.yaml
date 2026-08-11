@@ -1,22 +1,27 @@
-x_offset: 0.00300000003
-y_offset: 0.0320000015
-z_offset: 0.0379999988
+# Derived by scripts/init_baru_fk.py --yaml <export of page 2> on 2026-08-11.
+# The previous values (0.0030 / 0.0320 / 0.0380) came from the script's built-in
+# snapshot, which still held Robot 0's calibration -- not this robot's page 2 --
+# so walking_module's IK neutral pose did not match the stance the robot boots
+# into. Re-run that script whenever page 2 (WALKING_READY) is re-taught.
+x_offset: 0.0046
+y_offset: 0.0205
+z_offset: 0.0408
 roll_offset: 0
 pitch_offset: 3.9992452331112465
 yaw_offset: 0
 hip_pitch_offset: 7.9984904662224929
-period_time: 750
+period_time: 500
 dsp_ratio: 0.349999994
 step_forward_back_ratio: 0.25
 foot_height: 0.0399999991
 swing_right_left: 0.0199999996
 swing_top_down: 0.00600000005
 pelvis_offset: 3.0022988690251378
-arm_swing_gain: 0
+arm_swing_gain: 1.5
 balance_hip_roll_gain: 0.349999994
 balance_knee_gain: 0.400000006
 balance_ankle_roll_gain: 0.699999988
 balance_ankle_pitch_gain: 0.899999976
-p_gain: 0
+p_gain: 32
 i_gain: 0
 d_gain: 0

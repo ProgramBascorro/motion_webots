@@ -76,6 +76,11 @@ private:
   std::list<MotionModule *> motion_modules_;
   std::list<SensorModule *> sensor_modules_;
   std::vector<dynamixel::GroupSyncWrite *>  direct_sync_write_;
+  // Control table address + data length each direct_sync_write_ entry was built
+  // for. GroupSyncWrite locks those at construction and exposes no getter, so
+  // without tracking them here the reuse lookup could only match on the port and
+  // would hand a torque_enable write to a packet aimed at another register.
+  std::vector<std::pair<uint16_t, uint16_t> > direct_sync_write_key_;
 
   std::map<std::string, double> sensor_result_;
 

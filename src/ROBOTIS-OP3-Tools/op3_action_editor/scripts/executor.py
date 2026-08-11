@@ -53,7 +53,16 @@ def main(args=None):
     # so edits survive rebuilds.
     action_file_path_default = os.path.realpath(share_data_path)
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
-    device_name_default = '/dev/ttyUSB0'
+    # device_name is NOT the servo bus -- main.cpp opens it only to write the
+    # power-on register of the sub controller (ID 200, the OpenCR). This board's
+    # OpenCR is deaf on the TTL bus, so ID 200 answers over its own USB CDC port
+    # only; pointing this at the U2D2 gives "Error Set port" (or "Failed to turn
+    # on the Power of DXLs!" when the U2D2 happens to be plugged in). The raw
+    # /dev/ttyUSB0 path was doubly wrong: the FTDI keeps re-enumerating between
+    # ttyUSB0 and ttyUSB1, so only the by-id path is stable. Servos still come
+    # from the port lines in OP3.robot, untouched by this.
+    device_name_default = os.environ.get('OP3_SUB_CONTROLLER_DEVICE', '').strip() \
+        or '/dev/serial/by-id/usb-ROBOTIS_OpenCR_Virtual_ComPort_in_FS_Mode_FFFFFFFEFFFF-if00'
 
     if action_file_path != action_file_path_default:
         ensure_action_file(action_file_path, action_file_path_default)

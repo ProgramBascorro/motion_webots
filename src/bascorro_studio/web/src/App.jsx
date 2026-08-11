@@ -42,6 +42,13 @@ import {
 const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
 const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
 const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
+// Seeded once, then never again: if the version is deleted on purpose it must
+// stay deleted, so the flag records that the seed already ran rather than
+// checking whether the version is currently present.
+// Bumped to v2 on 2026-08-11: the preset's init_* offsets were re-derived from
+// action page 2, so a browser holding the v1 copy would keep serving the old
+// stance. Bumping re-runs the seed once, which refreshes the preset in place.
+const WALKING_SEED_FLAG_KEY = "bascorro.walking_versions.seeded.dari_claude.v2";
 const TELEOP_COMMAND_TOPIC = "/op3_joy_teleop/command";
 const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
 const DEFAULT_OVERLAY_TOPIC =
@@ -87,9 +94,12 @@ const YOLO_PARAM_KEYS = [
 // (see scratchpad init_baru_fk.py): foot at (0.003, ±0.032, -0.181) m
 // relative to hip → z_offset = leg_length(0.2195) + foot_z = 0.038.
 const WALKING_DEFAULT_PARAMS = {
-  init_x_offset: 0.003,
-  init_y_offset: 0.032,
-  init_z_offset: 0.038,
+  // FK-derived from action page 2 (WALKING_READY) -- keep in step with
+  // op3_walking_module/config/param.yaml. Regenerate both with
+  // scripts/init_baru_fk.py --yaml <page 2 export> when the page is re-taught.
+  init_x_offset: 0.0046,
+  init_y_offset: 0.0205,
+  init_z_offset: 0.0408,
   init_roll_offset: 0,
   init_pitch_offset: 0.0698,
   init_yaw_offset: 0,
@@ -392,6 +402,87 @@ function makeWalkingVersionId() {
   return `walking-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// Conservative starting gait, built on the values that actually run on this
+// robot (op3_walking_module/config/param.yaml) rather than on stock OP3 numbers.
+// Five deliberate deltas from that baseline: x_move_amplitude 0 -> 0.02 (the
+// robot marched in place without it), period_time 0.75 -> 0.80, dsp_ratio
+// 0.35 -> 0.40, y_swap_amplitude 0.020 -> 0.025, arm_swing_gain 0 -> 1.0.
+// The init_* offsets are left untouched: they are FK-tuned to INIT_BARU
+// (action page 2) so the handoff into walking_module stays smooth.
+// p/i/d are inert here -- op3_walking_module.cpp never writes them to the servos.
+const CLAUDE_WALKING_VERSION_NAME = "dari claude";
+const CLAUDE_WALKING_PARAMS = {
+  init_x_offset: 0.0046,
+  init_y_offset: 0.0205,
+  init_z_offset: 0.0408,
+  init_roll_offset: 0,
+  init_pitch_offset: 0.0698,
+  init_yaw_offset: 0,
+  hip_pitch_offset: 0.1396,
+  pelvis_offset: 0.0524,
+  period_time: 0.8,
+  dsp_ratio: 0.4,
+  step_fb_ratio: 0.25,
+  x_move_amplitude: 0.02,
+  y_move_amplitude: 0,
+  angle_move_amplitude: 0,
+  z_move_amplitude: 0.04,
+  move_aim_on: false,
+  y_swap_amplitude: 0.025,
+  z_swap_amplitude: 0.006,
+  arm_swing_gain: 1.0,
+  balance_enable: true,
+  balance_hip_roll_gain: 0.35,
+  balance_knee_gain: 0.4,
+  balance_ankle_roll_gain: 0.7,
+  balance_ankle_pitch_gain: 0.9,
+  p_gain: 0,
+  i_gain: 0,
+  d_gain: 0,
+};
+
+// Adds the preset to the saved-version list the first time this browser loads
+// the page. Existing versions are never touched -- the seed is only prepended.
+//
+// Kept pure on purpose: it reads the flag but never writes it, because
+// StrictMode invokes useState initializers twice in dev. Writing the flag here
+// meant the second call saw its own write and returned the list unseeded. The
+// flag is set from an effect instead (see markWalkingSeed below), and the id is
+// fixed so both invocations produce the same entry.
+const CLAUDE_WALKING_VERSION_ID = "claude-walking-preset-v1";
+
+function seedWalkingVersions(versions) {
+  if (typeof window === "undefined") return versions;
+  try {
+    if (localStorage.getItem(WALKING_SEED_FLAG_KEY)) return versions;
+  } catch {
+    // Private/restricted storage: skip seeding rather than break the page.
+    return versions;
+  }
+  const now = Date.now();
+  const preset = normalizeWalkingParams(CLAUDE_WALKING_PARAMS);
+
+  // An entry from an earlier seed is refreshed in place rather than duplicated.
+  // Only this preset is touched; every other saved version is left alone.
+  const existing = versions.findIndex((version) => version.name === CLAUDE_WALKING_VERSION_NAME);
+  if (existing !== -1) {
+    const refreshed = versions.slice();
+    refreshed[existing] = { ...versions[existing], params: preset, updatedAt: now };
+    return refreshed;
+  }
+
+  return [
+    {
+      id: CLAUDE_WALKING_VERSION_ID,
+      name: CLAUDE_WALKING_VERSION_NAME,
+      createdAt: now,
+      updatedAt: now,
+      params: preset,
+    },
+    ...versions,
+  ];
+}
+
 // --- Utilities ---
 
 function formatNumber(value, digits = 1) {
@@ -556,7 +647,7 @@ export default function App() {
   const [walkingLastAppliedAt, setWalkingLastAppliedAt] = useState(null);
   const [walkingError, setWalkingError] = useState("");
   const [torqueSpeedKey, setTorqueSpeedKey] = useState(DEFAULT_TORQUE_SPEED_KEY);
-  const [walkingVersions, setWalkingVersions] = useState(() => readWalkingVersions());
+  const [walkingVersions, setWalkingVersions] = useState(() => seedWalkingVersions(readWalkingVersions()));
   const [walkingVersionName, setWalkingVersionName] = useState("");
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
   const [teleopStatus, setTeleopStatus] = useState(null);
@@ -650,6 +741,16 @@ export default function App() {
       // Browser storage can fail in private or restricted contexts.
     }
   }, [walkingVersions]);
+
+  // Records that the "dari claude" preset has been offered to this browser, so
+  // deleting it makes it stay deleted instead of returning on the next reload.
+  useEffect(() => {
+    try {
+      localStorage.setItem(WALKING_SEED_FLAG_KEY, String(Date.now()));
+    } catch {
+      // Same restricted-storage case as above; the preset simply seeds again.
+    }
+  }, []);
 
   useEffect(() => {
     if (!rosUrl) return;
@@ -1360,6 +1461,23 @@ export default function App() {
   const healthDuration = healthResult?.duration_ms;
   const healthSkipped = healthResult?.skipped;
   const healthRaw = healthResult?.raw;
+  // Read straight from the servos by the health service. A joint that answers a
+  // ping but reports torque "off", or carries an error latch, is exactly the
+  // case that used to be invisible: it looks alive over ROS while ignoring
+  // every torque command.
+  const healthTorque = healthResult?.torque || {};
+  const healthHwErrors = healthResult?.hw_errors || {};
+  const healthTorqueOff = Object.entries(healthTorque)
+    .filter(([, state]) => state === "off")
+    .map(([name]) => name);
+  const healthHwErrorList = Object.entries(healthHwErrors);
+  // Dynamixel trips its overheating latch at max_temperature_limit (80 C by
+  // default). Listing anything from 50 C up shows the joints heading there
+  // while there is still time to act, not just the ones that already gave up.
+  const healthHotJoints = Object.entries(healthResult?.temps || {})
+    .map(([name, value]) => [name, Number(value)])
+    .filter(([, celsius]) => Number.isFinite(celsius) && celsius >= 50)
+    .sort((a, b) => b[1] - a[1]);
   const torqueEntries = useMemo(() => {
     const e = Object.entries(torque?.joints || {});
     e.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
@@ -2165,6 +2283,46 @@ export default function App() {
                 <span>{healthTotal} joints</span>
                 <span>{healthDuration !== undefined ? `${formatNumber(healthDuration, 1)} ms` : "-"}</span>
               </div>
+              {healthHwErrorList.length > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 space-y-1">
+                  <div className="text-xs font-bold text-red-700">Servo error latch</div>
+                  {healthHwErrorList.map(([name, why]) => (
+                    <div key={name} className="flex justify-between text-xs">
+                      <span className="font-mono text-gray-700">{name}</span>
+                      <span className="text-red-600">{why}</span>
+                    </div>
+                  ))}
+                  <div className="text-[11px] text-red-700">
+                    Servo mematikan torque-nya sendiri. Torque ON tidak akan berpengaruh
+                    sampai latch ini hilang — matikan daya servo lalu nyalakan lagi.
+                  </div>
+                </div>
+              )}
+              {healthHotJoints.length > 0 && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 space-y-1">
+                  <div className="text-xs font-bold text-orange-700">Suhu servo</div>
+                  {healthHotJoints.map(([name, celsius]) => (
+                    <div key={name} className="flex justify-between text-xs">
+                      <span className="font-mono text-gray-700">{name}</span>
+                      <span className={celsius >= 70 ? "text-red-600 font-bold" : "text-orange-700"}>
+                        {celsius} °C
+                      </span>
+                    </div>
+                  ))}
+                  <div className="text-[11px] text-orange-700">
+                    Latch overheating biasanya jatuh di 80 °C.
+                  </div>
+                </div>
+              )}
+              {/* Shown independently of the latch box: a joint can be torque-off
+                  without a latch, and hiding this whenever any latch exists made
+                  the torque state unreadable exactly when it mattered most. */}
+              {healthTorqueOff.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <div className="text-xs font-bold text-amber-700">Torque off</div>
+                  <div className="font-mono text-xs text-gray-700">{healthTorqueOff.join(", ")}</div>
+                </div>
+              )}
               {healthFailed.length > 0 ? (
                 <div className="max-h-[180px] overflow-y-auto pr-2 custom-scrollbar space-y-2">
                   {healthFailed.map((name) => (

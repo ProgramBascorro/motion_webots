@@ -24,10 +24,31 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <climits>
+#include <cstdlib>
 
 #include "robotis_device/robot.h"
 
 using namespace robotis_framework;
+
+// The port paths in OP3.robot are 70-character /dev/serial/by-id/... strings.
+// Repeating one on every device line pushed the ID and model columns far to the
+// right and wrapped each line, so the startup dump looked like a wall of text
+// with the useful parts scattered in the middle. The per-device lines now use
+// the short node name (ttyUSB1, ttyACM1); the full by-id path is still printed
+// once, in the port section, so nothing is lost.
+static std::string shortPortName(const std::string &port)
+{
+  std::string resolved = port;
+  char buffer[PATH_MAX];
+  if (realpath(port.c_str(), buffer) != NULL)
+    resolved = buffer;
+
+  size_t slash = resolved.find_last_of('/');
+  if (slash == std::string::npos || slash + 1 >= resolved.size())
+    return resolved;
+  return resolved.substr(slash + 1);
+}
 
 static inline std::string &ltrim(std::string &s)
 {
@@ -113,7 +134,8 @@ Robot::Robot(std::string robot_file_path, std::string dev_desc_dir_path)
         if (tokens.size() != 3)
           continue;
 
-        std::cout << tokens[0] << " added. (baudrate: " << tokens[1] << ")" << std::endl;
+        fprintf(stderr, "port  %-8s  %s baud\n      %s\n",
+                shortPortName(tokens[0]).c_str(), tokens[1].c_str(), tokens[0].c_str());
 
         ports_[tokens[0]] = dynamixel::PortHandler::getPortHandler(tokens[0].c_str());
         ports_[tokens[0]]->setBaudRate(std::atoi(tokens[1].c_str()));
@@ -136,6 +158,12 @@ Robot::Robot(std::string robot_file_path, std::string dev_desc_dir_path)
           dxls_[dev_name] = getDynamixel(file_path, id, port, protocol);
 
           Dynamixel *dxl = dxls_[dev_name];
+          // Printed here rather than inside getDynamixel(): the joint name only
+          // exists at this level, and it is the column that makes the dump
+          // readable -- an ID alone says nothing about which joint it is.
+          if (dxl != NULL)
+            fprintf(stderr, "  %-8s  ID %3d  %-14s %s\n", shortPortName(port).c_str(),
+                    dxl->id_, dxl->model_name_.c_str(), dev_name.c_str());
           std::vector<std::string> sub_tokens = split(tokens[6], ',');
           if (sub_tokens.size() > 0 && sub_tokens[0] != "")
           {
@@ -189,6 +217,9 @@ Robot::Robot(std::string robot_file_path, std::string dev_desc_dir_path)
           sensors_[dev_name] = getSensor(file_path, id, port, protocol);
 
           Sensor *sensor = sensors_[dev_name];
+          if (sensor != NULL)
+            fprintf(stderr, "  %-8s  ID %3d  %-14s %s\n", shortPortName(port).c_str(),
+                    sensor->id_, sensor->model_name_.c_str(), dev_name.c_str());
           std::vector<std::string> sub_tokens = split(tokens[6], ',');
           if (sub_tokens.size() > 0 && sub_tokens[0] != "")
           {
@@ -307,8 +338,8 @@ Sensor *Robot::getSensor(std::string path, int id, std::string port, float proto
     }
     sensor->port_name_ = port;
 
-    fprintf(stderr, "(%s) [ID:%3d] %14s added. \n", port.c_str(), sensor->id_, sensor->model_name_.c_str());
-    //std::cout << "[ID:" << (int)(_sensor->id) << "] " << _sensor->model_name << " added. (" << port << ")" << std::endl;
+    // The "added" line is printed by the caller in loadRobot(), which also knows
+    // the device name. Printing here too would duplicate every line.
     file.close();
   }
   else
@@ -483,8 +514,7 @@ Dynamixel *Robot::getDynamixel(std::string path, int id, std::string port, float
     if (dxl->ctrl_table_[velocity_p_gain_item_name] != NULL)
       dxl->velocity_p_gain_item_ = dxl->ctrl_table_[velocity_p_gain_item_name];
 
-    fprintf(stderr, "(%s) [ID:%3d] %14s added. \n", port.c_str(), dxl->id_, dxl->model_name_.c_str());
-    //std::cout << "[ID:" << (int)(_dxl->id) << "] " << _dxl->model_name << " added. (" << port << ")" << std::endl;
+    // Same as getSensor(): the caller prints it, with the joint name attached.
     file.close();
   }
   else

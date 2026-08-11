@@ -57,21 +57,33 @@ chmod +x ./run/run_vision_and_webots.sh
 
 sudo docker build -t op3-webots-ros2:humble .
 
-## RUN 
+## RUN
 
-INPUT_GID=$(getent group input | cut -d: -f3)
-DIALOUT_GID=$(getent group dialout | cut -d: -f3)
+```bash
+scripts/op3_docker.sh up       # nyalakan container
+scripts/op3_docker.sh shell    # buka shell di dalamnya (boleh berkali-kali)
+scripts/op3_docker.sh doctor   # periksa colokan, node perangkat, kecocokan OP3.robot
+scripts/op3_docker.sh down     # matikan
+```
 
-sudo docker run -it --rm \
-  --net=host --ipc=host \
-  --device=/dev/ttyUSB0 \
-  --device=/dev/input \
-  --device=/dev/uinput \
-  --group-add "${INPUT_GID}" \
-  --group-add "${DIALOUT_GID}" \
-  --ulimit rtprio=99 --ulimit memlock=-1 \
-  --cap-add SYS_NICE --cap-add SYS_RESOURCE \
-  -v "$(pwd)":/ros2_ws \
-  -w /ros2_ws \
-  op3-webots-ros2:humble \
-  bash
+Jangan lagi memakai `docker run` manual untuk robot asli. Perintah lama di sini
+memakai `--device=/dev/ttyUSB0`, dan itu sumber masalah yang berulang:
+
+- Docker menyalin major:minor perangkat **sekali** saat container start lalu
+  membekukannya. U2D2 (FTDI FT232H) sering re-enumerate dan berpindah antara
+  `ttyUSB0`/`ttyUSB1`, sehingga node di dalam container jadi basi. Gejalanya bisa
+  berupa `PORT [...] SETUP ERROR!`, atau — yang jauh lebih menipu — tanpa error
+  sama sekali: manager jalan, gait berputar, `goal_joint_states` berayun, tapi
+  robot diam dan `present_joint_states` beku bit-for-bit karena fd-nya sudah mati.
+  `scripts/op3_docker.sh` memakai `--privileged -v /dev:/dev`, jadi `/dev`
+  container mengikuti host secara live. (`--privileged` saja tidak cukup —
+  tanpa bind mount, `/dev/ttyUSB*` dan `/dev/serial` tidak muncul di dalam.)
+- `-it --rm ... bash` membuat PID 1 adalah shell-mu: menutup terminal mengirim
+  SIGHUP, container mati (exit 129) dan `--rm` menghapusnya berikut manager,
+  rosbridge, dan studio yang sedang jalan. Script menjalankannya detached dengan
+  `sleep infinity`, jadi umur container tidak terikat satu jendela terminal.
+
+Kalau ada yang aneh dengan port/serial, jalankan `scripts/op3_docker.sh doctor`
+sebelum menebak-nebak — dia memeriksa colokan di host, menghitung USB disconnect
+30 menit terakhir, mencocokkan by-id di `OP3.robot` dengan yang benar-benar
+tercolok, dan mencoba membuka port itu dari dalam container.

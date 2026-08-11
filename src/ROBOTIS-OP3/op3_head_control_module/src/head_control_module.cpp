@@ -343,7 +343,11 @@ void HeadControlModule::onModuleDisable()
 
   scan_state_ = NoScan;
 
-  std::cout << "head_control_module : disable";
+  // Was a bare std::cout without a newline, so it printed mid-terminal and stuck
+  // to whatever came next. It is normal bookkeeping -- the module is disabled
+  // every time another module (an action page, for one) claims the head joints --
+  // so it belongs at debug level, not in the operator's face.
+  RCLCPP_DEBUG(this->get_logger(), "head_control_module : disable");
 }
 
 void HeadControlModule::startMoving()

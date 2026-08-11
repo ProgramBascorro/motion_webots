@@ -43,6 +43,7 @@ RobotisController::RobotisController()
     gazebo_robot_name_("robotis")
 {
   direct_sync_write_.clear();
+  direct_sync_write_key_.clear();
 }
 
 void RobotisController::initializeSyncWrite()
@@ -1056,6 +1057,7 @@ void RobotisController::process()
           direct_sync_write_[i]->clearParam();
         }
         direct_sync_write_.clear();
+        direct_sync_write_key_.clear();
       }
 
       if (port_to_sync_write_position_p_gain_.size() > 0)
@@ -1258,6 +1260,7 @@ void RobotisController::process()
           direct_sync_write_[i]->clearParam();
         }
         direct_sync_write_.clear();
+        direct_sync_write_key_.clear();
       }
 
       queue_mutex_.unlock();
@@ -1622,6 +1625,7 @@ void RobotisController::writeControlTableCallback(const robotis_controller_msgs:
   queue_mutex_.lock();
 
   direct_sync_write_.push_back(new dynamixel::GroupSyncWrite(port, packet_handler, item->address_, msg->data_length));
+  direct_sync_write_key_.push_back(std::make_pair(item->address_, (uint16_t) msg->data_length));
   direct_sync_write_[direct_sync_write_.size() - 1]->addParam(device->id_, (uint8_t *)(msg->data.data()));
   
 //  fprintf(stderr, "[WriteControlTable] %s -> %s : ", msg->joint_name.c_str(), msg->start_item_name.c_str());
@@ -1678,22 +1682,28 @@ void RobotisController::syncWriteItemCallback(const robotis_controller_msgs::msg
 
     queue_mutex_.lock();
 
+    // Reuse an existing packet only when it targets the SAME register. Matching
+    // on the port alone meant that two different items queued inside one control
+    // cycle -- the studio sends profile_velocity, profile_acceleration and
+    // torque_enable back to back -- shared one GroupSyncWrite, and the later
+    // items were written to the first item's address with the first item's data
+    // length. Torque commands then landed in profile_velocity: the button did
+    // nothing and the joint's speed got scrambled instead, intermittently,
+    // depending on which writes happened to fall in the same cycle.
     int idx = 0;
-    if (direct_sync_write_.size() == 0)
+    for (idx = 0; idx < direct_sync_write_.size(); idx++)
+    {
+      if (direct_sync_write_[idx]->getPortHandler() == port
+          && direct_sync_write_[idx]->getPacketHandler() == packet_handler
+          && direct_sync_write_key_[idx].first == item->address_
+          && direct_sync_write_key_[idx].second == item->data_length_)
+        break;
+    }
+
+    if (idx == direct_sync_write_.size())
     {
       direct_sync_write_.push_back(new dynamixel::GroupSyncWrite(port, packet_handler, item->address_, item->data_length_));
-      idx = 0;
-    }
-    else
-    {
-      for (idx = 0; idx < direct_sync_write_.size(); idx++)
-      {
-        if (direct_sync_write_[idx]->getPortHandler() == port && direct_sync_write_[idx]->getPacketHandler() == packet_handler)
-          break;
-      }
-
-      if (idx == direct_sync_write_.size())
-        direct_sync_write_.push_back(new dynamixel::GroupSyncWrite(port, packet_handler, item->address_, item->data_length_));
+      direct_sync_write_key_.push_back(std::make_pair(item->address_, item->data_length_));
     }
 
     uint8_t *data = new uint8_t[item->data_length_];

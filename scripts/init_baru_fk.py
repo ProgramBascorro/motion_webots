@@ -21,12 +21,16 @@ WHY:
     switches body to walking_module), the IK pose MUST match the INIT_BARU
     page 2 pose. This script derives that match.
 """
+import argparse
 import math
 
-# ===== INPUT: joint values from INIT_BARU page 2 (raw dynamixel 0-4095) =====
-# Read from action yaml export of motion_4095_ros1_lama.bin, page index 2
-# step 0 positions. Example here is from Robot 0's calibration.
-PAGE2 = {
+# ===== INPUT: joint values from page 2 (raw dynamixel 0-4095) =====
+# Prefer --yaml: the dict below is a snapshot that WILL drift from the bin.
+# It already did once -- on 2026-08-11 it still held Robot 0's calibration
+# (l_knee 2724, r_hip_roll 2045) while ALPHONSE's page 2 had 2768 and 2088, so
+# the offsets in param.yaml had been derived from a pose the robot never stands
+# in. Reading the bin removes that whole class of mistake.
+PAGE2_FALLBACK = {
     "r_sho_pitch": 2198, "l_sho_pitch": 1888,
     "r_sho_roll": 1737,  "l_sho_roll": 2365,
     "r_el": 2334,        "l_el": 1754,
@@ -38,6 +42,46 @@ PAGE2 = {
     "r_ank_roll": 2061,  "l_ank_roll": 2070,
     "head_pan": 2049,    "head_tilt": 1922,
 }
+
+
+def load_page_from_yaml(path, page_index):
+    """Read step 0 joint positions from an action_yaml.py export.
+
+    Produce the export with:
+      ros2 run op3_action_editor action_yaml.py \
+        --action-file <bin> --robot-file <OP3.robot> \
+        export --out <yaml> --pages <page>
+    """
+    import yaml  # only needed on this path; keeps the fallback dependency-free
+
+    with open(path, "r", encoding="utf-8") as handle:
+        doc = yaml.safe_load(handle)
+
+    for page in doc.get("pages") or []:
+        if page.get("index") != page_index:
+            continue
+        steps = page.get("steps") or []
+        if not steps:
+            raise SystemExit(f"Page {page_index} ({page.get('name', '').strip()}) has no steps.")
+        return page.get("name", "").strip(), steps[0]["positions"]
+
+    raise SystemExit(f"Page {page_index} not found in {path}")
+
+
+parser = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--yaml", help="action_yaml.py export to read the pose from")
+parser.add_argument("--page", type=int, default=2, help="page index (default: 2)")
+args = parser.parse_args()
+
+if args.yaml:
+    page_name, PAGE2 = load_page_from_yaml(args.yaml, args.page)
+    print(f"Pose: page {args.page} '{page_name}' from {args.yaml}")
+else:
+    PAGE2 = PAGE2_FALLBACK
+    print("WARNING: using the built-in snapshot, which may not match the robot's bin.")
+    print("         Pass --yaml <export> to read the real pose.")
+print()
 
 # ===== OP3 spec link lengths (m) =====
 THIGH = 0.093

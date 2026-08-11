@@ -19,7 +19,7 @@ apply_profile() {
       ;;
     real_robot)
       WEBOTS_CMD="ros2 launch op3_webots_ros2 robot_launch.py"
-      MANAGER_CMD="ros2 run op3_manager op3_manager --ros-args -p offset_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/offset.yaml -p robot_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/OP3.robot -p init_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/dxl_init_OP3.yaml -p device_name:=${OP3_SERIAL_DEVICE:-/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT8J0QK9-if00-port0} -p baud_rate:=2000000 -p simulation:=false"
+      MANAGER_CMD="ros2 run op3_manager op3_manager --ros-args -p offset_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/offset.yaml -p robot_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/OP3.robot -p init_file_path:=$WS/src/ROBOTIS-OP3/op3_manager/config/dxl_init_OP3.yaml -p device_name:=${OP3_SERIAL_DEVICE:-/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3WKHM6-if00-port0} -p sub_controller_device:=${OP3_SUB_CONTROLLER_DEVICE:-/dev/serial/by-id/usb-ROBOTIS_OpenCR_Virtual_ComPort_in_FS_Mode_FFFFFFFEFFFF-if00} -p baud_rate:=2000000 -p simulation:=false"
       TELEOP_CMD="ros2 launch op3_joy_teleop op3_joy_teleop.launch.py"
       FOXGLOVE_CMD="ros2 launch foxglove_bridge foxglove_bridge_launch.xml"
       YOLO_VISION_CMD="ros2 launch op3_yolo_vision yolo.launch.py"
