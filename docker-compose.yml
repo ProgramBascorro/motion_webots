@@ -1,17 +1,68 @@
+# Cara yang dianjurkan tetap: scripts/op3_docker.sh up | shell | doctor | down
+#
+# File ini sengaja dibuat SETARA dengan script itu dan memakai container_name
+# yang sama ("op3"), supaya tidak ada container tandingan. Sebelumnya file ini
+# mendefinisikan container ketiga (op3_ros2_humble) yang hanya me-mount ./src --
+# tanpa build/ dan install/ -- sehingga setiap `ros2 run ...` di dalamnya
+# menjawab "Package not found", dan tanpa /dev sehingga port serial (termasuk
+# symlink udev /dev/ttyOP3 yang dipakai OP3.robot) tidak terlihat sama sekali.
+#
+# Kalau mengubah salah satu, ubah keduanya. Yang wajib sama:
+#   /dev bind + privileged, mount seluruh workspace, entrypoint bind,
+#   restart unless-stopped, dan command sleep infinity.
+#
+# Catatan: docker-compose.yolo.yml adalah container terpisah (op3_yolo, image
+# humble-yolo) dan memang berdiri sendiri -- jangan disamakan dengan yang ini.
+
 services:
-  op3_ros2:
+  op3:
     build: .
-    container_name: op3_ros2_humble
+    image: op3-webots-ros2:humble
+    container_name: op3
+
+    # Umur container tidak boleh terikat pada satu jendela terminal, dan harus
+    # hidup lagi sendiri setelah PC reboot -- kalau tidak, semua `ros2 run ...`
+    # kembali menjawab "Package not found" karena install/ menunjuk ke /ros2_ws
+    # yang hanya ada di dalam container.
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
+    # PID 1 di sini `sleep infinity`, dan sleep tidak pernah me-reap anak yatim,
+    # jadi proses ROS yang mati bersama terminalnya menumpuk sebagai <defunct>.
+    init: true
+
+    network_mode: host
+    ipc: host
+    privileged: true
+    working_dir: /ros2_ws
+
     environment:
-      - DISPLAY=${DISPLAY}
+      - DISPLAY=${DISPLAY:-}
       - XAUTHORITY=/tmp/.Xauthority
       - QT_X11_NO_MITSHM=1
-      - ROS_DOMAIN_ID=0
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+
     volumes:
-      - ./src:/ros2_ws/src:rw
+      # /dev di-bind hidup, BUKAN `devices:`. `devices:` membekukan major:minor
+      # saat start; U2D2 sering re-enumerate dan sesudahnya fd di dalam
+      # container mati diam-diam (ENODEV): gait berputar tapi robot beku.
+      - /dev:/dev
+      # Seluruh workspace, bukan cuma ./src. Workspace ini dibangun dengan
+      # --symlink-install di dalam container, jadi install/ dan build/ harus
+      # ikut ter-mount atau paketnya tidak akan terbaca.
+      - .:/ros2_ws
+      # Image masih menyimpan entrypoint lama yang kehilangan argumen CMD.
+      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-$HOME/.Xauthority}:/tmp/.Xauthority:rw
-    network_mode: host
-    privileged: true
-    stdin_open: true
-    tty: true
+
+    group_add:
+      - dialout
+      - input
+
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+
+    ulimits:
+      rtprio: 99
+      memlock: -1

@@ -32,9 +32,9 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --install-deps${RST}  Install apt + rosdep dependencies
   ${BOLD}./$(basename "$0") --build${RST}         Build workspace (colcon)
   ${BOLD}./$(basename "$0") --docker-build${RST}  Build Docker image
-  ${BOLD}./$(basename "$0") --docker-run${RST}    Run container (docker run)
-  ${BOLD}./$(basename "$0") --docker-up${RST}     Run docker-compose up
-  ${BOLD}./$(basename "$0") --docker-down${RST}   Stop docker-compose
+  ${BOLD}./$(basename "$0") --docker-run${RST}    Start container + open shell (op3_docker.sh)
+  ${BOLD}./$(basename "$0") --docker-up${RST}     Start container    (op3_docker.sh up)
+  ${BOLD}./$(basename "$0") --docker-down${RST}   Stop container     (op3_docker.sh down)
   ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
   ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
 
@@ -64,9 +64,9 @@ ${BOLD}Options${RST}
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
   --docker-build        Build Docker image
-  --docker-run          Run container (docker run)
-  --docker-up           Run docker-compose up
-  --docker-down         Stop docker-compose
+  --docker-run          Start container + open shell (op3_docker.sh)
+  --docker-up           Start container    (op3_docker.sh up)
+  --docker-down         Stop container     (op3_docker.sh down)
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
   --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
   --dry-run            Print what would run (no changes)
@@ -95,8 +95,8 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_PREFS_FILE (default: ~/.config/op3-stack/prefs.sh)
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
   OP3_DOCKER_TAG, OP3_DOCKER_WITH_WEBOTS, OP3_DOCKER_WEBOTS_VERSION, OP3_DOCKER_WEBOTS_PACKAGE_PREFIX
-  OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_RUN_FLAGS, OP3_DOCKER_UP_FLAGS
-  OP3_DOCKER_MOUNT_MODE (none|src|cache|full), OP3_DOCKER_SRC_RO (1|0)
+  OP3_DOCKER_BUILD_FLAGS
+  OP3_CONTAINER_NAME, OP3_IMAGE (dipakai scripts/op3_docker.sh)
   OP3_SAVE_LAST_SELECTION (default: 1; writes ~/.config/op3-stack/last.txt)
 
 ${BOLD}Profiles${RST}
