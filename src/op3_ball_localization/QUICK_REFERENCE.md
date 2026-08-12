@@ -114,7 +114,6 @@ ros2 launch op3_ball_localization yolo_scan_only.launch.py \
 
 **Documentation:**
 - `YOLO_LAUNCH_MODES.md` (detailed guide)
-- `IMPLEMENTATION_SUMMARY.md` (technical details)
 - `QUICK_REFERENCE.md` (this file)
 
 ---
@@ -157,5 +156,4 @@ source install/setup.bash
 ## For More Information
 
 - **User Guide:** See `YOLO_LAUNCH_MODES.md`
-- **Technical Details:** See `IMPLEMENTATION_SUMMARY.md`
 - **Source Code:** See `/op3_ball_localization/head_tracking_node.py`

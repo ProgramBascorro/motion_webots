@@ -94,6 +94,24 @@ output*.mkv
 output*.mp4
 tes_infer*.mp4
 
+# Sisa salah ketik perintah shell (berkas kosong bernama seperti flag)
+.codex
+--net=host
+
+# Dikeluarkan dari repo 2026-08-12, berkasnya sengaja dibiarkan ada di komputer.
+# Didaftarkan di sini supaya tidak muncul terus sebagai berkas tak terlacak dan
+# tidak gampang ter-`git add -A` kembali.
+/IMPLEMENTATION_SUMMARY.md
+/INTEGRATION_COMPLETE.md
+/NETWORK_ACCESS_SETUP.md
+/NETWORK_FIX_APPLIED.md
+/CAMERA_RECORDING_GUIDE.md
+/RECORDING_QUICKSTART.md
+/webcam_record_menu.sh
+/quick_record.sh
+/record_camera.py
+/test_recorder.sh
+
 # WEBDEV
 
 
