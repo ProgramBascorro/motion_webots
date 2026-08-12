@@ -32,7 +32,13 @@ via_pose :
 
 
 # target pose [deg]
-# Copied from motion_4095_CHRONUS.bin page 2 (INIT_BARU), step 0.
+# Copied from motion_4095_CHRONUS.bin page 2, step 0 -- back when that page was
+# named INIT_BARU. Page 2 was re-captured on 2026-08-12 and renamed
+# WALKING_READY, so these numbers are a snapshot of the older pose.
+#
+# It does not affect boot: op3_manager goes to init pose by playing action page 2
+# itself (goToInitActionPage), not through base_module. This file is only used
+# when something calls base_module's ini_pose explicitly.
 
 tar_pose :
   1 : 4.130859         # r_sho_pitch

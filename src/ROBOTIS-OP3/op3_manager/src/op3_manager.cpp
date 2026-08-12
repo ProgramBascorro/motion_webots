@@ -196,9 +196,9 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
     usleep(200 * 1000);
 
-    // go to init pose : action_module page 2 (INIT_BARU)
+    // go to init pose : action_module page 2 (WALKING_READY)
     goToInitActionPage();
-    RCLCPP_INFO(controller->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
+    RCLCPP_INFO(controller->get_logger(), "Go to init pose (action page 2: WALKING_READY)");
   }
 }
 
@@ -370,9 +370,9 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // go to init pose : action_module page 2 (INIT_BARU)
+  // go to init pose : action_module page 2 (WALKING_READY)
   goToInitActionPage();
-  RCLCPP_INFO(node->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
+  RCLCPP_INFO(node->get_logger(), "Go to init pose (action page 2: WALKING_READY)");
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
       "/robotis/health_check",

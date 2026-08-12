@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-Forward kinematics: INIT_BARU (action page 2) joint values -> walking_module
+Forward kinematics: action page 2 joint values -> walking_module
 init_x/y/z_offset.
+
+Page 2 was named INIT_BARU when this script was written; on 2026-08-12 it was
+re-captured and renamed WALKING_READY. The PAGE2 dict below is still the OLD
+snapshot -- see the note above it before trusting any number here.
 
 =============================================================================
  NOTE FOR THIS ROBOT (CHRONUS) — READ BEFORE USING THE OUTPUT
 =============================================================================
 This script assumes raw dynamixel 2048 == mechanically-straight joint for
 every servo. That held (roughly) for the source robot ("Robot 0"), but it does
-NOT hold for this robot: its servo zero-calibration differs, so its INIT_BARU
+NOT hold for this robot: its servo zero-calibration differs, so its page 2
 raw values look like nearly-straight legs to this script and the FK returns:
 
     init_x_offset = -0.0023
@@ -18,7 +22,7 @@ raw values look like nearly-straight legs to this script and the FK returns:
 The robot actually stands crouched (working z_offset = 0.075). So the FK-derived
 offsets are NOT used here. Instead, op3_walking_module uses a capture/bias
 mechanism (see op3_walking_module.cpp ~line 504-544, 1207): when walking_module
-is enabled it captures the live INIT_BARU pose from the controller and biases
+is enabled it captures the live page 2 pose from the controller and biases
 the gait onto it. That reads the REAL pose at runtime, so it needs neither a
 correct FK chain nor a correct servo zero-calibration. param.yaml keeps the
 empirically-tuned offsets (x=-0.015, y=0.015, z=0.075).
@@ -34,9 +38,12 @@ USAGE:
 """
 import math
 
-# ===== INPUT: joint values from INIT_BARU page 2 (raw dynamixel 0-4095) =====
-# Decoded from motion_4095_CHRONUS.bin, page index 2 (name "INIT_BARU"),
-# step 0 positions. These are THIS robot's calibrated standing pose.
+# ===== INPUT: joint values from action page 2 (raw dynamixel 0-4095) =====
+# Decoded from motion_4095_CHRONUS.bin, page index 2, step 0 positions.
+#
+# STALE: this is page 2 as it was when named "INIT_BARU". Page 2 was re-captured
+# on 2026-08-12 and renamed "WALKING_READY"; five leg joints moved, l_ank_pitch
+# by 65 degrees (1956 -> 1211). Re-decode the bin before re-running this.
 PAGE2 = {
     "r_sho_pitch": 2457, "l_sho_pitch": 1674,
     "r_sho_roll": 2398,  "l_sho_roll": 1785,

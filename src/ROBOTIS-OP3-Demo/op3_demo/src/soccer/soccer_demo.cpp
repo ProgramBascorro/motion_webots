@@ -578,8 +578,8 @@ void SoccerDemo::startSoccerMode()
 
   is_start_soccer_running_ = true;
 
-  // Robot is already at INIT_BARU (boot pose). walking_module's IK-derived
-  // ready pose (from the FK-tuned init offsets) matches INIT_BARU, so enable
+  // Robot is already at WALKING_READY (boot pose). walking_module's IK-derived
+  // ready pose (from the FK-tuned init offsets) matches WALKING_READY, so enable
   // walking_module DIRECTLY — no action page 2 / WalkingReady replay.
   setBodyModuleToDemo("walking_module");
 

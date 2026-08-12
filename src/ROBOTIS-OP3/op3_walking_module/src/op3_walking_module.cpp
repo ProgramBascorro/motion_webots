@@ -496,11 +496,11 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     }
 
     // Lock the walking stance to the pose present when walking is enabled
-    // (INIT_BARU). walking_bias_ = captured - neutral IK stance, so that:
-    //   idle -> goal = captured_init_pose_      (hold INIT_BARU, no jump)
-    //   walk -> goal = walking_bias_ + IK_angle (= INIT_BARU + gait oscillation)
+    // (WALKING_READY). walking_bias_ = captured - neutral IK stance, so that:
+    //   idle -> goal = captured_init_pose_      (hold WALKING_READY, no jump)
+    //   walk -> goal = walking_bias_ + IK_angle (= WALKING_READY + gait oscillation)
     // The Init Pose offsets only shape the gait neutral the oscillation is built
-    // around; the standing stance itself stays locked to INIT_BARU.
+    // around; the standing stance itself stays locked to WALKING_READY.
     if (capture_init_pose_ == true)
     {
       captured_init_pose_ = goal_position_;
@@ -1207,7 +1207,7 @@ void WalkingModule::saveWalkingParam(std::string &path)
 void WalkingModule::onModuleEnable()
 {
   walking_state_ = WalkingEnable;
-  capture_init_pose_ = true;   // lock walking stance to the current pose (INIT_BARU)
+  capture_init_pose_ = true;   // lock walking stance to the current pose (WALKING_READY)
   RCLCPP_INFO(this->get_logger(), "Walking Enable");
 }
 

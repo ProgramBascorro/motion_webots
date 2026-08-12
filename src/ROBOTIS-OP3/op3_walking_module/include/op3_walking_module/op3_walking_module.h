@@ -146,8 +146,8 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
   // Walking stance is locked to the pose present when walking is enabled
-  // (INIT_BARU). captured_init_pose_ holds that pose; walking_bias_ = captured -
-  // neutral IK stance, so the gait oscillation is added on top of INIT_BARU.
+  // (WALKING_READY). captured_init_pose_ holds that pose; walking_bias_ = captured -
+  // neutral IK stance, so the gait oscillation is added on top of WALKING_READY.
   Eigen::MatrixXd captured_init_pose_;
   Eigen::MatrixXd walking_bias_;
   bool capture_init_pose_;

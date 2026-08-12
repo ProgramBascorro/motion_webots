@@ -269,7 +269,7 @@ bool QNodeOP3::isUsingModule(std::string module_name)
   return map_it->second;
 }
 
-// move ini pose : action_module page 2 (INIT_BARU)
+// move ini pose : action_module page 2 (WALKING_READY)
 void QNodeOP3::moveInitPose()
 {
   const int kInitPosePageNum = 2;
@@ -285,7 +285,7 @@ void QNodeOP3::moveInitPose()
   motion_index_pub_->publish(motion_msg);
 
   std::stringstream ss;
-  ss << "Go to robot initial pose (action page " << kInitPosePageNum << " : INIT_BARU).";
+  ss << "Go to robot initial pose (action page " << kInitPosePageNum << " : WALKING_READY).";
   log(Info, ss.str());
 }
 
