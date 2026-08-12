@@ -193,3 +193,8 @@ coverage/
 # Misc
 # =========================
 *.local
+
+# State lokal Claude Code. worktrees/ berisi checkout penuh repo ini, jadi kalau
+# ikut ter-commit isinya jadi salinan repo di dalam repo.
+.claude/settings.local.json
+.claude/worktrees/
