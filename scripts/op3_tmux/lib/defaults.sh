@@ -40,8 +40,23 @@ BALL_LOCALIZER_CMD="${OP3_BALL_LOCALIZER_CMD:-ros2 launch op3_ball_localization 
 OFFSET_TUNER_CMD="${OP3_OFFSET_TUNER_CMD:-ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml}"
 
 # Action editor
-ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095.bin}"
-ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_custom.bin}"
+#
+# Berkas aksi robot ini adalah motion_4095_CHRONUS.bin DI src/, bukan salinan di
+# install/share. commands.sh meng-export nilai ini sebagai OP3_ACTION_FILE ke
+# setiap pane, dan action_module membaca env itu lebih dulu daripada default-nya
+# -- jadi baris inilah yang menentukan page 2 mana yang dimainkan op3_manager
+# saat boot, bukan hanya berkas yang dibuka editor.
+#
+# Dulu defaultnya motion_custom.bin (berkas robot lain) dan pref tersimpan malah
+# menunjuk ke workspace /home/bascorro/motion_webots yang tidak ada di dalam
+# container: loadFile gagal, action_module diam-diam mundur ke salinan
+# install/share, dan hasil edit terbaru tidak pernah sampai ke robot.
+#
+# $WS/src/... sengaja dipakai, bukan install/share: berkasnya yang dilacak git,
+# jadi editor dan manager membaca-menulis berkas yang sama dan perubahannya
+# kelihatan di `git status`. Salinan di install/share tinggal jadi cadangan.
+ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin}"
+ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin}"
 ACTION_EDITOR_LOG="${OP3_ACTION_EDITOR_LOG:-/tmp/op3_action_editor_bridge.log}"
 ACTION_EDITOR_CMD="${OP3_ACTION_EDITOR_CMD:-bridge_log='${ACTION_EDITOR_LOG}'; bridge_pid=0; ros2 run op3_action_editor bridge_webots.py >\"\$bridge_log\" 2>&1 & bridge_pid=\$!; ros2 run op3_action_editor webots_executor.py; if [ \$bridge_pid -ne 0 ]; then kill \$bridge_pid; wait \$bridge_pid 2>/dev/null; fi}"
 

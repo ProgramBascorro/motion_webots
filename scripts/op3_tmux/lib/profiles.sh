@@ -39,8 +39,11 @@ apply_profile() {
       ;;
   esac
 
-  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095.bin}"
-  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_custom.bin}"
+  # Harus sama dengan defaults.sh -- lihat alasan lengkapnya di sana. Profil
+  # menimpa default, jadi kalau cuma salah satu yang dibetulkan, jalur profil
+  # tetap memuat berkas aksi robot lain.
+  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin}"
+  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin}"
 
   # Apply env overrides after profile defaults
   WEBOTS_CMD="${OP3_WEBOTS_CMD:-$WEBOTS_CMD}"
