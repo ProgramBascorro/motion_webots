@@ -147,48 +147,6 @@ docker_base_cmd() {
   echo "sudo docker"
 }
 
-docker_compose_cmd() {
-  local docker_cmd
-  docker_cmd="$(docker_base_cmd)"
-  if $docker_cmd compose version >/dev/null 2>&1; then
-    echo "$docker_cmd compose"
-    return 0
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-      echo "docker-compose"
-    else
-      echo "sudo docker-compose"
-    fi
-    return 0
-  fi
-  die "docker compose not found. Install docker or docker-compose."
-}
-
-detect_docker_serial_device() {
-  local preferred="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT8J0QK9-if00-port0"
-  local candidate
-
-  if [[ -e "$preferred" ]]; then
-    printf "%s" "$preferred"
-    return 0
-  fi
-
-  for candidate in /dev/serial/by-id/*; do
-    if [[ -e "$candidate" ]]; then
-      printf "%s" "$candidate"
-      return 0
-    fi
-  done
-
-  for candidate in /dev/ttyUSB* /dev/ttyACM*; do
-    if [[ -e "$candidate" ]]; then
-      printf "%s" "$candidate"
-      return 0
-    fi
-  done
-}
-
 action_docker_build() {
   local docker_cmd
   docker_cmd="$(docker_base_cmd)"
@@ -210,129 +168,49 @@ action_docker_build() {
     .)
 }
 
+# ---------------------------------------------------------------------------
+# Semua aksi docker di sini didelegasikan ke scripts/op3_docker.sh.
+#
+# Dulu file ini punya implementasi `docker run` sendiri, dan implementasi itu
+# mengulang persis semua jebakan yang sudah dibuang di op3_docker.sh:
+#
+#   * `-it --rm`              PID 1 adalah shell-mu. Menutup terminal mengirim
+#                             SIGHUP: container mati (exit 129) DAN terhapus,
+#                             berikut manager/rosbridge/studio yang sedang jalan.
+#   * `--device=<realpath>`   major:minor dibekukan saat container start. U2D2
+#                             (FTDI FT232H) sering re-enumerate, dan sesudahnya
+#                             fd di dalam container mati diam-diam (ENODEV):
+#                             gait berputar, goal_joint_states berayun, tapi
+#                             robot beku tanpa satu pun pesan error.
+#   * serial default FT8J0QK9 itu U2D2 robot lain. Punya robot ini FT3WKHM6.
+#   * `src:ro` + build/install di-mount terpisah, jadi /ros2_ws/src read-only
+#                             dan action editor tidak bisa menyimpan .bin.
+#
+# Satu container, satu definisi. Jangan hidupkan lagi versi tandingan di sini.
+# ---------------------------------------------------------------------------
+op3_docker_sh() {
+  local script="$WS/scripts/op3_docker.sh"
+  [[ -x "$script" ]] || die "Tidak ditemukan atau tidak executable: $script"
+  printf "%s" "$script"
+}
+
 action_docker_run() {
-  local docker_cmd
-  docker_cmd="$(docker_base_cmd)"
-  [[ -d "$WS" ]] || die "Workspace not found: $WS"
-
-  local tty_in="/dev/tty"
-  if [[ ! -r "$tty_in" || ! -w "$tty_in" ]]; then
-    tty_in="/proc/self/fd/0"
-  fi
-
-  local tag="${OP3_DOCKER_TAG:-op3-webots-ros2:humble}"
-  local run_flags="${OP3_DOCKER_RUN_FLAGS:-}"
-  local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
-  local mount_mode="${OP3_DOCKER_MOUNT_MODE:-cache}"
-  local src_ro="${OP3_DOCKER_SRC_RO:-1}"
-  local serial_device="${OP3_DOCKER_SERIAL_DEVICE:-}"
-  [[ -z "$serial_device" ]] && serial_device="$(detect_docker_serial_device)"
-
-  local -a docker_cmd_parts
-  read -r -a docker_cmd_parts <<< "$docker_cmd"
-
-  local -a cmd
-  cmd=(
-    "${docker_cmd_parts[@]}" run -it --rm
-    --net=host --ipc=host
-    --privileged
-    --ulimit rtprio=99
-    --ulimit memlock=-1
-    --cap-add SYS_NICE
-    --cap-add SYS_RESOURCE
-  )
-
-  case "$serial_device" in
-    ""|none|None|NONE|skip|Skip|SKIP)
-      ;;
-    *)
-      if [[ -e "$serial_device" ]]; then
-        local resolved_serial="$serial_device"
-        resolved_serial="$(readlink -f "$serial_device" 2>/dev/null || printf "%s" "$serial_device")"
-        if [[ -e "$resolved_serial" ]]; then
-          cmd+=(--device="$resolved_serial:$resolved_serial")
-        else
-          cmd+=(--device="$serial_device")
-        fi
-        [[ -d /dev/serial/by-id ]] && cmd+=(-v /dev/serial/by-id:/dev/serial/by-id:ro)
-        [[ -d /dev/serial/by-path ]] && cmd+=(-v /dev/serial/by-path:/dev/serial/by-path:ro)
-        cmd+=(-e "OP3_SERIAL_DEVICE=$serial_device")
-      else
-        echo "${YLW}Warning:${RST} serial device not found, not mounting: $serial_device"
-      fi
-      ;;
-  esac
-
-  [[ -e /dev/input ]] && cmd+=(--device=/dev/input)
-  [[ -e /dev/uinput ]] && cmd+=(--device=/dev/uinput)
-  [[ -e /dev/video0 ]] && cmd+=(--device=/dev/video0)
-  [[ -e /dev/video1 ]] && cmd+=(--device=/dev/video1)
-
-  local input_gid=""
-  local dialout_gid=""
-  input_gid="$(getent group input 2>/dev/null | cut -d: -f3 || true)"
-  dialout_gid="$(getent group dialout 2>/dev/null | cut -d: -f3 || true)"
-  [[ -n "$input_gid" ]] && cmd+=(--group-add "$input_gid")
-  [[ -n "$dialout_gid" ]] && cmd+=(--group-add "$dialout_gid")
-
-  if [[ -n "${DISPLAY:-}" ]]; then
-    cmd+=(-e "DISPLAY=${DISPLAY}")
-    [[ -S /tmp/.X11-unix/X0 ]] && cmd+=(-v /tmp/.X11-unix:/tmp/.X11-unix:rw)
-    [[ -f "$xauth" ]] && cmd+=(-e XAUTHORITY=/tmp/.Xauthority -v "$xauth":/tmp/.Xauthority:rw)
-  fi
-
-  local ro_suffix=""
-  [[ "$src_ro" == "1" ]] && ro_suffix=":ro"
-
-  case "$mount_mode" in
-    none)
-      ;;
-    full)
-      cmd+=(-v "$WS":/ros2_ws)
-      ;;
-    src|cache)
-      [[ -d "$WS/src" ]] && cmd+=(-v "$WS/src":/ros2_ws/src${ro_suffix})
-      [[ -d "$WS/scripts" ]] && cmd+=(-v "$WS/scripts":/ros2_ws/scripts${ro_suffix})
-      [[ -f "$WS/script.sh" ]] && cmd+=(-v "$WS/script.sh":/ros2_ws/script.sh${ro_suffix})
-      if [[ "$mount_mode" == "cache" ]]; then
-        mkdir -p "$WS/build" "$WS/install" "$WS/log" 2>/dev/null || true
-        cmd+=(-v "$WS/build":/ros2_ws/build)
-        cmd+=(-v "$WS/install":/ros2_ws/install)
-        cmd+=(-v "$WS/log":/ros2_ws/log)
-      fi
-      ;;
-    *)
-      die "Unknown OP3_DOCKER_MOUNT_MODE: $mount_mode"
-      ;;
-  esac
-
-  cmd+=(-w /ros2_ws)
-  [[ -n "${TERM:-}" ]] && cmd+=(-e "TERM=${TERM}")
-
-  if [[ -n "$run_flags" ]]; then
-    read -r -a extra_flags <<< "$run_flags"
-    cmd+=("${extra_flags[@]}")
-  fi
-
-  local init_cmd
-  init_cmd='if [ -n "${OPENVINO_ROOT:-}" ] && [ -f "${OPENVINO_ROOT}/setupvars.sh" ]; then source "${OPENVINO_ROOT}/setupvars.sh" || true; fi; source /opt/ros/humble/setup.bash; if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash || true; fi; export WEBOTS_HOME="${WEBOTS_HOME:-/usr/local/webots}"; export LD_LIBRARY_PATH="$WEBOTS_HOME/lib:$WEBOTS_HOME/lib/controller:${LD_LIBRARY_PATH:-}"; export USER="${USER:-root}"; exec /bin/bash -il'
-  cmd+=(--entrypoint /bin/bash "$tag" -lc "$init_cmd")
-  "${cmd[@]}" <"$tty_in" >"$tty_in"
+  local script
+  script="$(op3_docker_sh)"
+  "$script" up || return $?
+  exec "$script" shell
 }
 
 action_docker_up() {
-  local compose_cmd
-  compose_cmd="$(docker_compose_cmd)"
-  [[ -d "$WS" ]] || die "Workspace not found: $WS"
-  local up_flags="${OP3_DOCKER_UP_FLAGS:-}"
-  (cd "$WS" && $compose_cmd up $up_flags)
+  local script
+  script="$(op3_docker_sh)"
+  exec "$script" up
 }
 
 action_docker_down() {
-  local compose_cmd
-  compose_cmd="$(docker_compose_cmd)"
-  [[ -d "$WS" ]] || die "Workspace not found: $WS"
-  (cd "$WS" && $compose_cmd down)
+  local script
+  script="$(op3_docker_sh)"
+  exec "$script" down
 }
 
 restart_component() {

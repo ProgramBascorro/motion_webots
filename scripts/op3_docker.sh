@@ -137,10 +137,95 @@ except OSError as exc:
       bad "$(basename "$port") tidak terlihat di dalam container"
     fi
   done < <(robot_file_ports)
+
+  echo
+  echo "${BOLD}5. Workspace di dalam container${RST}"
+  # Regresi yang pernah menipu berjam-jam: `docker exec` melewati ENTRYPOINT,
+  # shell lahir tanpa ROS, dan tiap `ros2 run ...` cuma menjawab "command not
+  # found" atau "Package not found" -- seolah paketnya hilang. Diuji dari shell
+  # BARU, bukan dari env PID 1, karena itu yang benar-benar kamu pakai.
+  if $DOCKER exec "$NAME" /docker-entrypoint.sh bash -c 'command -v ros2' >/dev/null 2>&1; then
+    ok "ros2 ada di PATH lewat entrypoint (dipakai 'op3_docker.sh shell')"
+  else
+    bad "ros2 TIDAK ketemu lewat entrypoint -- periksa docker-entrypoint.sh"
+  fi
+  if $DOCKER exec "$NAME" bash -i -c 'command -v ros2' >/dev/null 2>&1; then
+    ok "ros2 ada di PATH untuk 'docker exec -it $NAME bash' biasa"
+  else
+    warn "shell polos belum punya ROS -- jalankan 'scripts/op3_docker.sh up' sekali lagi"
+  fi
+  local pkg missing=0
+  for pkg in op3_action_editor op3_manager op3_action_module; do
+    if ! $DOCKER exec "$NAME" /docker-entrypoint.sh bash -c \
+         "ros2 pkg prefix $pkg" >/dev/null 2>&1; then
+      bad "paket '$pkg' tidak ketemu -- workspace belum di-build di dalam container"
+      missing=1
+    fi
+  done
+  [ "$missing" -eq 0 ] && ok "paket op3 inti terbaca (action_editor, manager, action_module)"
+
+  echo
+  echo "${BOLD}6. Kesegaran build (ABI)${RST}"
+  # Jebakan paling mahal yang pernah kena di repo ini (2026-08-12).
+  #
+  # robotis_controller.h diubah (menambah anggota data ke class RobotisController),
+  # lalu HANYA paket robotis_controller yang di-build ulang. Paket lain yang
+  # meng-#include header itu masih memakai layout class LAMA: offset anggota dan
+  # ukuran object-nya beda dengan .so yang baru. Hasilnya bukan error link dan
+  # bukan crash, tapi memori dibaca di alamat yang salah.
+  #
+  # Gejalanya sama sekali tidak menunjuk ke penyebabnya: op3_action_editor jalan,
+  # mencetak daftar port dan 20 servo, berhenti tepat setelah "Load offsets...",
+  # lalu berputar 100% CPU selamanya tanpa satu pun pesan error. Butuh gdb untuk
+  # menemukannya. Karena itu diperiksa otomatis di sini.
+  local hdr="$WS/src/ROBOTIS-Framework/robotis_controller/include/robotis_controller/robotis_controller.h"
+  if [ ! -f "$hdr" ]; then
+    warn "robotis_controller.h tidak ditemukan -- lewati pemeriksaan"
+    return 0
+  fi
+  local abi_stale=0 src_file pkg pkg_dir artifact
+  while IFS= read -r src_file; do
+    pkg_dir="$(dirname "$src_file")"
+    while [ "$pkg_dir" != "/" ] && [ "$pkg_dir" != "$WS" ]; do
+      [ -f "$pkg_dir/package.xml" ] && break
+      pkg_dir="$(dirname "$pkg_dir")"
+    done
+    [ -f "$pkg_dir/package.xml" ] || continue
+    pkg="$(basename "$pkg_dir")"
+    artifact="$(find "$WS/build/$pkg" -maxdepth 1 \( -name '*.so' -o -type f -perm -u+x \) \
+                 ! -name '*.cmake' ! -name '*.txt' ! -name '*.py' 2>/dev/null | head -1)"
+    [ -n "$artifact" ] || continue
+    if [ "$artifact" -ot "$hdr" ]; then
+      bad "'$pkg' dibangun SEBELUM robotis_controller.h berubah -- layout class beda."
+      bad "  Perbaiki: colcon build --packages-select $pkg --symlink-install"
+      abi_stale=1
+    fi
+  done < <(grep -rl 'robotis_controller/robotis_controller.h' \
+             --include='*.h' --include='*.hpp' --include='*.cpp' "$WS/src" 2>/dev/null)
+  [ "$abi_stale" -eq 0 ] && ok "semua pemakai robotis_controller.h dibangun setelah header terakhir berubah"
+}
+
+# `docker exec ... bash` melewati ENTRYPOINT, jadi shell lewat jalur itu lahir
+# tanpa ROS sama sekali. `shell` di script ini sudah dibungkus entrypoint, tapi
+# siapa pun masih bisa mengetik `docker exec -it op3 bash` dari kebiasaan lama.
+# Tanam sourcing-nya di .bashrc container supaya SEMUA jalan masuk beres.
+# Idempoten: aman dipanggil berkali-kali.
+harden_container_shell() {
+  $DOCKER exec "$NAME" bash -c '
+marker="# >>> op3: auto-source ROS (dipasang op3_docker.sh) >>>"
+grep -qF "$marker" /root/.bashrc 2>/dev/null && exit 0
+cat >> /root/.bashrc <<EOF
+$marker
+[ -f /opt/ros/humble/setup.bash ] && source /opt/ros/humble/setup.bash
+[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash
+# <<< op3: auto-source ROS <<<
+EOF
+' >/dev/null 2>&1 || warn "gagal memasang auto-source ROS di .bashrc container"
 }
 
 cmd_up() {
   if container_running; then
+    harden_container_shell
     echo "Container '$NAME' sudah jalan."
     echo "Buka shell: scripts/op3_docker.sh shell"
     return 0
@@ -158,11 +243,34 @@ cmd_up() {
   input_gid="$(getent group input | cut -d: -f3)"
   dialout_gid="$(getent group dialout | cut -d: -f3)"
 
+  # X11 diteruskan kalau ada, supaya GUI (rqt_image_view, Webots) tetap bisa
+  # tampil. Jalur `--docker-run` lama membawa ini; tanpa disalin ke sini,
+  # menyatukan semua ke satu script justru mematikan GUI.
+  local -a x11=()
+  if [ -n "${DISPLAY:-}" ]; then
+    x11+=(-e "DISPLAY=$DISPLAY")
+    [ -d /tmp/.X11-unix ] && x11+=(-v /tmp/.X11-unix:/tmp/.X11-unix:rw)
+    local xauth="${XAUTHORITY:-$HOME/.Xauthority}"
+    [ -f "$xauth" ] && x11+=(-e XAUTHORITY=/tmp/.Xauthority -v "$xauth":/tmp/.Xauthority:rw)
+  fi
+
   # docker-entrypoint.sh di-bind dari source: image masih menyimpan versi lama
   # yang kehilangan argumen CMD (setupvars.sh milik OpenVINO menelan "$@", jadi
   # `exec "$@"` jalan tanpa argumen dan container langsung exit 0). Bind mount
   # ini membuat perbaikannya berlaku tanpa rebuild image.
+  # `--restart unless-stopped`: setelah PC reboot container ikut hidup lagi
+  # sendiri. Tanpa ini, tiap kali PC dinyalakan ulang container hilang dan semua
+  # `ros2 run ...` menjawab "Package not found" -- workspace ini dibangun dengan
+  # --symlink-install DI DALAM container, jadi seluruh install/ menunjuk ke
+  # /ros2_ws yang cuma ada di sana. Kalau tidak mau auto-start, pakai
+  # `scripts/op3_docker.sh down` (itu dihitung "stopped", jadi tidak bangkit).
+  # `--init`: PID 1 di container ini `sleep infinity`, dan sleep tidak pernah
+  # me-reap anak yatim. Proses ROS yang mati saat terminalnya ditutup jadi
+  # menumpuk sebagai <defunct> dan mengotori `pgrep`/`ps` -- sempat bikin salah
+  # baca PID waktu mendiagnosis. tini sebagai PID 1 membereskannya sendiri.
   $DOCKER run -d --name "$NAME" \
+    --init \
+    --restart unless-stopped \
     --net=host --ipc=host \
     --privileged \
     -v /dev:/dev \
@@ -171,6 +279,7 @@ cmd_up() {
     -w /ros2_ws \
     ${input_gid:+--group-add "$input_gid"} \
     ${dialout_gid:+--group-add "$dialout_gid"} \
+    "${x11[@]}" \
     --ulimit rtprio=99 --ulimit memlock=-1 \
     --cap-add SYS_NICE --cap-add SYS_RESOURCE \
     "$IMAGE" \
@@ -181,6 +290,7 @@ cmd_up() {
     echo "${RED}Container gagal start.${RST} Lihat: $DOCKER logs $NAME" >&2
     exit 1
   fi
+  harden_container_shell
   echo "Container '$NAME' jalan."
   echo
   cmd_doctor
@@ -190,7 +300,13 @@ cmd_up() {
 
 cmd_shell() {
   container_running || { echo "Container '$NAME' tidak jalan. Jalankan: scripts/op3_docker.sh up" >&2; exit 1; }
-  exec $DOCKER exec -it "$NAME" bash
+  # Shell HARUS lewat /docker-entrypoint.sh. `docker exec` melewati ENTRYPOINT
+  # container, jadi shell polos lahir tanpa ROS sama sekali -- `ros2` tidak ada
+  # di PATH dan setiap `ros2 run ...` cuma menjawab "command not found". PID 1
+  # memang punya env-nya (dia lewat entrypoint waktu start), tapi env itu tidak
+  # diwariskan ke proses baru hasil exec. Entrypoint yang men-source
+  # /opt/ros/humble + /ros2_ws/install, jadi panggil dia sebagai pembungkus.
+  exec $DOCKER exec -it "$NAME" /docker-entrypoint.sh bash
 }
 
 cmd_down() {
