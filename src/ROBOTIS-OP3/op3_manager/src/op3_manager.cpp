@@ -57,7 +57,10 @@ const int SUB_CONTROLLER_ID = 200;
 const int DXL_BROADCAST_ID = 254;
 const int DEFAULT_DXL_ID = 1;
 const std::string SERVO_DEVICE = "/dev/ttyOP3";
-const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOpenCR";
+// Stock opencr_op3 wiring: ID 200 sits on the TTL bus with the servos, so the
+// power-on and RGB LED writes go to the servo port. The OpenCR's micro-USB CDC
+// (/dev/ttyACM0) is only a debug console here and answers no DXL packet.
+const std::string SUB_CONTROLLER_DEVICE = SERVO_DEVICE;
 const int POWER_CTRL_TABLE = 24;
 const int RGB_LED_CTRL_TABLE = 26;
 const int TORQUE_ON_CTRL_TABLE = 64;
