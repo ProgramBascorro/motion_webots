@@ -10,22 +10,22 @@ Pakai:
     # sourcekan dulu workspace supaya dynamixel_sdk (python) tersedia
     source install/setup.bash
 
-    # cek OpenCR (ID 200) di port U2D2 / OpenCR
-    python3 scripts/opencr_check.py --port /dev/ttyUSB0
+    # cek OpenCR (ID 200) di bus DXL
+    python3 scripts/opencr_check.py --port /dev/ttyOP3
 
     # sekalian scan semua servo + OpenCR di bus
-    python3 scripts/opencr_check.py --port /dev/ttyUSB0 --scan
+    python3 scripts/opencr_check.py --port /dev/ttyOP3 --scan
 
-    # kalau OpenCR muncul sebagai USB CDC sendiri (jembatan), coba portnya:
-    python3 scripts/opencr_check.py --port /dev/ttyACM0
-
-Catatan penting soal topologi:
-    - Firmware standar OP3 menjawab ID 200 di sisi JEMBATAN (USB) OpenCR, dan
-      MENERUSKAN paket servo (ID 1-20) ke bus DXL. Jadi port yang benar adalah
-      port milik OpenCR; di port itu ID 200 DAN servo 1-20 sama-sama menjawab.
-    - Kalau Anda memasang U2D2 langsung ke bus servo (melewati OpenCR), servo
-      1-20 menjawab tapi ID 200 tidak akan pernah menjawab - itu normal, bukan
-      OpenCR rusak.
+Catatan penting soal topologi (robot ini):
+    - /dev/ttyOP3 = U2D2 (FTDI 0403:6014), master bus TTL. Firmware standar
+      opencr_op3 melayani ID 200 di DXL_PORT = Serial3, yaitu bus TTL yang sama
+      dengan servo. Jadi di /dev/ttyOP3 servo 1-20 DAN ID 200 sama-sama menjawab.
+    - /dev/ttyACM0 = micro-USB OpenCR, hanya konsol debug/flash. Port ini tidak
+      pernah membalas paket DXL, jadi wajar kalau scan di sana kosong total.
+    - Kalau tidak ada satu pun ID menjawab, cek dulu U2D2-nya benar tercolok:
+      lsusb | grep 0403   (kosong = adapter tidak ada, bukan servo mati)
+    - Board yang di-flash opencr_op3_usb berperilaku sebaliknya: ID 200 dilayani
+      lewat micro-USB-nya, dan OP3.robot harus memberi sensor OPEN-CR port itu.
 """
 
 import argparse
@@ -83,7 +83,7 @@ def ping(packet, port, dxl_id):
 
 def main():
     ap = argparse.ArgumentParser(description="Diagnostik OpenCR / bus OP3")
-    ap.add_argument("--port", default="/dev/ttyUSB0")
+    ap.add_argument("--port", default="/dev/ttyOP3")
     ap.add_argument("--baud", type=int, default=2000000)
     ap.add_argument("--id", type=int, default=OPENCR_ID, help="ID OpenCR (default 200)")
     ap.add_argument("--scan", action="store_true", help="scan ID 1-20 + 200")
@@ -113,9 +113,11 @@ def main():
                 print(f"  ID {dxl_id:3d}  OK   model={model}{tag}")
         if not found:
             print("  (tidak ada device menjawab)")
+            print("  -> Cek U2D2 tercolok (lsusb | grep 0403) dan power robot menyala.")
         elif OPENCR_ID not in found:
             print(f"\n  Servo terbaca {found}, tapi ID 200 (OpenCR) TIDAK menjawab.")
-            print("  -> OpenCR tidak berada di jalur ini (kemungkinan dilewati U2D2).")
+            print("  -> OpenCR tidak ada di bus ini: tidak bertenaga, atau di-flash")
+            print("     opencr_op3_usb sehingga ID 200 hanya ada di micro-USB-nya.")
         print("-" * 56)
 
     print(f"Ping OpenCR (ID {args.id}) ...")
@@ -123,8 +125,8 @@ def main():
     if comm != COMM_SUCCESS:
         print(f"  GAGAL: {packet.getTxRxResult(comm)}")
         print("\n  Kesimpulan: OpenCR tidak menjawab di port ini.")
-        print("  Cek: (1) apakah servo chain masuk ke port DXL OpenCR, bukan U2D2;")
-        print("       (2) apakah PC tersambung ke USB OpenCR (coba --port /dev/ttyACM0);")
+        print("  Cek: (1) U2D2 tercolok dan port ini memang bus TTL (lsusb | grep 0403);")
+        print("       (2) OpenCR bertenaga dan kabel TTL-nya masuk ke bus servo;")
         print("       (3) tidak ada proses lain memegang port (fuser %s)." % args.port)
         port.closePort()
         sys.exit(1)

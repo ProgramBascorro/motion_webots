@@ -52,39 +52,66 @@ def _dxl_answers(dev, dxl_id):
         os.close(fd)
 
 
-def ensure_ports(servo_link='/dev/ttyOP3', sub_link='/dev/ttyOpenCR', max_minor=15):
-    """Resolve both stable port names by probing who actually answers.
+def _usb_serial_ports():
+    """Every USB serial tty the kernel actually has, adapters (ttyUSB*) first.
+
+    Enumerated from sysfs rather than guessed: /sys/class/tty lists a name only
+    once its driver is bound, and carries the real major:minor. Inside a container
+    started with --device the node can be missing from /dev although the kernel has
+    the tty, so recreate exactly that one -- we are root in a privileged container
+    and device numbers are global. Nothing is ever created for a tty the kernel
+    does not have, so no phantom nodes are left behind in the shared /dev.
+    """
+    ports = []
+    for name in os.listdir('/sys/class/tty'):
+        if not name.startswith(('ttyUSB', 'ttyACM')):
+            continue
+        try:
+            with open('/sys/class/tty/%s/dev' % name) as handle:
+                major, minor = (int(part) for part in handle.read().strip().split(':'))
+        except (OSError, ValueError):
+            continue
+        dev = '/dev/%s' % name
+        if not os.path.exists(dev):
+            try:
+                os.mknod(dev, 0o666 | stat.S_IFCHR, os.makedev(major, minor))
+            except OSError:
+                continue
+        ports.append(dev)
+    # Adapters before CDC ports, then in number order (length first, so ttyUSB2
+    # stays ahead of ttyUSB10).
+    ports.sort(key=lambda dev: (not dev.startswith('/dev/ttyUSB'), len(dev), dev))
+    return ports
+
+
+def _openable(dev):
+    """True if ``dev`` can be opened -- a node with no driver bound cannot."""
+    try:
+        fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    os.close(fd)
+    return True
+
+
+def ensure_ports(servo_link='/dev/ttyOP3', sub_link='/dev/ttyOP3'):
+    """Resolve the port names by probing who actually answers.
 
     Mirrors ensure_opencr_port() in op3_action_editor's executor.py -- the manager
-    needs the same treatment because it is usually the first thing started, and
-    /dev/ttyOpenCR has no udev rule installed on this host. Inside the container the
-    serial nodes are fixed --device entries from container-start time, so recreate
-    them and repoint the links at whatever is live now. Idempotent; quiet off-hardware.
+    needs the same treatment because it is usually the first thing started. A board
+    that re-enumerates lands on a different minor, so the stable name has to follow
+    the port that answers. Idempotent; quiet off-hardware.
 
-    The servos are on the U2D2 and the sub controller ID 200 on the OpenCR's CDC,
-    because this board's TTL transceiver is dead (see OP3.robot). If a healthy
-    OpenCR is ever put back on the TTL bus, both answer on one port; sub_link is
-    then left alone rather than putting two PortHandlers on one tty.
+    Stock opencr_op3 wiring here: sub controller ID 200 answers on the TTL bus
+    alongside the servos, so both names are the same port and only one link is ever
+    rewritten. The two arguments stay separate because a board flashed with
+    opencr_op3_usb serves ID 200 on its micro-USB instead; the probe reports that
+    mismatch rather than papering over it.
+
+    A port nobody answered on is never adopted -- adopting one only turns a missing
+    adapter into twenty "JOINT[...] does NOT respond!!" lines further downstream.
     """
-    candidates = []
-    for major, prefix in ((188, 'ttyUSB'), (166, 'ttyACM')):
-        for minor in range(max_minor + 1):
-            dev = '/dev/%s%d' % (prefix, minor)
-            if not os.path.exists(dev):
-                try:
-                    os.mknod(dev, 0o666 | stat.S_IFCHR, os.makedev(major, minor))
-                except OSError:
-                    pass
-            candidates.append(dev)
-
-    live = []
-    for dev in candidates:
-        try:
-            fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        except OSError:
-            continue
-        os.close(fd)
-        live.append(dev)
+    live = [dev for dev in _usb_serial_ports() if _openable(dev)]
 
     if not live:
         print('op3_manager.launch: no live serial port found', file=sys.stderr)
@@ -95,7 +122,11 @@ def ensure_ports(servo_link='/dev/ttyOP3', sub_link='/dev/ttyOpenCR', max_minor=
 
     def point(link, target):
         try:
-            if os.path.realpath(link) == target:
+            if link == target or os.path.realpath(link) == target:
+                return
+            if os.path.exists(link) and not os.path.islink(link):
+                print('op3_manager.launch: %s is a real device node, not a symlink; '
+                      'leaving it alone (wanted %s)' % (link, target), file=sys.stderr)
                 return
             if os.path.islink(link) or os.path.exists(link):
                 os.remove(link)
@@ -104,15 +135,29 @@ def ensure_ports(servo_link='/dev/ttyOP3', sub_link='/dev/ttyOpenCR', max_minor=
         except OSError as e:
             print('op3_manager.launch: could not set %s: %s' % (link, e), file=sys.stderr)
 
-    point(servo_link, servo_port or live[0])
+    if servo_port is None:
+        print('op3_manager.launch: no servo answered on %s -- the DXL bus adapter '
+              '(U2D2/FTDI, /dev/ttyUSB*) is not reachable, so %s is left as it is. '
+              'Check the U2D2 cable and that the robot is powered; the OpenCR '
+              'micro-USB alone cannot drive the servos.'
+              % (', '.join(live), servo_link), file=sys.stderr)
+    else:
+        point(servo_link, servo_port)
 
     if sub_port is None:
         print('op3_manager.launch: ID %d silent on %s -- no IMU, no button'
               % (SUB_CONTROLLER_ID, ', '.join(live)), file=sys.stderr)
     elif sub_port == servo_port:
-        print('op3_manager.launch: ID %d shares the servo port (%s) -- stock '
-              'opencr_op3 wiring; move the OPEN-CR sensor line in OP3.robot back '
-              'onto %s' % (SUB_CONTROLLER_ID, sub_port, servo_link), file=sys.stderr)
+        pass  # stock wiring: one port carries both, nothing else to point
+    elif servo_port is None:
+        print('op3_manager.launch: ID %d answers on %s but no servo does -- the '
+              'OpenCR is up, the servo bus is not.'
+              % (SUB_CONTROLLER_ID, sub_port), file=sys.stderr)
+    elif sub_link == servo_link:
+        print('op3_manager.launch: ID %d answers on %s, not on the servo port %s -- '
+              'this OpenCR serves the sub controller over its own port, so the '
+              'OPEN-CR sensor line in OP3.robot needs that port, not %s'
+              % (SUB_CONTROLLER_ID, sub_port, servo_port, servo_link), file=sys.stderr)
     else:
         point(sub_link, sub_port)
 
@@ -125,13 +170,13 @@ def generate_launch_description():
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    # Same stable names OP3.robot uses. Two of them, because the servo bus and the
-    # sub controller are on different adapters here: device_name is the servo port
-    # (the startup torque check reads joint ID 1 through it), while the DXL power-on
-    # and RGB LED writes go to ID 200 on the OpenCR's own port. With stock
-    # opencr_op3 wiring both would simply be /dev/ttyOP3.
+    # Same name OP3.robot uses. Two parameters, one port: device_name is the servo
+    # port (the startup torque check reads joint ID 1 through it) and ID 200 rides
+    # the same TTL bus under stock opencr_op3, so the DXL power-on and RGB LED
+    # writes go there too. They stay separate for a board flashed with
+    # opencr_op3_usb, which serves ID 200 on its own micro-USB port instead.
     device_name_default = '/dev/ttyOP3'
-    sub_controller_device_name_default = '/dev/ttyOpenCR'
+    sub_controller_device_name_default = '/dev/ttyOP3'
 
     return LaunchDescription([
         Node(

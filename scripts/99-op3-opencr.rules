@@ -4,20 +4,18 @@
 #   sudo cp scripts/99-op3-opencr.rules /etc/udev/rules.d/99-op3-opencr.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# Two ports, two jobs. Stock opencr_op3 serves the sub controller (ID 200 --
-# IMU, button, buzzer, DXL power) on DXL_PORT = Serial3, i.e. the TTL bus
-# alongside the servos, and its micro-USB is only a debug console. CHRONUS's
-# OpenCR cannot do that: its TTL transceiver is deaf (never receives a byte on
-# Serial3 even though the sketch, the IMU and the USB CDC all work), so it runs
-# opencr_op3_usb instead, which serves ID 200 over the micro-USB.
+# One port does the work. CHRONUS runs stock opencr_op3, which serves the sub
+# controller (ID 200 -- IMU, button, buzzer, DXL power) on DXL_PORT = Serial3,
+# i.e. the TTL bus alongside the servos. So ttyOP3 = the U2D2 = servos + ID 200,
+# and the OpenCR's micro-USB CDC (/dev/ttyACM0) is only a debug console: it never
+# answers a DXL packet, so nothing in the stack addresses it.
 #
-# So: ttyOP3 = the TTL adapter, servos only. ttyOpenCR = the OpenCR CDC, ID 200.
-# A ttyACM must still never claim ttyOP3 -- the servos are not reachable there.
+# A ttyACM must never claim ttyOP3 -- nothing is reachable there.
 
-# U2D2 (FT232H) on the DXL bus -- the 20 servos
+# U2D2 (FT232H) on the DXL bus -- the 20 servos plus sub controller ID 200
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", SYMLINK+="ttyOP3", MODE="0666"
 
-# OpenCR CDC -- sub controller ID 200 (opencr_op3_usb build). With the stock
-# firmware this same node is just a debug console and OP3.robot should put the
-# sensor back on ttyOP3.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", SYMLINK+="ttyOpenCR", MODE="0666"
+# OpenCR CDC (/dev/ttyACM0) -- debug console only under stock opencr_op3. Kept
+# world-writable for flashing and serial monitoring. A board flashed with
+# opencr_op3_usb would serve ID 200 here, and OP3.robot would need this port.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", MODE="0666"
