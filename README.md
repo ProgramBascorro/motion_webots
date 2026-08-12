@@ -59,6 +59,12 @@ sudo docker build -t op3-webots-ros2:humble .
 
 ## RUN
 
+> **Memasang repo ini di robot lain (CHRONUS dsb)?** Baca
+> **[SETUP_ROBOT_BARU.md](SETUP_ROBOT_BARU.md)** lebih dulu. Sebagian isi repo
+> ini khusus ALPHONSE — terutama alamat serial dan penempatan OpenCR di port USB
+> terpisah (itu workaround untuk transceiver bus yang mati, bukan susunan OP3
+> normal). Penyesuaiannya otomatis: `scripts/op3_serial_setup.py --apply`.
+
 ```bash
 scripts/op3_docker.sh up       # nyalakan container
 scripts/op3_docker.sh shell    # buka shell di dalamnya (boleh berkali-kali)
