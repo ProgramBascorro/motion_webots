@@ -117,11 +117,21 @@ def generate_launch_description():
             'omp_threads', default_value='2',
             description='Cap torch/numpy (OpenMP/BLAS) threads for pre/post-'
                         'processing so YOLO leaves CPU for walking. Empty = no cap.'),
+        # BELUM diukur ulang di robot ini. Angka "0-3" dan alasannya berasal dari
+        # PC asal port ini (i5 4 core / 8 thread, jadi menghindari dua thread
+        # berbagi satu core fisik). Robot ini Jetson Cortex-A78AE 6 core dengan
+        # 1 thread per core, jadi alasan HT-nya tidak berlaku sama sekali; yang
+        # tersisa cuma efeknya: YOLO dikurung di core 0-3 dan menyisakan core 4-5
+        # untuk loop kontrol 8 ms, manager, rosbridge, dan studio. Nilainya
+        # dibiarkan apa adanya karena belum ada pengukuran di perangkat ini
+        # (dan robotis_controller sudah berjalan dengan prioritas realtime, jadi
+        # ia tetap mendahului YOLO di core mana pun). Kalau nanti diukur, ubah
+        # lewat argumen ini -- tidak perlu menyentuh berkas.
         DeclareLaunchArgument(
             'cpu_affinity', default_value='0-3',
             description='taskset core list to pin ALL detector threads, leaving '
-                        'the rest for the controller. Default "0-3" measured ~2x '
-                        'faster inference on this 4c/8t i5 (avoids HT contention). '
-                        'Set empty to disable, or adjust for other CPUs.'),
+                        'the rest for the controller. "0-3" carried over from the '
+                        'source PC (4c/8t i5); not re-measured on this 6-core '
+                        'Jetson. Set empty to disable, or adjust for other CPUs.'),
         OpaqueFunction(function=_launch_setup),
     ])
