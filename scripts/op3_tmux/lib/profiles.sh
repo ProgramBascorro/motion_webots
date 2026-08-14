@@ -11,8 +11,13 @@ apply_profile() {
       BALL_HEAD_TRACKING_CMD="ros2 launch op3_ball_localization yolo_scan_only.launch.py"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
-      DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
+      # Harus sama dengan defaults.sh -- alasan memilih demo.launch.xml (bukan
+      # demo_yolo.launch.xml) ditulis lengkap di sana.
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml"
       START_DELAY_SEC="4.0"
+      # Tidak ada bus Dynamixel sungguhan di sim, jadi tidak ada init yang perlu
+      # diberi jalan lebih dulu.
+      STACK_STAGGER_SEC="0.0"
       ROS_DOMAIN_ID_DEFAULT="0"
       ;;
     real_robot)
@@ -25,8 +30,14 @@ apply_profile() {
       BALL_HEAD_TRACKING_CMD="ros2 launch op3_ball_localization yolo_scan_only.launch.py"
       BALL_LOCALIZER_CMD="ros2 launch op3_ball_localization ball_localizer.launch.py"
       OFFSET_TUNER_CMD="ros2 launch op3_offset_tuner_server op3_offset_tuner_server.launch.xml"
-      DEMO_CMD="ros2 launch op3_demo demo_yolo.launch.xml"
+      # Sama dengan jalur webots dan defaults.sh; lihat penjelasannya di defaults.sh.
+      DEMO_CMD="ros2 launch op3_demo demo.launch.xml"
       START_DELAY_SEC="1.0"
+      # Beri op3_manager waktu menyelesaikan init Dynamixel-nya sebelum pane
+      # vision/web/studio ikut start. Jetson ini cuma 6 core dan node YOLO
+      # langsung memakan hampir semuanya; init yang seharusnya ~3.5 s bisa molor
+      # dan variasinya besar kalau semuanya start berbarengan.
+      STACK_STAGGER_SEC="5.0"
       ROS_DOMAIN_ID_DEFAULT="1"
       ;;
     *)
@@ -34,6 +45,9 @@ apply_profile() {
       ;;
   esac
 
+  # Harus sama dengan defaults.sh -- lihat alasan lengkapnya di sana. Profil
+  # menimpa default, jadi kalau cuma salah satu yang dibetulkan, jalur profil
+  # tetap menyemai berkas aksi robot lain.
   ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ORION.bin}"
   ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ORION.bin}"
 
@@ -54,5 +68,6 @@ apply_profile() {
   DEMO_WAIT_STEP_SEC="${OP3_DEMO_WAIT_STEP_SEC:-$DEMO_WAIT_STEP_SEC}"
   DEMO_WAIT_STEPS="${OP3_DEMO_WAIT_STEPS:-$DEMO_WAIT_STEPS}"
   START_DELAY_SEC="${OP3_START_DELAY_SEC:-$START_DELAY_SEC}"
+  STACK_STAGGER_SEC="${OP3_STACK_STAGGER_SEC:-$STACK_STAGGER_SEC}"
   ROS_DOMAIN_ID_DEFAULT="${ROS_DOMAIN_ID_DEFAULT_ENV:-$ROS_DOMAIN_ID_DEFAULT}"
 }
