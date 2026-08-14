@@ -134,6 +134,12 @@ public:
   void    stopTimer();
   bool    isTimerRunning();
 
+  /* The Dynamixel bus has a single master: when two processes keep the same serial port
+   * open (e.g. op3_manager and op3_action_editor) they corrupt each other's packets.
+   * Returns "name(pid N)" of another process already holding device_name, or an empty
+   * string when the port is free. */
+  static std::string findPortUser(const std::string &device_name);
+
   void    setCtrlModule(std::string module_name);
   void    loadOffset(const std::string path);
 

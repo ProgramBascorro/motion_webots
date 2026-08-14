@@ -26,6 +26,13 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <dirent.h>
+#include <limits.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+
 using namespace robotis_framework;
 
 RobotisController::RobotisController()
@@ -45,6 +52,58 @@ RobotisController::RobotisController()
   direct_sync_write_.clear();
 }
 
+std::string RobotisController::findPortUser(const std::string &device_name)
+{
+  // The Linux port handler opens the tty without any lock, so a second master goes
+  // unnoticed until its packets start colliding. Look the owner up in /proc instead.
+  char resolved[PATH_MAX];
+  std::string device_path = (realpath(device_name.c_str(), resolved) != NULL) ? resolved : device_name;
+
+  DIR *proc_dir = opendir("/proc");
+  if (proc_dir == NULL)
+    return "";
+
+  const pid_t self_pid = getpid();
+  std::string port_user;
+
+  for (struct dirent *proc_entry = readdir(proc_dir); proc_entry != NULL && port_user.empty();
+       proc_entry = readdir(proc_dir))
+  {
+    const pid_t pid = atoi(proc_entry->d_name);
+    if (pid <= 0 || pid == self_pid)
+      continue;
+
+    const std::string fd_dir_path = std::string("/proc/") + proc_entry->d_name + "/fd";
+    DIR *fd_dir = opendir(fd_dir_path.c_str());
+    if (fd_dir == NULL)   // process owned by somebody else, or already gone
+      continue;
+
+    for (struct dirent *fd_entry = readdir(fd_dir); fd_entry != NULL; fd_entry = readdir(fd_dir))
+    {
+      char link_target[PATH_MAX];
+      const std::string fd_path = fd_dir_path + "/" + fd_entry->d_name;
+      const ssize_t length = readlink(fd_path.c_str(), link_target, sizeof(link_target) - 1);
+      if (length <= 0)
+        continue;
+      link_target[length] = '\0';
+
+      if (device_path != link_target)
+        continue;
+
+      std::string process_name;
+      std::ifstream comm_file(std::string("/proc/") + proc_entry->d_name + "/comm");
+      std::getline(comm_file, process_name);
+
+      port_user = (process_name.empty() ? "unknown" : process_name) + "(pid " + proc_entry->d_name + ")";
+      break;
+    }
+    closedir(fd_dir);
+  }
+  closedir(proc_dir);
+
+  return port_user;
+}
+
 void RobotisController::initializeSyncWrite()
 {
   if (gazebo_mode_ == true)
@@ -55,14 +114,28 @@ void RobotisController::initializeSyncWrite()
     it.second->txRxPacket();
   for(auto& it : port_to_bulk_read_)
   {
+    // Keep retrying for ~2s: the Dynamixels need a moment to answer after the sub
+    // controller switches their power on, and a busy bus can drop a packet or two.
+    const int max_retry = 200;
     int error_count = 0;
     int result = COMM_SUCCESS;
     do
     {
-      if (++error_count > 10)
+      if (++error_count > max_retry)
       {
-        RCLCPP_ERROR(this->get_logger(), "first bulk read fail!!");
-        exit(-1);
+        const std::string port_user = findPortUser(it.first);
+        RCLCPP_ERROR(this->get_logger(), "first bulk read fail!! [port: %s]", it.first.c_str());
+        if (port_user.empty() == false)
+          RCLCPP_ERROR(this->get_logger(), "  -> %s is also using the port; stop it and start again.",
+                       port_user.c_str());
+        else
+          RCLCPP_ERROR(this->get_logger(), "  -> check the Dynamixel power switch, the bus cable and the baud rate.");
+
+        // Hard-exit: plain exit() would run the static destructors while the queue
+        // thread is still spinning, turning this error into a SIGSEGV (launch reports
+        // "exit code -11") that hides the message above.
+        fflush(NULL);
+        std::_Exit(1);
       }
       usleep(10 * 1000);
       result = it.second->txRxPacket();

@@ -37,6 +37,16 @@ void sighandler(int sig)
 
 bool turnOnDynamixelPower(rclcpp::Node::SharedPtr node, const std::string &device_name, const int &baud_rate)
 {
+  // The Dynamixel bus takes one master only: bail out when another node (usually a
+  // running op3_manager) still owns the port instead of corrupting its packets.
+  std::string port_user = robotis_framework::RobotisController::findPortUser(device_name);
+  if (port_user.empty() == false)
+  {
+    RCLCPP_ERROR(node->get_logger(), "%s is already in use by %s.", device_name.c_str(), port_user.c_str());
+    RCLCPP_ERROR(node->get_logger(), "Stop that node first, then start the action editor again.");
+    return false;
+  }
+
   // power on
   dynamixel::PortHandler *_port_h = (dynamixel::PortHandler *) dynamixel::PortHandler::getPortHandler(device_name.c_str());
   bool _set_port = _port_h->setBaudRate(baud_rate);

@@ -73,14 +73,41 @@ start_bg() {
   echo "[studio] started $name (log: $logfile)"
 }
 
+# Setiap yang di-start_bg adalah `ros2 run` / `ros2 launch`: pembungkus python
+# yang node aslinya jadi CUCU. `kill $pid` cuma membunuh pembungkusnya, dan node
+# yang tertinggal tetap memegang portnya. Dari situlah gejala "studio kadang
+# nyala tapi tombol Walking mati semua": rosbridge sebelumnya masih menempel di
+# 9090 atau asset server di 8001, jadi yang baru gagal bind dan diam-diam tidak
+# pernah naik. Lihat scripts/lib/proc_tree.sh.
+# shellcheck source=lib/proc_tree.sh
+source "$SCRIPT_DIR/lib/proc_tree.sh"
+
 cleanup() {
-  for pid in "${pids[@]:-}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
+  trap - EXIT INT TERM HUP
+  if [[ "${#pids[@]}" -gt 0 ]]; then
+    echo "[studio] menghentikan ${#pids[@]} proses latar..."
+    proc_kill_tree "${pids[@]}"
+  fi
+
+  # pnpm/vite jalan di latar depan, bukan lewat start_bg, jadi tidak ada di
+  # $pids -- tanpa sapuan ini port 5173 bisa ikut tertinggal.
+  local -a leftovers=() protected=()
+  local child
+  mapfile -t protected < <(proc_protected_pids)
+  while read -r child; do
+    if [[ -n "$child" ]] && ! proc_is_protected "$child" "${protected[@]}"; then
+      leftovers+=("$child")
     fi
-  done
+  done < <(proc_descendants "$$")
+  if [[ "${#leftovers[@]}" -gt 0 ]]; then
+    proc_kill_pids "${leftovers[@]}"
+  fi
 }
+# EXIT saja TIDAK cukup: bash tidak menjalankan trap EXIT kalau ia mati oleh
+# sinyal yang tidak di-trap, dan itu justru kasus tersering di sini -- pane tmux
+# ditutup, shell-nya dapat SIGHUP, script mati seketika tanpa membereskan apa pun.
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM HUP
 
 if [[ "${OP3_STUDIO_SKIP_BRIDGE:-${OP3_ACTION_WEB_SKIP_BRIDGE:-0}}" != "1" ]]; then
   start_bg "bridge_webots" ros2 run op3_action_editor bridge_webots.py

@@ -25,6 +25,8 @@
 
 /* Standard Library Header */
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <iomanip>
 #include <map>
 #include <mutex>
@@ -73,6 +75,15 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_enable_ctrl_pub;
 rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr g_action_page_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_demo_command_pub;
 std::mutex g_health_mutex;
+
+/* Give up on a startup error without running the static destructors: the RobotisController
+ * singleton is destroyed after rclcpp has shut down, so a plain return from main turns the
+ * error into a SIGSEGV/SIGBUS (launch reports "exit code -11") that hides the message. */
+[[noreturn]] void exitOnStartupError()
+{
+  fflush(NULL);
+  std::_Exit(1);
+}
 
 void goToInitActionPage()
 {
@@ -189,9 +200,9 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
     usleep(200 * 1000);
 
-    // go to init pose : action_module page 2 (INIT_BARU)
+    // go to init pose : action_module page 2 (WALKING_READY)
     goToInitActionPage();
-    RCLCPP_INFO(controller->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
+    RCLCPP_INFO(controller->get_logger(), "Go to init pose (action page 2: WALKING_READY)");
   }
 }
 
@@ -263,6 +274,31 @@ int main(int argc, char **argv)
   /* real robot */
   if (g_is_simulation == false)
   {
+    // The Dynamixel bus takes one master only; sharing it corrupts both sides' packets
+    // and only shows up later as "first bulk read fail!!". Wait for the other node to go
+    // away rather than dying instantly - a forgotten op3_action_editor is the usual
+    // cause, and repeating the warning keeps it readable while the rest of the launch
+    // floods the terminal with its own start-up output.
+    const int kPortWaitSeconds = 30;
+    const int kPortPollSeconds = 2;
+    for (int waited = 0;; waited += kPortPollSeconds)
+    {
+      std::string port_user = RobotisController::findPortUser(g_device_name);
+      if (port_user.empty() == true)
+        break;
+
+      if (waited >= kPortWaitSeconds)
+      {
+        RCLCPP_ERROR(node->get_logger(), "%s is STILL in use by %s - giving up.",
+                     g_device_name.c_str(), port_user.c_str());
+        exitOnStartupError();
+      }
+
+      RCLCPP_WARN(node->get_logger(), "%s is in use by %s - stop it to let op3_manager start (%ds left).",
+                  g_device_name.c_str(), port_user.c_str(), kPortWaitSeconds - waited);
+      rclcpp::sleep_for(std::chrono::seconds(kPortPollSeconds));
+    }
+
     // open port
     PortHandler *port_handler = (PortHandler *) PortHandler::getPortHandler(g_device_name.c_str());
     bool set_port_result = port_handler->setBaudRate(g_baudrate);
@@ -316,14 +352,14 @@ int main(int argc, char **argv)
   if (g_robot_file == "")
   {
     RCLCPP_ERROR(node->get_logger(), "NO robot file path in the ROS parameters.");
-    return -1;
+    exitOnStartupError();
   }
 
   // initialize robot
   if (controller->initialize(g_robot_file, g_init_file) == false)
   {
     RCLCPP_ERROR(node->get_logger(), "ROBOTIS Controller Initialize Fail!");
-    return -1;
+    exitOnStartupError();
   }
 
   // load offset
@@ -349,9 +385,9 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // go to init pose : action_module page 2 (INIT_BARU)
+  // go to init pose : action_module page 2 (WALKING_READY)
   goToInitActionPage();
-  RCLCPP_INFO(node->get_logger(), "Go to init pose (action page 2: INIT_BARU)");
+  RCLCPP_INFO(node->get_logger(), "Go to init pose (action page 2: WALKING_READY)");
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
       "/robotis/health_check",
