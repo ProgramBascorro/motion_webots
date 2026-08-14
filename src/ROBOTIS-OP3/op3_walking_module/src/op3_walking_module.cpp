@@ -91,6 +91,11 @@ WalkingModule::WalkingModule()
   captured_init_pose_ = Eigen::MatrixXd::Zero(1, result_.size());
   walking_bias_ = Eigen::MatrixXd::Zero(1, result_.size());
   capture_init_pose_ = false;
+  walking_bias_valid_ = false;
+  // 25 deg/s: fast enough that a slider feels immediate, slow enough that jumping
+  // z_offset from 0 to 0.075 in one keystroke ramps over about a second instead of
+  // snapping. control_cycle_msec_ is re-read in initialize(), so recompute there too.
+  idle_track_max_step_ = 25.0 * DEGREE2RADIAN * (control_cycle_msec_ * 0.001);
   joint_axis_direction_ = Eigen::MatrixXi::Zero(1, result_.size());
 
   balancing_idx_ = BalancingPhase0;
@@ -105,16 +110,19 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
 {
   queue_thread_ = std::thread(&WalkingModule::queueThread, this);
   control_cycle_msec_ = control_cycle_msec;
+  // Depends on the cycle the controller actually runs at, not the constructor's guess.
+  idle_track_max_step_ = 25.0 * DEGREE2RADIAN * (control_cycle_msec_ * 0.001);
 
   // m, s, rad
-  // init pose  --  all zero so WalkingReady matches ini_pose.yaml (all joints -> 2048)
-  walking_param_.init_x_offset = 0.0;
-  walking_param_.init_y_offset = 0.0;
+  // Init pose: neutral stance, fitted to action page 2 (WALKING_READY). Only a fallback
+  // for a missing/broken param.yaml -- loadWalkingParam() below overwrites all of these.
+  walking_param_.init_x_offset = -0.015;
+  walking_param_.init_y_offset = 0.025;
   walking_param_.init_z_offset = 0.0;
   walking_param_.init_roll_offset = 0.0;
-  walking_param_.init_pitch_offset = 0.0 * DEGREE2RADIAN;
+  walking_param_.init_pitch_offset = 9.4 * DEGREE2RADIAN;
   walking_param_.init_yaw_offset = 0.0 * DEGREE2RADIAN;
-  walking_param_.hip_pitch_offset = 0.0 * DEGREE2RADIAN;
+  walking_param_.hip_pitch_offset = 9.4 * DEGREE2RADIAN;
   // time
   walking_param_.period_time = 600 * 0.001;
   walking_param_.dsp_ratio = 0.1;
@@ -496,17 +504,18 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     }
 
     // Lock the walking stance to the pose present when walking is enabled
-    // (INIT_BARU). walking_bias_ = captured - neutral IK stance, so that:
-    //   idle -> goal = captured_init_pose_      (hold INIT_BARU, no jump)
-    //   walk -> goal = walking_bias_ + IK_angle (= INIT_BARU + gait oscillation)
-    // The Init Pose offsets only shape the gait neutral the oscillation is built
-    // around; the standing stance itself stays locked to INIT_BARU.
+    // (action page 2, WALKING_READY). walking_bias_ = captured - neutral IK stance:
+    //   idle -> goal = walking_bias_ + neutral   (= WALKING_READY, see below)
+    //   walk -> goal = walking_bias_ + IK_angle  (= WALKING_READY + gait oscillation)
+    // The one exception among the offsets is y_offset - see computeNeutralLegAngle() -
+    // which does widen the feet while walking.
     if (capture_init_pose_ == true)
     {
       captured_init_pose_ = goal_position_;
       walking_bias_ = goal_position_;
       double neutral_leg[12];
-      if (computeNeutralLegAngle(neutral_leg) == true)
+      walking_bias_valid_ = computeNeutralLegAngle(neutral_leg);
+      if (walking_bias_valid_ == true)
       {
         for (int i = 0; i < 12; i++)
           walking_bias_.coeffRef(0, i) = goal_position_.coeff(0, i) - neutral_leg[i];
@@ -516,6 +525,22 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
 
     bool get_angle = false;
     const bool walking_idle = (ctrl_running_ == false && real_running_ == false);
+
+    // Standing still, the legs track the neutral stance of the *current* Init Pose
+    // offsets instead of a frozen copy of the captured pose. Right after the capture
+    // the two are identical by construction (walking_bias_ = captured - neutral, so
+    // walking_bias_ + neutral == captured), so enabling the module still causes no
+    // jump. What changes is that new offsets published on /robotis/walking/set_params
+    // now show on the robot immediately: the stance shifts by exactly
+    // (neutral_new - neutral_old) without having to start the gait first. That is the
+    // only way to see x/y/z_offset at all while standing - computeLegAngle(), the only
+    // other place they are read, runs solely while walking.
+    // Falls back to the frozen pose whenever the bias is not trustworthy (IK failure
+    // at capture time) or the IK has no solution for the offsets just entered.
+    double idle_leg[12];
+    bool idle_tracks_offsets = false;
+    if (walking_idle == true && walking_bias_valid_ == true)
+      idle_tracks_offsets = computeNeutralLegAngle(idle_leg);
 
     if (walking_idle == false)
     {
@@ -537,7 +562,26 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     {
       double goal_position = 0.0;
       if (walking_idle == true)
-        goal_position = captured_init_pose_.coeff(0, idx);
+      {
+        if (idle_tracks_offsets == true && idx < 12)
+        {
+          // Rate limit. A slider dragged in Bascorro Studio moves in small steps and
+          // follows smoothly, but a value typed straight in (z_offset 0.0 -> 0.075) is
+          // several degrees per joint at once, and without a cap the servos would slam
+          // there in one 8 ms cycle. Legs only; the arms keep the captured pose.
+          const double target = walking_bias_.coeff(0, idx) + idle_leg[idx];
+          const double present = goal_position_.coeff(0, idx);
+          const double step = target - present;
+          if (step > idle_track_max_step_)
+            goal_position = present + idle_track_max_step_;
+          else if (step < -idle_track_max_step_)
+            goal_position = present - idle_track_max_step_;
+          else
+            goal_position = target;
+        }
+        else
+          goal_position = captured_init_pose_.coeff(0, idx);
+      }
       else if (get_angle == false && idx < 12)
         goal_position = goal_position_.coeff(0, idx);
       else
@@ -1207,7 +1251,7 @@ void WalkingModule::saveWalkingParam(std::string &path)
 void WalkingModule::onModuleEnable()
 {
   walking_state_ = WalkingEnable;
-  capture_init_pose_ = true;   // lock walking stance to the current pose (INIT_BARU)
+  capture_init_pose_ = true;   // lock walking stance to the current pose (WALKING_READY)
   RCLCPP_INFO(this->get_logger(), "Walking Enable");
 }
 
@@ -1215,6 +1259,9 @@ void WalkingModule::onModuleDisable()
 {
   RCLCPP_INFO(this->get_logger(), "Walking Disable");
   walking_state_ = WalkingDisable;
+  // Another module owns the joints now; the bias describes a pose that no longer holds.
+  // Re-enabling captures afresh, so never track offsets against a stale bias.
+  walking_bias_valid_ = false;
 }
 
 // Leg joint angles for the standstill stance (zero swap / leg movement) - the
@@ -1226,10 +1273,17 @@ bool WalkingModule::computeNeutralLegAngle(double *neutral)
   updatePoseParam();
   double leg_length = op3_kd_->thigh_length_m_ + op3_kd_->calf_length_m_ + op3_kd_->ankle_length_m_;
 
+  // The lateral offset is deliberately left out of this reference stance. Everything put
+  // in here is subtracted from the gait again through walking_bias_, so an offset present
+  // in both places has no effect on the robot at all. Dropping y_offset here is what
+  // turns it into a real "extra foot separation while walking" knob on top of the
+  // captured pose, whose feet sit almost straight under the hips and clip each other
+  // while stepping. The other offsets stay in: they only set the operating point the
+  // gait oscillation is linearised around.
   double ep[12];
-  ep[0] = x_offset_;        ep[1]  = -y_offset_ / 2;  ep[2]  = z_offset_ - leg_length;
+  ep[0] = x_offset_;        ep[1]  = 0.0;             ep[2]  = z_offset_ - leg_length;
   ep[3] = -r_offset_ / 2;   ep[4]  = p_offset_;       ep[5]  = -a_offset_ / 2;
-  ep[6] = x_offset_;        ep[7]  =  y_offset_ / 2;  ep[8]  = z_offset_ - leg_length;
+  ep[6] = x_offset_;        ep[7]  = 0.0;             ep[8]  = z_offset_ - leg_length;
   ep[9] =  r_offset_ / 2;   ep[10] = p_offset_;       ep[11] =  a_offset_ / 2;
 
   if (op3_kd_->calcInverseKinematicsForRightLeg(&neutral[0], ep[0], ep[1], ep[2], ep[3], ep[4], ep[5]) == false)

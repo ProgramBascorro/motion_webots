@@ -145,12 +145,20 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd target_position_;
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
-  // Walking stance is locked to the pose present when walking is enabled
-  // (INIT_BARU). captured_init_pose_ holds that pose; walking_bias_ = captured -
-  // neutral IK stance, so the gait oscillation is added on top of INIT_BARU.
+  // Walking stance is locked to the pose present when walking is enabled (action page 2,
+  // WALKING_READY). captured_init_pose_ holds that pose; walking_bias_ = captured -
+  // neutral IK stance, so the gait oscillation is added on top of WALKING_READY.
   Eigen::MatrixXd captured_init_pose_;
   Eigen::MatrixXd walking_bias_;
   bool capture_init_pose_;
+  // False until a capture has produced a usable bias (the IK can fail). While standing
+  // still the legs follow the neutral stance of the current Init Pose offsets so that
+  // new x/y/z_offset values show on the robot without starting the gait; that is only
+  // meaningful once the bias is trustworthy, otherwise the frozen captured pose is used.
+  bool walking_bias_valid_;
+  // Cap on how far a leg joint may move per control cycle while standing still, so a
+  // typed-in offset ramps instead of slamming. Radians per cycle.
+  double idle_track_max_step_;
   Eigen::MatrixXi joint_axis_direction_;
   std::map<std::string, int> joint_table_;
   int walking_state_;

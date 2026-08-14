@@ -1,10 +1,34 @@
+# Init Pose offsets: the neutral stance the gait oscillation is built around.
+# Fitted to action page 2 (WALKING_READY) of motion_4095_ORION.bin, so walking_bias_
+# (= captured pose - neutral stance) stays small and the gait keeps the geometry the
+# robot is actually standing in. The IK part (x/y/z/roll/pitch/yaw) matches page 2 within
+# ~1.6 deg on every joint it can reach; the knees cannot be matched because page 2 stands
+# slightly past full extension (r -12 deg, l -22 deg beyond straight), and that part is
+# absorbed by walking_bias_.
+# Raise z_offset to walk from a more crouched stance, but note the gait then lifts the
+# swing foot much less than foot_height (z_offset 0.075 only produced ~2 mm).
+# Since 2026-08-13 these offsets are also visible while STANDING: with walking_module
+# enabled but not started, the legs track the neutral stance of whatever offsets are
+# current, rate limited to 25 deg/s. So publishing on /robotis/walking/set_params (the
+# Apply button in Bascorro Studio) moves the robot right away, no "start" needed. Right
+# after the capture the tracked pose equals the captured one exactly, so enabling the
+# module still causes no jump.
+# y_offset is the exception: computeNeutralLegAngle() leaves it out of the reference
+# stance, so it survives walking_bias_ and is the knob for foot separation *while
+# walking* (page 2 keeps the standing width). Extra gap is about y_offset + 6 mm (page 2
+# leans a little to one side), so ~31 mm here: its feet sit almost under the 70 mm-apart
+# hips and were clipping each other. 0.015 is narrower, 0.035 clearly wider.
+# hip_pitch_offset cancels out of the gait (walking_bias_ subtracts it again), but
+# BallFollower reads it as the torso forward lean for its distance-to-ball estimate, so
+# it carries page 2's lean: hip_pitch + knee + ank_pitch = 2.5 + 0 + 7 = 9.5 deg.
+# NOTE: sending "save" on /robotis/walking/command rewrites this file and drops comments.
 x_offset: -0.015
-y_offset: 0.015
-z_offset: 0.075
+y_offset: 0.025
+z_offset: 0.0
 roll_offset: 0
-pitch_offset: 3.999999969014533
+pitch_offset: 9.4
 yaw_offset: 0
-hip_pitch_offset: 7.999999938029066
+hip_pitch_offset: 9.4
 period_time: 780
 dsp_ratio: 0.3
 step_forward_back_ratio: 0.25
