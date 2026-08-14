@@ -101,7 +101,7 @@ void ActionModule::initialize(const int control_cycle_msec, robotis_framework::R
   }
 
   const std::string action_package_path = ament_index_cpp::get_package_share_directory("op3_action_module");
-  std::string default_path = action_package_path + "/data/motion_4095_CHRONUS.bin";
+  std::string default_path = action_package_path + "/data/motion_4095_ORION.bin";
   std::string fallback_path = action_package_path + "/data/motion_4095.bin";
   std::string action_file_path = default_path;
   const char* env_action_file = std::getenv("OP3_ACTION_FILE");

@@ -34,8 +34,8 @@ apply_profile() {
       ;;
   esac
 
-  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095.bin}"
-  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin}"
+  ACTION_FILE_SEED="${OP3_ACTION_FILE_SEED:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ORION.bin}"
+  ACTION_FILE_PATH="${OP3_ACTION_FILE:-$WS/src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ORION.bin}"
 
   # Apply env overrides after profile defaults
   WEBOTS_CMD="${OP3_WEBOTS_CMD:-$WEBOTS_CMD}"

@@ -92,7 +92,7 @@ Dokumen ini dari robot pertama. Robot berikutnya **beda mesin**, jadi:
 | 5 | `src/bascorro_studio/web/src/ActionEditor.jsx` | dialog konfirmasi upload + info/staleness bin | §6 |
 | 6 | `src/bascorro_studio/bascorro_studio/apply_node.py` | `file_info()` + action `stat` (python — restart node) | §6 |
 | 7 | `src/ROBOTIS-OP3-Tools/op3_action_editor/scripts/executor.py` | default action file = salinan src | §7 |
-| 8 | `src/ROBOTIS-OP3/op3_action_module/data/motion_4095_CHRONUS.bin` | **DATA, bukan kode** — berisi INIT_BARU (page 2) dll. **Spesifik tiap robot, JANGAN copy bin robot 1.** Robot lain biasanya **sudah punya INIT_BARU di page 2 dengan nilai sendiri** → pakai apa adanya, JANGAN ditimpa. Kode capture bekerja dengan nilai page 2 berapa pun. | §6, §7 |
+| 8 | `src/ROBOTIS-OP3/op3_action_module/data/motion_4095_ORION.bin` | **DATA, bukan kode** — berisi INIT_BARU (page 2) dll. **Spesifik tiap robot, JANGAN copy bin robot 1.** Robot lain biasanya **sudah punya INIT_BARU di page 2 dengan nilai sendiri** → pakai apa adanya, JANGAN ditimpa. Kode capture bekerja dengan nilai page 2 berapa pun. | §6, §7 |
 
 > File #1–#7 = kode/logika (di-copy / re-apply). File #8 = data kalibrasi (buat sendiri per-robot).
 

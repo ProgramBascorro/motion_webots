@@ -18,14 +18,14 @@ def resolve_action_file() -> str:
     env_path = os.environ.get("OP3_ACTION_FILE", "").strip()
     if env_path:
         return env_path
-    return get_package_share_directory("op3_action_module") + "/data/motion_4095_CHRONUS.bin"
+    return get_package_share_directory("op3_action_module") + "/data/motion_4095_ORION.bin"
 
 
 def resolve_seed_file() -> str:
     env_path = os.environ.get("OP3_ACTION_FILE_SEED", "").strip()
     if env_path:
         return env_path
-    return get_package_share_directory("op3_action_module") + "/data/motion_4095_CHRONUS.bin"
+    return get_package_share_directory("op3_action_module") + "/data/motion_4095_ORION.bin"
 
 
 def resolve_robot_file() -> str:
