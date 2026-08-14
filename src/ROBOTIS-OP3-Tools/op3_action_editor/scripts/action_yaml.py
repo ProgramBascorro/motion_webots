@@ -45,7 +45,7 @@ def get_default_action_file() -> str:
     env_path = os.environ.get("OP3_ACTION_FILE", "").strip()
     if env_path:
         return env_path
-    return get_package_share_directory("op3_action_module") + "/data/motion_4095_ros1_lama.bin"
+    return get_package_share_directory("op3_action_module") + "/data/ALPHONSE.bin"
 
 
 def get_default_robot_file() -> str:
@@ -457,7 +457,7 @@ def parse_pages_arg(pages: str) -> Tuple[str, List[int]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Export/import OP3 action pages as YAML.")
-    parser.add_argument("--action-file", help="Path to motion_4095_ros1_lama.bin (defaults to OP3_ACTION_FILE)")
+    parser.add_argument("--action-file", help="Path to ALPHONSE.bin (defaults to OP3_ACTION_FILE)")
     parser.add_argument("--robot-file", help="Path to OP3.robot for joint mapping")
 
     subparsers = parser.add_subparsers(dest="command", required=True)

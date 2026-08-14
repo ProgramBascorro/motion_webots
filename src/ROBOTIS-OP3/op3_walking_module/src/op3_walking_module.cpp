@@ -107,7 +107,7 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   control_cycle_msec_ = control_cycle_msec;
 
   // m, s, rad
-  // init pose — derived from INIT_BARU (action bin page 2) via forward
+  // init pose — derived from WALKING_READY (action bin page 2) via forward
   // kinematics on the calibrated joint values, so walking_module's
   // IK-generated "walking ready" pose matches the user's calibrated standing
   // pose. Hip yaw/roll/pitch/knee/ankle joints from page 2 → foot at
@@ -532,10 +532,10 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     sensoryFeedback(rl_gyro_err, fb_gyro_err, balance_angle);
 
     double err_total = 0.0, err_max = 0.0;
-    // Hold captured INIT_BARU when walking is idle (no gait running), so stance
+    // Hold captured WALKING_READY when walking is idle (no gait running), so stance
     // never snaps back to init_position_ zero between Enable and Start. While
     // running, every joint (including arms) oscillates around the captured
-    // pose via walking_bias_ so the gait centers on INIT_BARU.
+    // pose via walking_bias_ so the gait centers on WALKING_READY.
     bool walking_idle = (real_running_ == false);
     // set goal position
     for (int idx = 0; idx < 14; idx++)
@@ -1206,7 +1206,7 @@ void WalkingModule::saveWalkingParam(std::string &path)
 void WalkingModule::onModuleEnable()
 {
   walking_state_ = WalkingEnable;
-  // Capture the current dxl goal as INIT_BARU stance on the next process() tick.
+  // Capture the current dxl goal as WALKING_READY stance on the next process() tick.
   capture_init_pose_ = true;
   RCLCPP_INFO(this->get_logger(), "Walking Enable");
 }
@@ -1220,7 +1220,7 @@ void WalkingModule::onModuleDisable()
 bool WalkingModule::computeNeutralLegAngle(double *neutral)
 {
   // IK of the standing pose with zero swap/move amplitudes — used to derive
-  // walking_bias_ so the gait oscillates around the captured INIT_BARU instead
+  // walking_bias_ so the gait oscillates around the captured WALKING_READY instead
   // of init_position_ zeros.
   updatePoseParam();
 

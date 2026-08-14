@@ -38,15 +38,15 @@ via_pose :
 
 # target pose [deg]
 #
-# Retuned 2026-07-01 to mirror INIT_BARU (action page 2 step[0] of
-# motion_4095_ros1_lama.bin) so base_module's boot INIT lands in the same
-# splayed standing stance as action_module INIT_BARU. Values are converted
+# Retuned 2026-07-01 to mirror WALKING_READY (action page 2 step[0] of
+# ALPHONSE.bin) so base_module's boot INIT lands in the same splayed
+# standing stance as action_module WALKING_READY. Values are converted
 # from raw DXL positions via (raw - 2048) * 360 / 4096. Key changes vs the
 # original ROBOTIS defaults:
 #   - hip_roll (ID 9/10):   splayed  +3.52° / -6.86°  (spread 10.4°)
-#   - shoulder/elbow: arms rest lower, matching INIT_BARU's relaxed pose.
+#   - shoulder/elbow: arms rest lower, matching WALKING_READY's relaxed pose.
 # Head, knee, ankle_pitch stayed at ROBOTIS defaults (already matched
-# INIT_BARU joint-for-joint).
+# WALKING_READY joint-for-joint).
 
 tar_pose :
   1 : 7.646484         # r_sho_pitch   (raw 2135)

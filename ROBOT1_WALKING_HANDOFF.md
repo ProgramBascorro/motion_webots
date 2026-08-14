@@ -264,8 +264,8 @@ Kalau ada line dengan `knee_cos` atau `alpha_sin` → fix sudah ada.
 
 ## 0. KESALAHAN YANG SUDAH TERJADI (jangan ulangi)
 
-### ❌ Memaksa INIT_BARU sebelum walking_module enable
-**Konteks dulu**: Bascorro `initThenEnableWalking` dan demo path memaksa robot ke action_module + page 2 (INIT_BARU) sebelum switch ke walking_module.
+### ❌ Memaksa WALKING_READY sebelum walking_module enable
+**Konteks dulu**: Bascorro `initThenEnableWalking` dan demo path memaksa robot ke action_module + page 2 (WALKING_READY) sebelum switch ke walking_module.
 
 **Kenapa salah**:
 - 4 detik animasi action page 2 + jerky module handoff
@@ -273,9 +273,9 @@ Kalau ada line dengan `knee_cos` atau `alpha_sin` → fix sudah ada.
 - Double init bikin user experience lambat & ga smooth
 
 **Aturan baru**:
-- **Boot**: action_module + page 2 (INIT_BARU) — robot ke calibrated standing
+- **Boot**: action_module + page 2 (WALKING_READY) — robot ke calibrated standing
 - **Tombol START**: walking_module DIRECT (no page 2 replay)
-- `init_x/y/z_offset` di walking_module **harus FK-tuned** match INIT_BARU geometry — supaya walking-ready pose mirip INIT_BARU → smooth transition
+- `init_x/y/z_offset` di walking_module **harus FK-tuned** match WALKING_READY geometry — supaya walking-ready pose mirip WALKING_READY → smooth transition
 
 ### ❌ Setting walking params ke nol di Bascorro UI lalu Save
 **Gejala**: kaki seret / lompat bareng / robot ga maju (cuma goyang hip_roll ID 9/10)
@@ -327,7 +327,7 @@ d_gain: 0
 ```
 
 ### KENAPA NILAI INI:
-- `init_x/y/z_offset` = FK-derived dari INIT_BARU page 2 Robot 0. Diturunkan via `scripts/init_baru_fk.py` (lihat section 2).
+- `init_x/y/z_offset` = FK-derived dari WALKING_READY page 2 Robot 0. Diturunkan via `scripts/walking_ready_fk.py` (lihat section 2).
 - `pitch_offset = 4°` — proven value, body lean forward kompensasi berat kepala+kamera.
 - `hip_pitch_offset = 8°` — juga dipake `ball_follower` untuk kalkulasi jarak bola.
 - `period_time = 750` (ms) — comfortable cadence.
@@ -340,20 +340,20 @@ d_gain: 0
 - `p_gain = 32` — XM430 standard PID position.
 
 ### CATATAN ROBOT 1:
-Kalau Robot 1 punya INIT_BARU yang **beda** dari Robot 0 (joint values di page 2 bin file beda), maka `init_x/y/z_offset` perlu di-derive ulang. Lihat section 2.
+Kalau Robot 1 punya WALKING_READY yang **beda** dari Robot 0 (joint values di page 2 bin file beda), maka `init_x/y/z_offset` perlu di-derive ulang. Lihat section 2.
 
 ---
 
-## 2. FK DERIVATION — Perhitungan x/y/z offset dari INIT_BARU page 2
+## 2. FK DERIVATION — Perhitungan x/y/z offset dari WALKING_READY page 2
 
 ### VERIFY:
 ```bash
-ls /home/alphonse/motion_webots/scripts/init_baru_fk.py
+ls /home/alphonse/motion_webots/scripts/walking_ready_fk.py
 ```
 
-### A. INPUT — INIT_BARU page 2 joint values (Robot 0)
+### A. INPUT — WALKING_READY page 2 joint values (Robot 0)
 
-Diekstrak dari `op3_action_module/data/action_25_febuari_jam11Malem.yaml` page index 2 step 0 (= INIT_BARU pose yang user record di action editor):
+Diekstrak dari `op3_action_module/data/action_25_febuari_jam11Malem.yaml` page index 2 step 0 (= WALKING_READY pose yang user record di action editor):
 
 | Joint | Raw dxl | Sudut (°) | Joint | Raw dxl | Sudut (°) |
 |-------|---------|-----------|-------|---------|-----------|
@@ -397,7 +397,7 @@ if side == -1:  # right leg
     ank_pitch = -ank_pitch
 ```
 
-### D. OUTPUT FK untuk Robot 0 (jalankan `init_baru_fk.py`)
+### D. OUTPUT FK untuk Robot 0 (jalankan `walking_ready_fk.py`)
 
 ```
 Right foot pos (m):  x = -0.0050   y = -0.0371   z = -0.1814
@@ -447,13 +447,13 @@ z_offset: 0.038    # standing height — foot 181mm di bawah hip
 - `y_offset = 0.032` = 64mm feet spread total. Cukup buat stability tapi ga terlalu lebar.
 - `x_offset = 0.003` = body 3mm di depan center hip → kompensasi minor untuk CoM.
 
-### H. CARA PAKAI UNTUK ROBOT 1 (kalau INIT_BARU page 2 beda)
+### H. CARA PAKAI UNTUK ROBOT 1 (kalau WALKING_READY page 2 beda)
 
 1. Export Robot 1's motion bin → yaml (action editor → Save as YAML), atau decode bin file langsung.
-2. Buka `scripts/init_baru_fk.py`, update `PAGE2` dict dengan joint values Robot 1.
+2. Buka `scripts/walking_ready_fk.py`, update `PAGE2` dict dengan joint values Robot 1.
 3. Run:
    ```bash
-   python3 /home/alphonse/motion_webots/scripts/init_baru_fk.py
+   python3 /home/alphonse/motion_webots/scripts/walking_ready_fk.py
    ```
 4. Copy 3 line output (`x_offset:`, `y_offset:`, `z_offset:`) ke `param.yaml`.
 5. Update juga `WALKING_DEFAULT_PARAMS` di `App.jsx` (section 7) dengan nilai yang sama (`init_x_offset`, `init_y_offset`, `init_z_offset`).
@@ -565,15 +565,15 @@ head_tracking_node re-publish SCAN tiap 2.5s, jadi drop satu command ga apa-apa.
 grep -A 2 "controller running" /home/alphonse/motion_webots/src/ROBOTIS-OP3-Demo/op3_demo/src/demo_node.cpp
 ```
 
-Harus ada `"controller running — playing INIT_BARU (action page 2)"`.
+Harus ada `"controller running — playing WALKING_READY (action page 2)"`.
 
 ### MASALAH KALAU BELUM ADA:
 - Tanpa wait `/robotis/present_joint_states`, page 2 publish bisa drop (controller belum running)
-- Robot ga ke INIT_BARU di boot
+- Robot ga ke WALKING_READY di boot
 
 ### EXPECTED CODE di demo_node.cpp main() (setelah checkManagerRunning):
 ```cpp
-// Boot-time INIT pose. Per user spec: robot lands at INIT_BARU (action
+// Boot-time INIT pose. Per user spec: robot lands at WALKING_READY (action
 // page 2 — calibrated standing pose) when demo launches. Walking-ready
 // is a separate transition that happens on START button press.
 {
@@ -600,7 +600,7 @@ Harus ada `"controller running — playing INIT_BARU (action page 2)"`.
 
   if (modules_constructed && controller_running) {
     RCLCPP_WARN(node->get_logger(),
-                "controller running — playing INIT_BARU (action page 2)");
+                "controller running — playing WALKING_READY (action page 2)");
     goInitPose();
   } else {
     RCLCPP_WARN(node->get_logger(),
@@ -733,17 +733,17 @@ const handleInitPose = () => {
   }
   walkingModuleEnabledRef.current = false;
   walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
-  sendStatus(`Init Pose: switching to action_module → page ${INIT_BARU_PAGE_NUM}…`);
+  sendStatus(`Init Pose: switching to action_module → page ${WALKING_READY_PAGE_NUM}…`);
   window.setTimeout(() => {
-    actionPagePubRef.current.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
-    sendStatus(`Init Pose: playing page ${INIT_BARU_PAGE_NUM} (INIT_BARU)`);
+    actionPagePubRef.current.publish(new ROSLIB.Message({ data: WALKING_READY_PAGE_NUM }));
+    sendStatus(`Init Pose: playing page ${WALKING_READY_PAGE_NUM} (WALKING_READY)`);
   }, ACTION_MODULE_SETTLE_MS);
 };
 ```
 
 ### VERIFY 7.4 — Constants masih ada:
 ```bash
-grep "INIT_BARU_PAGE_NUM\|ACTION_MODULE_SETTLE_MS\|INIT_BARU_PLAY_MS\|WALKING_ENABLE_SETTLE_MS\|actionPagePubRef" /home/alphonse/motion_webots/src/bascorro_studio/web/src/App.jsx | head -8
+grep "WALKING_READY_PAGE_NUM\|ACTION_MODULE_SETTLE_MS\|WALKING_READY_PLAY_MS\|WALKING_ENABLE_SETTLE_MS\|actionPagePubRef" /home/alphonse/motion_webots/src/bascorro_studio/web/src/App.jsx | head -8
 ```
 
 Harus ada deklarasi semua constant + `actionPagePubRef = useRef(null)`.
@@ -765,7 +765,7 @@ User minta: "kalau untuk simulasi pada walking tidak perlu dibuat lengkap karena
 
 **Pendekatan**:
 - Hapus subscription ke joint state simulator yang aktif (yang dulu konsumsi `/bascorro_studio/sim_preview/joint_states`)
-- Buat 3D viewer load OP3 URDF static (T-pose / INIT_BARU static)
+- Buat 3D viewer load OP3 URDF static (T-pose / WALKING_READY static)
 - TIDAK perlu sim_domain_bridge active walking
 - TIDAK perlu manager_sim spawn lewat apply_node untuk walking
 
@@ -776,7 +776,7 @@ grep -l "sim_preview/joint_states\|sim_domain_bridge\|WalkingSimPreview" /home/a
 
 ### LANGKAH SIMPLIFIKASI (kalau perlu):
 1. Di `WalkingSimPreview.jsx`: hapus prop/ref `simRos*`, hapus subscription `/bascorro_studio/sim_preview/joint_states`
-2. Set joint state ke zero (T-pose) atau ke nilai INIT_BARU hardcoded
+2. Set joint state ke zero (T-pose) atau ke nilai WALKING_READY hardcoded
 3. Hapus pemanggilan ke `sim_domain_bridge` dari Bascorro start scripts
 4. Disable button "Apply & Start" di sim mode atau tampilkan note "sim walking dinonaktifkan"
 
@@ -828,7 +828,7 @@ grep -A 5 "Boot init pose" /home/alphonse/motion_webots/src/ROBOTIS-OP3/op3_mana
 ```cpp
 // Boot-time INIT pose is handled by demo_node (after waiting for the
 // motion modules to load + the controller's first bulkread). It enables
-// action_module and plays page 2 (INIT_BARU — the user's calibrated
+// action_module and plays page 2 (WALKING_READY — the user's calibrated
 // standing pose). Walking-ready is a separate transition triggered by
 // the START button.
 RCLCPP_INFO(node->get_logger(),
@@ -854,7 +854,7 @@ source install/setup.bash
 
 # Verify build pick up fixes:
 strings install/op3_demo/lib/op3_demo/op_demo_node | grep "controller running" | head -1
-# Expected: "controller running — playing INIT_BARU (action page 2)"
+# Expected: "controller running — playing WALKING_READY (action page 2)"
 
 strings install/op3_demo/lib/op3_demo/op_demo_node | grep "dropping command" | head -1
 # Expected: "head_control_module: goal_position not initialized yet, dropping command"
@@ -869,8 +869,8 @@ ros2 launch op3_demo demo_yolo.launch.xml
 ### Expected log:
 ```
 [op3_manager] Boot init pose: deferred to demo_node (will play action page 2)
-[op_demo_node] controller running — playing INIT_BARU (action page 2)
-... robot animates to INIT_BARU pose ...
+[op_demo_node] controller running — playing WALKING_READY (action page 2)
+... robot animates to WALKING_READY pose ...
 [op_demo_node] Demo node loop start
 ```
 
@@ -884,7 +884,7 @@ Lalu pencet MODE → START:
 
 | Item | Status |
 |------|--------|
-| Boot → robot ke INIT_BARU (page 2) otomatis | ✓ **CONFIRMED** |
+| Boot → robot ke WALKING_READY (page 2) otomatis | ✓ **CONFIRMED** |
 | START → walking jalan, kaki gantian (ga lompat) | ✓ **CONFIRMED** |
 | STOP button responsiveness | ⚠️ **BELUM OPTIMAL** — masih perlu iteration |
 
@@ -1044,8 +1044,8 @@ SPOT_ANGLE_OFFSET = 0.0
 - [ ] `App.jsx` handleInitPose PAKAI page 2 (section 7.3)
 - [ ] `demo_yolo.launch.xml` removed face_detection + web_setting (section 9)
 - [ ] `op3_manager.cpp` log-only deferral, no publisher init code (section 10)
-- [ ] Build sukses + log "controller running — playing INIT_BARU" muncul (section 11)
-- [ ] Robot animasi ke INIT_BARU di boot
+- [ ] Build sukses + log "controller running — playing WALKING_READY" muncul (section 11)
+- [ ] Robot animasi ke WALKING_READY di boot
 - [ ] START button → walking dengan kaki gantian (ID 11/12), bukan goyang samping (ID 9/10)
 - [ ] STOP button responsif (1x pencet, ga restart bug)
 
@@ -1059,6 +1059,6 @@ Kalau ada bug atau perubahan baru:
 - Demo FSM: `op3_demo/src/demo_node.cpp` + `soccer_demo.cpp`
 - Bascorro UI: `bascorro_studio/web/src/App.jsx`
 - Bascorro backend: `bascorro_studio/bascorro_studio/apply_node.py`
-- Motion bin format: `op3_action_module/data/motion_4095_ros1_lama.bin` (page 2 = INIT_BARU)
+- Motion bin format: `op3_action_module/data/ALPHONSE.bin` (page 2 = WALKING_READY)
 
 Dokumen ini terbaru per 2026-06-26. Untuk perubahan selanjutnya, update section yang relevan + checklist.

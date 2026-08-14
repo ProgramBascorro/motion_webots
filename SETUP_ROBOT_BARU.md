@@ -43,13 +43,32 @@ perintah perbaikannya.
 | **Alamat serial** (U2D2 + OpenCR) | Setiap adaptor punya serial sendiri | `op3_serial_setup.py --apply` |
 | **OpenCR di port USB terpisah** | Transceiver bus TTL board ALPHONSE **mati** | Lihat bagian 3 — kemungkinan besar CHRONUS tidak butuh ini |
 | **Model servo di `OP3.robot`** | Tertulis `XM430-W350` untuk semua, padahal aslinya beda | Lihat bagian 6 |
-| `op3_walking_module/config/param.yaml` | `x/y/z_offset` diturunkan lewat FK dari page 2 milik ALPHONSE | Turunkan ulang: `scripts/init_baru_fk.py --yaml <export>` |
-| `motion_4095_ros1_lama.bin` | Gerakan hasil kalibrasi ALPHONSE | Pakai `.bin` robot sendiri |
+| `op3_walking_module/config/param.yaml` | `x/y/z_offset` diturunkan lewat FK dari page 2 milik ALPHONSE | Turunkan ulang: `scripts/walking_ready_fk.py --yaml <export>` |
+| `op3_action_module/data/ALPHONSE.bin` | Gerakan hasil kalibrasi ALPHONSE | Rekam sendiri jadi `CHRONUS.bin` — lihat bawah |
 | `offset.yaml` | Offset mekanis per robot | Tuning ulang dengan offset tuner |
 
 Yang **umum** dan aman dipakai apa adanya: `scripts/op3_docker.sh`,
 `docker-compose.yml`, `docker-entrypoint.sh`, `script.sh`, seluruh `op3_tmux`,
 dan semua modul C++.
+
+### Berkas gerakan dinamai menurut robotnya
+
+Dulu berkas ini bernama `motion_4095_ros1_lama.bin`, bersebelahan dengan
+`motion_4095.bin` dan `motion_4095_ros1.bin` yang **tidak** dipakai — mudah
+sekali salah pilih. Sekarang namanya nama robot, jadi jelas milik siapa.
+
+Untuk CHRONUS, salin lalu ganti nama defaultnya sekali jalan:
+
+```bash
+cp src/ROBOTIS-OP3/op3_action_module/data/{ALPHONSE,CHRONUS}.bin
+grep -rl 'ALPHONSE\.bin' script.sh scripts/ src/ --exclude-dir=.git \
+  | xargs sed -i 's/ALPHONSE\.bin/CHRONUS.bin/g'
+colcon build --packages-select op3_action_module --symlink-install
+```
+
+Sesudah itu **rekam ulang** page-page-nya lewat action editor — isi salinan itu
+masih gerakan ALPHONSE, cuma namanya yang berganti. Untuk coba-coba tanpa
+mengubah berkas, cukup `export OP3_ACTION_FILE=/path/ke/lain.bin`.
 
 ---
 

@@ -15,7 +15,7 @@ def generate_launch_description():
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
     robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
-    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/motion_4095_ros1_lama.bin'
+    action_file_path_default = get_package_share_directory('op3_action_module') + '/data/ALPHONSE.bin'
     # Dua port, dua peran -- op3_manager memakai keduanya untuk hal berbeda:
     #   device_name           -> bus servo (U2D2). Dipakai buttonHandlerCallback
     #                            untuk membaca torque ID 1 saat tombol ditekan lama.

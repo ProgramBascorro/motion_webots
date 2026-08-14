@@ -1,4 +1,4 @@
-# Derived by scripts/init_baru_fk.py --yaml <export of page 2> on 2026-08-11.
+# Derived by scripts/walking_ready_fk.py --yaml <export of page 2> on 2026-08-11.
 # The previous values (0.0030 / 0.0320 / 0.0380) came from the script's built-in
 # snapshot, which still held Robot 0's calibration -- not this robot's page 2 --
 # so walking_module's IK neutral pose did not match the stance the robot boots

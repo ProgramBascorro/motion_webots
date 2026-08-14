@@ -115,7 +115,7 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   bool computeLegAngle(double *leg_angle);
   // Leg joint angles for the standstill (zero-movement) neutral stance the gait
   // oscillates around — used to derive walking_bias_ so the stance locks to the
-  // captured INIT_BARU pose. Returns false if the IK has no solution.
+  // captured WALKING_READY pose. Returns false if the IK has no solution.
   bool computeNeutralLegAngle(double *neutral);
   void computeArmAngle(double *arm_angle);
   void sensoryFeedback(const double &rlGyroErr, const double &fbGyroErr, double *balance_angle);
@@ -148,10 +148,10 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd target_position_;
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
-  // Walk-in-INIT_BARU: pose captured when walking is enabled (the INIT_BARU
+  // Walk-in-WALKING_READY: pose captured when walking is enabled (the WALKING_READY
   // standing stance). Idle -> hold captured_init_pose_ (no snap to zero pose);
   // walking -> walking_bias_ (= captured - neutral IK) + gait oscillation, so
-  // the stance stays locked to INIT_BARU. capture_init_pose_ triggers the grab
+  // the stance stays locked to WALKING_READY. capture_init_pose_ triggers the grab
   // on the first process() cycle after onModuleEnable().
   Eigen::MatrixXd captured_init_pose_;
   Eigen::MatrixXd walking_bias_;

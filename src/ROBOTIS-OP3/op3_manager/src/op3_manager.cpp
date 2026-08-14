@@ -411,9 +411,9 @@ int main(int argc, char **argv)
 
   usleep(100 * 1000);
 
-  // Boot-time INIT pose: play action page 2 (INIT_BARU) straight from
-  // motion_4095_ros1_lama.bin, the same page the action editor edits. This
-  // used to publish "ini_pose" and let base_module replay
+  // Boot-time INIT pose: play action page 2 (WALKING_READY) straight from
+  // ALPHONSE.bin, the same page the action editor edits. This used to
+  // publish "ini_pose" and let base_module replay
   // op3_base_module/data/ini_pose.yaml, a hand-retuned mirror of page 2 that
   // drifts out of sync every time the page is re-taught.
   //

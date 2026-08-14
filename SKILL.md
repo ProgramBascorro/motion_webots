@@ -109,7 +109,7 @@ Service:
 
 Parameter:
 
-- `/action file path` — string, default `op3_action_module/data/motion_4095.bin`
+- `/action file path` — string, default `op3_action_module/data/ALPHONSE.bin`
 
 Agent notes:
 

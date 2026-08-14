@@ -54,14 +54,14 @@ const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
 const DEFAULT_OVERLAY_TOPIC =
   import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
 
-// INIT_BARU is action page 2 (user's calibrated standing pose).
-const INIT_BARU_PAGE_NUM = 2;
+// WALKING_READY is action page 2 (user's calibrated standing pose).
+const WALKING_READY_PAGE_NUM = 2;
 // Time for op3_manager to switch the controller to action_module before
 // publishing the page command (the page_num subscriber needs the swap).
 const ACTION_MODULE_SETTLE_MS = 600;
-// Time for action page 2 (INIT_BARU) to finish playing on the hardware
+// Time for action page 2 (WALKING_READY) to finish playing on the hardware
 // (~1.2 s on this robot; buffer for trajectory tail).
-const INIT_BARU_PLAY_MS = 1800;
+const WALKING_READY_PLAY_MS = 1800;
 // Time for op3_manager to load the walking_module control_module before we
 // publish "start"; otherwise the start command is dropped silently.
 const WALKING_ENABLE_SETTLE_MS = 1200;
@@ -88,15 +88,15 @@ const YOLO_PARAM_KEYS = [
   "robot_confidence_threshold",
 ];
 
-// Defaults match the FK-derived INIT_BARU geometry + the proven OP3 gait
+// Defaults match the FK-derived WALKING_READY geometry + the proven OP3 gait
 // shape (op3_walking_module/config/param.yaml). init_x/y/z_offset come
-// from forward kinematics on the calibrated INIT_BARU page 2 joint values
-// (see scratchpad init_baru_fk.py): foot at (0.003, ±0.032, -0.181) m
+// from forward kinematics on the calibrated WALKING_READY page 2 joint values
+// (see scratchpad walking_ready_fk.py): foot at (0.003, ±0.032, -0.181) m
 // relative to hip → z_offset = leg_length(0.2195) + foot_z = 0.038.
 const WALKING_DEFAULT_PARAMS = {
   // FK-derived from action page 2 (WALKING_READY) -- keep in step with
   // op3_walking_module/config/param.yaml. Regenerate both with
-  // scripts/init_baru_fk.py --yaml <page 2 export> when the page is re-taught.
+  // scripts/walking_ready_fk.py --yaml <page 2 export> when the page is re-taught.
   init_x_offset: 0.0046,
   init_y_offset: 0.0205,
   init_z_offset: 0.0408,
@@ -407,7 +407,7 @@ function makeWalkingVersionId() {
 // Five deliberate deltas from that baseline: x_move_amplitude 0 -> 0.02 (the
 // robot marched in place without it), period_time 0.75 -> 0.80, dsp_ratio
 // 0.35 -> 0.40, y_swap_amplitude 0.020 -> 0.025, arm_swing_gain 0 -> 1.0.
-// The init_* offsets are left untouched: they are FK-tuned to INIT_BARU
+// The init_* offsets are left untouched: they are FK-tuned to WALKING_READY
 // (action page 2) so the handoff into walking_module stays smooth.
 // p/i/d are inert here -- op3_walking_module.cpp never writes them to the servos.
 const CLAUDE_WALKING_VERSION_NAME = "dari claude";
@@ -948,7 +948,7 @@ export default function App() {
   }, [overlayTopic, rosState]);
 
   // Auto-enable head_control_module on the real robot so head torque comes
-  // up as soon as the manager is reachable. Without this, INIT_BARU's head
+  // up as soon as the manager is reachable. Without this, WALKING_READY's head
   // channels are ignored because head joints have no owning module yet.
   // (Sim head torque-on is handled by the sim_domain_bridge — the Sim Start
   //  sequence publishes head_control_module via the bridged topic.)
@@ -1110,10 +1110,10 @@ export default function App() {
   };
 
   // Enable walking_module directly. Used to force a replay of action page 2
-  // (INIT_BARU) first to "stamp" the walking-ready pose, but that added a
+  // (WALKING_READY) first to "stamp" the walking-ready pose, but that added a
   // ~4 s animation + a jerky module handoff. walking_module's init_x/y/z/
   // pitch_offset are now FK-tuned (in op3_walking_module/config/param.yaml)
-  // to match INIT_BARU page 2 geometry — its IK parks the legs at the
+  // to match WALKING_READY page 2 geometry — its IK parks the legs at the
   // calibrated pose statically the moment it's enabled, no replay needed.
   const initThenEnableWalking = (onReady) => {
     restoreFullSpeed();
@@ -1131,7 +1131,7 @@ export default function App() {
   const applyWalkingAndStart = () => {
     if (!applyWalkingParams()) return;
     initThenEnableWalking(() => {
-      sendWalkingCommand("start", "Walking dimulai dari INIT_BARU");
+      sendWalkingCommand("start", "Walking dimulai dari WALKING_READY");
     });
   };
 
@@ -1159,7 +1159,7 @@ export default function App() {
     sendStatus("[SIM] Parameter terkirim — enable walking_module…");
 
     // Skip the action_module → page 2 → walking_module relay (used to "stamp"
-    // INIT_BARU). walking_module's IK now produces the same calibrated ready
+    // WALKING_READY). walking_module's IK now produces the same calibrated ready
     // pose statically from init_x/y/z_offset, so we just enable head + walking
     // and start. Mirror change in op3_demo + real-robot path above.
     publishOnSim("/bascorro_studio/sim/enable_ctrl_module", "std_msgs/String", { data: "head_control_module" });
@@ -1181,7 +1181,7 @@ export default function App() {
 
 
   const enableWalkingModule = () => {
-    initThenEnableWalking(() => sendStatus("Walking module enabled di INIT_BARU"));
+    initThenEnableWalking(() => sendStatus("Walking module enabled di WALKING_READY"));
   };
 
   const applyWalkingPreset = (preset) => {
@@ -1309,21 +1309,21 @@ export default function App() {
   };
 
   const handleInitPose = () => {
-    // "Init Pose" button literally plays action page 2 (INIT_BARU — the
+    // "Init Pose" button literally plays action page 2 (WALKING_READY — the
     // user's calibrated standing pose recorded in the action editor).
     // Walking-ready is a separate transition triggered by Apply & Start
     // (it switches to walking_module, whose FK-tuned IK pose matches
-    // INIT_BARU geometry so the handoff is smooth).
+    // WALKING_READY geometry so the handoff is smooth).
     if (!walkingModulePubRef.current || !actionPagePubRef.current || rosState !== "connected") {
       sendStatus("Init Pose: action module unavailable", true);
       return;
     }
     walkingModuleEnabledRef.current = false;
     walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
-    sendStatus(`Init Pose: switching to action_module → page ${INIT_BARU_PAGE_NUM}…`);
+    sendStatus(`Init Pose: switching to action_module → page ${WALKING_READY_PAGE_NUM}…`);
     window.setTimeout(() => {
-      actionPagePubRef.current.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
-      sendStatus(`Init Pose: playing page ${INIT_BARU_PAGE_NUM} (INIT_BARU)`);
+      actionPagePubRef.current.publish(new ROSLIB.Message({ data: WALKING_READY_PAGE_NUM }));
+      sendStatus(`Init Pose: playing page ${WALKING_READY_PAGE_NUM} (WALKING_READY)`);
     }, ACTION_MODULE_SETTLE_MS);
   };
 

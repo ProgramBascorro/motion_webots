@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-Forward kinematics: INIT_BARU (action page 2) joint values -> walking_module
+Forward kinematics: WALKING_READY (action page 2) joint values -> walking_module
 init_x/y/z_offset.
 
 USAGE:
     Update PAGE2 dict below with the joint values from the robot's
     motion bin (decoded via action editor / yaml export), then run:
-        python3 scripts/init_baru_fk.py
+        python3 scripts/walking_ready_fk.py
 
 OUTPUT:
     Numbers to paste into op3_walking_module/config/param.yaml and
     bascorro_studio/web/src/App.jsx WALKING_DEFAULT_PARAMS so the
     walking_module's IK-derived neutral pose matches the calibrated
-    INIT_BARU standing geometry.
+    WALKING_READY standing geometry.
 
 WHY:
     walking_module's "walking ready" pose is computed from init_x/y/z_offset
     via IK (op3_walking_module.cpp:1220 `ep[2] = z_offset_ - leg_length`).
     For the boot→walking transition to be smooth (no jerk when soccer demo
-    switches body to walking_module), the IK pose MUST match the INIT_BARU
+    switches body to walking_module), the IK pose MUST match the WALKING_READY
     page 2 pose. This script derives that match.
 """
 import argparse
