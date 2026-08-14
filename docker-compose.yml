@@ -1,21 +1,96 @@
+# Cara yang dianjurkan tetap: scripts/op3_docker.sh up | shell | doctor | down
+#
+# File ini sengaja dibuat SETARA dengan script itu dan memakai container_name
+# yang sama ("op3"), supaya tidak ada container tandingan. Sebelumnya file ini
+# mendefinisikan container ketiga (op3_ros2_humble) yang hanya me-mount ./src,
+# ./build, ./install, dan ./log secara terpisah -- gampang tidak sinkron, dan
+# tidak mem-bind ./docker-entrypoint.sh sehingga entrypoint lama di dalam image
+# (yang kehilangan argumen CMD) tetap yang dipakai.
+#
+# Kalau mengubah salah satu, ubah keduanya. Yang wajib sama:
+#   /dev bind + privileged, mount seluruh workspace, entrypoint + bashrc bind,
+#   restart unless-stopped, dan command sleep infinity.
+
 services:
-  op3_ros2:
+  op3:
     build: .
-    container_name: op3_ros2_humble
+    # Ditulis eksplisit, bukan dibiarkan ditebak compose dari nama proyek +
+    # service: service ini sudah berganti nama jadi "op3", jadi tebakannya
+    # berubah ke motion_webots_new-op3 dan compose akan membangun image BARU
+    # dari nol (di Jetson ini OpenCV-nya saja puluhan menit) padahal yang lama
+    # masih ada.
+    #
+    # Di robot ini ada dua image yang mirip dan gampang tertukar; yang lebih tua
+    # justru yang namanya lebih rapi. Yang ini dibangun 2026-07-04 dari
+    # Dockerfile yang sudah diadaptasi arm64 dan punya torch(cpu), ultralytics,
+    # serta wheel openvino yang dipakai op3_ball_detector. op3-webots-ros2:humble
+    # (2026-06-30) lahir sebelum blok pip YOLO masuk Dockerfile: `import torch`
+    # di dalamnya gagal. scripts/op3_docker.sh memilih dengan urutan yang sama.
+    image: motion_webots_new-op3_ros2:latest
+    container_name: op3
+
+    # Umur container tidak boleh terikat pada satu jendela terminal, dan harus
+    # hidup lagi sendiri setelah PC reboot -- kalau tidak, semua `ros2 run ...`
+    # kembali menjawab "Package not found" karena install/ menunjuk ke /ros2_ws
+    # yang hanya ada di dalam container.
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
+    # PID 1 di sini `sleep infinity`, dan sleep tidak pernah me-reap anak yatim,
+    # jadi proses ROS yang mati bersama terminalnya menumpuk sebagai <defunct>.
+    init: true
+
+    network_mode: host
+    ipc: host
+    privileged: true
+    working_dir: /ros2_ws
+
     environment:
-      - DISPLAY=${DISPLAY}
+      - DISPLAY=${DISPLAY:-}
       - XAUTHORITY=/tmp/.Xauthority
-      - ROS_DOMAIN_ID=0
+      - QT_X11_NO_MITSHM=1
+      # Jangan dipatok: profil real_robot di scripts/op3_tmux memakai 1 dan
+      # meng-export sendiri ke tiap pane, profil webots memakai 0.
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+
     volumes:
-      - ./src:/ros2_ws/src:rw
-      - ./build:/ros2_ws/build:rw        # prebuilt workspace from host (symlink-install needs build+install together)
-      - ./install:/ros2_ws/install:rw    # so ros2 run/launch find op3_* packages inside the container
-      - ./log:/ros2_ws/log:rw
-      - ./scripts/container_bashrc:/root/.bashrc:ro   # auto-source ROS + workspace in every `docker exec` shell
+      # /dev di-bind hidup, BUKAN `devices:`. `devices:` membekukan major:minor
+      # saat start; adapter FTDI sering re-enumerate dan sesudahnya fd di dalam
+      # container mati diam-diam (ENODEV): gait berputar tapi robot beku.
+      # `privileged` saja juga tidak cukup -- terbukti di robot ini, container
+      # privileged tanpa bind melihat /dev/ttyUSB0 tapi tidak melihat symlink
+      # udev /dev/ttyOP3, karena udev tidak jalan di dalam container.
+      #
+      # Bind ini juga yang membawa kamera. ALPHONSE_NEW menuliskan
+      # `devices: [/dev/video0, /dev/video1]` di sini; sengaja tidak ditiru --
+      # `devices:` menolak start kalau perangkatnya belum ada, padahal robot ini
+      # sering hidup tanpa kamera tercolok, dan container yang gagal start
+      # membawa serta manager dan studio. Dengan bind, kamera yang dicolok
+      # setelah container jalan pun langsung terlihat.
+      - /dev:/dev
+      # Seluruh workspace, bukan src/build/install/log terpisah. Workspace ini
+      # dibangun dengan --symlink-install di dalam container, jadi install/ dan
+      # build/ harus ikut ter-mount atau paketnya tidak akan terbaca.
+      - .:/ros2_ws
+      # Image masih menyimpan entrypoint lama yang kehilangan argumen CMD.
+      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      # `docker exec ... bash` melewati ENTRYPOINT: tanpa ini shell polos lahir
+      # tanpa ROS sama sekali.
+      - ./scripts/container_bashrc:/root/.bashrc:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-$HOME/.Xauthority}:/tmp/.Xauthority:rw
-      - /dev:/dev          # share host /dev so hot-plugged serial (FTDI ttyUSB) appears live
-    network_mode: host
-    privileged: true
-    stdin_open: true
-    tty: true
+
+    # GID host (input=101, dialout=20 di Jetson ini). Angka, bukan nama: grup
+    # `input` tidak ada di image Ubuntu 22.04 dan container gagal start kalau
+    # namanya tidak bisa di-resolve. scripts/op3_docker.sh membacanya dengan
+    # getent, jadi di sana tidak perlu ditulis tangan.
+    group_add:
+      - "101"
+      - "20"
+
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+
+    ulimits:
+      rtprio: 99
+      memlock: -1

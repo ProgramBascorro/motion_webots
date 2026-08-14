@@ -53,6 +53,7 @@ readonly M_DOCKER_RUN="docker_run"
 readonly M_DOCKER_COMPOSE_UP="docker_compose_up"
 readonly M_DOCKER_STOP="docker_stop"
 readonly M_EXIT_TMUX="exit_tmux"
+readonly M_FREE_PORT="free_port"
 readonly M_QUIT="quit"
 
 # Order matters (Launch picker first)
@@ -67,6 +68,7 @@ readonly MENU_ENUMS=(
   "$M_DOCKER_COMPOSE_UP"
   "$M_DOCKER_STOP"
   "$M_EXIT_TMUX"
+  "$M_FREE_PORT"
   "$M_QUIT"
 )
 
@@ -79,10 +81,11 @@ menu_label() {
     "$M_INSTALL_DEPS")  echo "Install deps" ;;
     "$M_ROS_ENV")       echo "Set ROS env" ;;
     "$M_DOCKER_BUILD")  echo " Docker build" ;;
-    "$M_DOCKER_RUN")    echo "Docker run (container)" ;;
-    "$M_DOCKER_COMPOSE_UP") echo "Docker compose up" ;;
-    "$M_DOCKER_STOP")   echo "Docker compose down" ;;
+    "$M_DOCKER_RUN")    echo "Container: start + shell" ;;
+    "$M_DOCKER_COMPOSE_UP") echo "Container: start" ;;
+    "$M_DOCKER_STOP")   echo "Container: stop" ;;
     "$M_EXIT_TMUX")     echo "Exit tmux session" ;;
+    "$M_FREE_PORT")     echo "Free DXL port" ;;
     "$M_QUIT")          echo "Quit" ;;
     *)                  echo "Unknown" ;;
   esac
@@ -101,6 +104,7 @@ menu_emoji() {
     "$M_DOCKER_COMPOSE_UP") echo "🐳" ;;
     "$M_DOCKER_STOP")   echo "🛑" ;;
     "$M_EXIT_TMUX")     echo "🧹" ;;
+    "$M_FREE_PORT")     echo "🔌" ;;
     "$M_QUIT")          echo "👋" ;;
     *)                  echo "" ;;
   esac
@@ -132,10 +136,11 @@ choice_to_enum() {
     "Install deps")      echo "$M_INSTALL_DEPS" ;;
     "Set ROS env")       echo "$M_ROS_ENV" ;;
     "Docker build")      echo "$M_DOCKER_BUILD" ;;
-    "Docker run (container)") echo "$M_DOCKER_RUN" ;;
-    "Docker compose up") echo "$M_DOCKER_COMPOSE_UP" ;;
-    "Docker compose down") echo "$M_DOCKER_STOP" ;;
+    "Container: start + shell") echo "$M_DOCKER_RUN" ;;
+    "Container: start") echo "$M_DOCKER_COMPOSE_UP" ;;
+    "Container: stop") echo "$M_DOCKER_STOP" ;;
     "Exit tmux session") echo "$M_EXIT_TMUX" ;;
+    "Free DXL port")     echo "$M_FREE_PORT" ;;
     "Quit")              echo "$M_QUIT" ;;
     *)                   echo "$M_QUIT" ;;
   esac
@@ -336,39 +341,16 @@ while true; do
         op3_tmux_main --docker-build
       ;;
 
+    # Tidak ada lagi pertanyaan mount mode / detached. Untuk robot ini jawabannya
+    # cuma satu yang benar dan sudah dipakai scripts/op3_docker.sh. Pilihan lama
+    # justru berbahaya: default "Cache (src read-only)" membuat /ros2_ws/src
+    # read-only, sehingga action editor tidak bisa menyimpan .bin sama sekali.
     "$M_DOCKER_RUN")
-      run_flags=""
-      gum confirm "Run in detached mode?" && run_flags="-d"
-      mount_choice="$(gum choose --header "Mount mode" \
-        "Cache (src read-only + build/install/log)" \
-        "Src only (read-only)" \
-        "Full workspace (read/write)" \
-        "No mounts (sandbox)")"
-      mount_mode="cache"
-      case "$mount_choice" in
-        "Cache (src read-only + build/install/log)") mount_mode="cache" ;;
-        "Src only (read-only)") mount_mode="src" ;;
-        "Full workspace (read/write)") mount_mode="full" ;;
-        "No mounts (sandbox)") mount_mode="none" ;;
-      esac
-      src_ro="1"
-      if [[ "$mount_mode" == "src" || "$mount_mode" == "cache" ]]; then
-        src_choice="$(gum choose --header "Src mount access" \
-          "Read-only (safer)" \
-          "Read/write")"
-        [[ "$src_choice" == "Read/write" ]] && src_ro="0"
-      fi
-      OP3_DOCKER_RUN_FLAGS="$run_flags" \
-        OP3_DOCKER_MOUNT_MODE="$mount_mode" \
-        OP3_DOCKER_SRC_RO="$src_ro" \
-        op3_tmux_main --docker-run
+      op3_tmux_main --docker-run
       ;;
 
     "$M_DOCKER_COMPOSE_UP")
-      up_flags=""
-      gum confirm "Run in detached mode?" && up_flags="-d"
-      gum confirm "Build before run?" && up_flags="--build $up_flags"
-      OP3_DOCKER_UP_FLAGS="$up_flags" op3_tmux_main --docker-up
+      op3_tmux_main --docker-up
       ;;
 
     "$M_DOCKER_STOP")
@@ -378,6 +360,12 @@ while true; do
     "$M_EXIT_TMUX")
       op3_tmux_main --exit
       exit $?
+      ;;
+
+    # Sisa node yang masih memegang /dev/ttyUSBx tanpa mematikan stack. Paling
+    # sering dibutuhkan setelah executor.py dijalankan tangan lalu di-Ctrl-C.
+    "$M_FREE_PORT")
+      op3_tmux_main --free-port || true
       ;;
 
     "$M_QUIT"|*)

@@ -32,11 +32,12 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --install-deps${RST}  Install apt + rosdep dependencies
   ${BOLD}./$(basename "$0") --build${RST}         Build workspace (colcon)
   ${BOLD}./$(basename "$0") --docker-build${RST}  Build Docker image
-  ${BOLD}./$(basename "$0") --docker-run${RST}    Run container (docker run)
-  ${BOLD}./$(basename "$0") --docker-up${RST}     Run docker-compose up
-  ${BOLD}./$(basename "$0") --docker-down${RST}   Stop docker-compose
-  ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
+  ${BOLD}./$(basename "$0") --docker-run${RST}    Start container + open shell (op3_docker.sh)
+  ${BOLD}./$(basename "$0") --docker-up${RST}     Start container    (op3_docker.sh up)
+  ${BOLD}./$(basename "$0") --docker-down${RST}   Stop container     (op3_docker.sh down)
+  ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session + free DXL port)
   ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
+  ${BOLD}./$(basename "$0") --free-port${RST}     Free the DXL port only (leave the session running)
 
 ${BOLD}Options${RST}
   --ws PATH            Workspace root (default: ${WS})
@@ -64,11 +65,12 @@ ${BOLD}Options${RST}
   --install-deps        Install apt + rosdep dependencies
   --build               Build workspace (colcon)
   --docker-build        Build Docker image
-  --docker-run          Run container (docker run)
-  --docker-up           Run docker-compose up
-  --docker-down         Stop docker-compose
+  --docker-run          Start container + open shell (op3_docker.sh)
+  --docker-up           Start container    (op3_docker.sh up)
+  --docker-down         Stop container     (op3_docker.sh down)
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
   --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
+  --free-port           Kill whatever still holds /dev/ttyUSBx (see scripts/op3_tmux/lib/reap.sh)
   --dry-run            Print what would run (no changes)
 
 ${BOLD}Defaults (env override)${RST}
@@ -95,8 +97,8 @@ ${BOLD}Env overrides (recommended)${RST}
   OP3_PREFS_FILE (default: ~/.config/op3-stack/prefs.sh)
   WEBOTS_HOME, OP3_PROFILE, OP3_TOOLS_CMD, OP3_RQT_CMD
   OP3_DOCKER_TAG, OP3_DOCKER_WITH_WEBOTS, OP3_DOCKER_WEBOTS_VERSION, OP3_DOCKER_WEBOTS_PACKAGE_PREFIX
-  OP3_DOCKER_BUILD_FLAGS, OP3_DOCKER_RUN_FLAGS, OP3_DOCKER_UP_FLAGS
-  OP3_DOCKER_MOUNT_MODE (none|src|cache|full), OP3_DOCKER_SRC_RO (1|0)
+  OP3_DOCKER_BUILD_FLAGS
+  OP3_CONTAINER_NAME, OP3_IMAGE (dipakai scripts/op3_docker.sh)
   OP3_SAVE_LAST_SELECTION (default: 1; writes ~/.config/op3-stack/last.txt)
 
 ${BOLD}Profiles${RST}
@@ -140,6 +142,7 @@ op3_tmux_dispatch() {
   DO_DOCKER_DOWN=0
   DO_EXIT=0
   DO_STOP=0
+  DO_FREE_PORT=0
   DO_USUAL=0
   DO_SAVE_USUAL=0
   RESTART_COMPONENT=""
@@ -184,6 +187,7 @@ op3_tmux_dispatch() {
       --docker-down) DO_DOCKER_DOWN=1; shift ;;
     --exit|-x) DO_EXIT=1; shift ;;
       --stop) DO_STOP=1; shift ;;
+      --free-port) DO_FREE_PORT=1; shift ;;
       --restart) RESTART_COMPONENT="$2"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h|--help) apply_profile "$PROFILE"; help; exit 0 ;;
@@ -194,6 +198,7 @@ op3_tmux_dispatch() {
   apply_profile "$PROFILE"
 
   if [[ "$DO_EXIT" -eq 1 ]]; then action_exit; exit 0; fi
+  if [[ "$DO_FREE_PORT" -eq 1 ]]; then action_free_port; exit $?; fi
   if [[ "$DO_STATUS" -eq 1 ]]; then action_status; exit 0; fi
   if [[ "$DO_DOCTOR" -eq 1 ]]; then action_doctor; exit $?; fi
   if [[ "$DO_INSTALL_DEPS" -eq 1 ]]; then action_install_deps; exit $?; fi

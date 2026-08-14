@@ -1,6 +1,14 @@
-# ~/.bashrc for the OP3 container (mounted to /root/.bashrc via docker-compose.yml).
-# Makes every interactive shell — including `docker exec -it op3_ros2_humble bash` —
-# automatically source ROS 2 and the built workspace, surviving container recreation.
+# ~/.bashrc for the OP3 container, mounted read-only to /root/.bashrc by both
+# scripts/op3_docker.sh and docker-compose.yml.
+#
+# `docker exec` bypasses the container ENTRYPOINT, so a plain
+# `docker exec -it op3 bash` would otherwise start with no ROS at all — `ros2`
+# not even on PATH, every `ros2 run ...` answering "command not found". Mounting
+# this file (rather than appending to the image's own .bashrc) keeps the fix in
+# git and makes it survive container recreation.
+#
+# `scripts/op3_docker.sh shell` goes through /docker-entrypoint.sh instead and
+# does not depend on this file; it exists for every other way in.
 
 [ -f /opt/ros/humble/setup.bash ]      && source /opt/ros/humble/setup.bash
 [ -f /ros2_ws/install/setup.bash ]     && source /ros2_ws/install/setup.bash
