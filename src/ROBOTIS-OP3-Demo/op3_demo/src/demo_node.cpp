@@ -48,8 +48,8 @@ void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
 const int SPIN_RATE = 30;
 const bool DEBUG_PRINT = false;
 
-// INIT_BARU = the user's calibrated standing pose, stored on this action page.
-const int INIT_BARU_PAGE_NUM = 2;
+// WALKING_READY = the user's calibrated standing pose, stored on this action page.
+const int WALKING_READY_PAGE_NUM = 2;
 // Time to let action_module take over before sending the page play command.
 const int ACTION_MODULE_SETTLE_MS = 500;
 
@@ -132,7 +132,7 @@ int main(int argc, char **argv)
   // turn on R/G/B LED
   setLED(0x01 | 0x02 | 0x04);
 
-  // NOTE: boot-time INIT_BARU (action page 2) is already played by op3_manager
+  // NOTE: boot-time WALKING_READY (action page 2) is already played by op3_manager
   // itself (op3_manager.cpp goToInitActionPage() at the end of main()), so
   // demo_node does NOT repeat it here — doing so would double-fire the page.
   // goInitPose() below (action page 2) is still used when returning to Ready.
@@ -304,7 +304,7 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 
 void goInitPose()
 {
-  // INIT_BARU = action page 2 (user's calibrated standing pose). Switch to
+  // WALKING_READY = action page 2 (user's calibrated standing pose). Switch to
   // action_module, let it settle, then play the page.
   std_msgs::msg::String module_msg;
   module_msg.data = "action_module";
@@ -313,7 +313,7 @@ void goInitPose()
   rclcpp::sleep_for(std::chrono::milliseconds(ACTION_MODULE_SETTLE_MS));
 
   std_msgs::msg::Int32 page_msg;
-  page_msg.data = INIT_BARU_PAGE_NUM;
+  page_msg.data = WALKING_READY_PAGE_NUM;
   action_page_pub->publish(page_msg);
 }
 

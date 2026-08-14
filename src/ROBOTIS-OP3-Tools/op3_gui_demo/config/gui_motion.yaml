@@ -9,7 +9,7 @@ motion:
   23 : Yes Go
   27 : Oops
 # soccer
-  2 : INIT_BARU
+  2 : WALKING_READY
   122 : Get up(Front)
   123 : Get up(Back)
   121 : Right Kick

@@ -578,9 +578,19 @@ void SoccerDemo::startSoccerMode()
 
   is_start_soccer_running_ = true;
 
-  // Robot is already at INIT_BARU (boot pose). walking_module's IK-derived
-  // ready pose (from the FK-tuned init offsets) matches INIT_BARU, so enable
-  // walking_module DIRECTLY — no action page 2 / WalkingReady replay.
+  // Walking ready pose comes from action page 2 (WALKING_READY) only: replay that page
+  // with the action_module, wait until it finished, then hand the body over to
+  // walking_module (which locks its stance to this pose) and the head to head_control.
+  setModuleToDemo("action_module");
+
+  playMotion(WalkingReady);
+
+  // Give the action_module a moment to pick the page up, otherwise is_running is still
+  // false here and walking_module would take over halfway through the pose.
+  rclcpp::sleep_for(std::chrono::milliseconds(200));
+  while (isActionRunning() == true)
+    rclcpp::sleep_for(std::chrono::milliseconds(100));
+
   setBodyModuleToDemo("walking_module");
 
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Start Soccer Demo");

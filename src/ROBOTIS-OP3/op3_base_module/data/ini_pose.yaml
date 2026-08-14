@@ -32,7 +32,9 @@ via_pose :
 
 
 # target pose [deg]
-# Copied from motion_4095_CHRONUS.bin page 2 (INIT_BARU), step 0.
+# base_module's own init pose. It was copied from an earlier motion_4095_ORION.bin
+# page 2 and no longer matches it: page 2 is now WALKING_READY, and that page (not
+# this file) is what op3_manager and the demo play as the ready pose.
 
 tar_pose :
   1 : 4.130859         # r_sho_pitch

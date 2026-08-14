@@ -30,7 +30,7 @@ class OPDemo
   enum Motion_Index
   {
     InitPose = 2,
-    WalkingReady = 8,
+    WalkingReady = 2,   // this robot's ready pose lives on page 2 (WALKING_READY) only
     GetUpFront = 85,
     GetUpBack = 86,
     RightKick = 218, //32 inti  //218 regional //220 nasional // smpg kanan : 6 
