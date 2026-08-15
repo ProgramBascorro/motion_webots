@@ -42,6 +42,24 @@ grep -rn "showUploadConfirm\|binIsNewerThanDraft"                      src/   # 
 grep -rn "def file_info\|action == \"stat\""                          src/   # §6 backend apply_node
 ```
 
+**Mekanisme parameter walking & tab Walking di studio → `PANDUAN_PARAMETER_WALKING.md`.**
+Dokumen itu memakai pola yang sama dengan halaman ini (grep penanda dulu, terapkan
+yang belum ada) dan punya blok cek siap jalan di bagian 0. Per 2026-08-15 branch ini
+sudah punya 6 dari 10; yang **belum** ada empat:
+
+```bash
+test -f src/bascorro_studio/web/src/walkingParams.js                      # parser dipakai bersama App+TuningPage
+grep -rn "refreshWalkingCurrent\|sendBalanceCommand"  src/bascorro_studio/  # balance IMU sinkron + dibaca ulang
+grep -rn "payload.period_time > 0"                    src/bascorro_studio/  # period_time 0 -> NaN, kaki beku
+grep -rn "Bentuk Gait"                                src/bascorro_studio/  # grup Balance dipecah dari gait
+```
+
+Yang keempat penting untuk dipahami, bukan sekadar ditempel: `balance_enable` hanya
+menggerbang `sensoryFeedback()`, yang menulis ke **8 sendi kaki saja**. `arm_swing_gain`
+bukan parameter IMU — ayunan tangan datang dari `computeArmAngle()` dan tidak akan
+berhenti walau balance dimatikan. Dulu semuanya satu grup bernama "Balance", dan itu
+menyesatkan operator.
+
 **Alur ringkas:** verifikasi path → **cek penanda (grep) untuk tiap fitur** → apply hanya yang belum
 ada (sesuaikan dgn kode robot 2) → sesuaikan item per-robot 2–7 di atas → build di container + cek
 timestamp → restart → uji (robot digantung dulu).
@@ -298,6 +316,13 @@ Mapping ID (OP3.robot): 1 r_sho_pitch · 2 l_sho_pitch · 3 r_sho_roll · 4 l_sh
 ---
 
 ## 10. TUNING walking (satuan runtime: detik/meter/radian)
+
+> Sebelum menyetel: baca `PANDUAN_PARAMETER_WALKING.md`. Di situ ada peta empat
+> tempat parameter walking hidup (termasuk **tiga salinan angka** yang diam-diam
+> bisa berbeda: `param.yaml`, fallback `initialize()`, dan `WALKING_DEFAULT_PARAMS`),
+> peta nama/satuan yaml ↔ pesan ↔ UI, dan delapan jebakan mekanisme yang membuat
+> nilai yang diketik tidak sampai ke robot. Menyetel angka sebelum mekanismenya
+> benar hanya menghasilkan hasil yang tidak bisa diulang.
 
 OP3 standar → param.yaml resmi sudah baik. Paling berdampak: **perbesar y_swap**.
 
