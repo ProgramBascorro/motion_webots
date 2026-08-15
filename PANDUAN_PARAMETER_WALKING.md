@@ -8,6 +8,51 @@ Semua yang di bawah ini boleh disalin mentah ke robot lain.
 
 ---
 
+## 0. Cek cepat: perbaikan mana yang sudah ada di repo ini?
+
+Jalankan dari akar repo. Setiap baris yang **tidak** menghasilkan keluaran berarti
+perbaikannya belum terpasang — buka bagian yang disebut.
+
+```bash
+# A  parser angka bersama                              -> bagian 2A
+test -f src/bascorro_studio/web/src/walkingParams.js && echo "A ok"
+# A  input teks, bukan number                          -> bagian 2A
+grep -q 'inputMode="decimal"' src/bascorro_studio/web/src/App.jsx && echo "A-input ok"
+# B  perbandingan dirty tahan NaN                      -> bagian 2B
+grep -q 'parseWalkingNumber(walkingParams\[field.key\], NaN)' src/bascorro_studio/web/src/App.jsx && echo "B ok"
+# C  Start mengaktifkan modul dulu                     -> bagian 2C
+grep -q 'startWalkingNow' src/bascorro_studio/web/src/App.jsx && echo "C ok"
+# D  Balance sinkron + baca ulang dari robot           -> bagian 2D
+grep -q 'refreshWalkingCurrent' src/bascorro_studio/web/src/App.jsx && echo "D ok"
+# E  gerbang idle di walking module                    -> bagian 2E
+grep -q 'ctrl_running_ == false && real_running_ == false' \
+  src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp && echo "E ok"
+# F  durasi trajektori double + lantai 1.5 s           -> bagian 2F
+grep -q 'mov_time < 1.5 ? 1.5 : mov_time' \
+  src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp && echo "F ok"
+# F  prasyarat: round() di iniPoseTraGene              -> bagian 2F
+grep -q 'round(mov_time / smp_time + 1)' \
+  src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp && echo "F-round ok"
+# H  TuningPage menolak period_time <= 0               -> bagian 2H
+grep -q 'payload.period_time > 0' src/bascorro_studio/web/src/TuningPage.jsx && echo "H ok"
+# I  grup Balance sudah dipecah                        -> bagian 3
+grep -q 'Bentuk Gait' src/bascorro_studio/web/src/App.jsx && echo "I ok"
+```
+
+Untuk **G** (tiga salinan angka) tidak ada grep tunggal — bandingkan bertiga:
+
+```bash
+grep -E '^(period_time|dsp_ratio|foot_height|arm_swing_gain|p_gain):' \
+  src/ROBOTIS-OP3/op3_walking_module/config/param.yaml
+grep -nA3 'walking_param_.period_time =' \
+  src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp
+sed -n '/^const WALKING_DEFAULT_PARAMS/,/^};/p' src/bascorro_studio/web/src/App.jsx
+```
+
+Ingat konversi satuan di tabel bagian 1 sebelum menyimpulkan ada yang beda.
+
+---
+
 ## 1. Peta: parameter walking hidup di empat tempat
 
 ```

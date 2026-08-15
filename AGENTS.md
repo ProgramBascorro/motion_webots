@@ -1,13 +1,52 @@
 # Repository Guidelines
 
+## Start here (baca sebelum menjalankan apa pun)
+
+Repo ini dipakai di robot OP3 nyata bernama **ALPHONSE**, di dalam **container Docker
+bernama `op3`**. Tiga hal yang membatalkan sebagian besar asumsi ROS 2 biasa:
+
+1. **Workspace hanya jalan di dalam container.** Host tidak punya `/ros2_ws`.
+   `install/` berisi symlink per-berkas yang menunjuk ke sana, jadi di host
+   `source install/setup.bash` tetap keluar dengan kode 0 tapi diam-diam
+   melewatkan hampir semua paket, dan `ros2 run` akan bilang "package not found".
+   Jalankan lewat `docker exec op3 bash -lc '...'` atau `scripts/op3_docker.sh shell`.
+2. **Periksa dulu, jangan langsung build.** `bash scripts/op3_docker.sh doctor`
+   memeriksa enam hal: perangkat serial di host, kestabilan colokan, port yang
+   diminta `OP3.robot`, akses dari dalam container, ROS di PATH, dan kebasian ABI.
+   Sebagian besar kegagalan "aneh" terjawab di sini.
+3. **Pakai `--packages-above`, bukan `--packages-select`.** Kalau header ikut
+   berubah, `--packages-select` meninggalkan pemakainya memakai layout kelas lama.
+   Gejalanya kejam: node hang di 100% CPU **tanpa pesan error sama sekali**.
+
+```bash
+bash scripts/op3_docker.sh doctor
+docker exec op3 bash -lc 'cd /ros2_ws && source /opt/ros/humble/setup.bash \
+  && colcon build --symlink-install --packages-above <paket>'
+```
+
+Robot ini bergerak. Perubahan pada modul motion bisa membuatnya jatuh atau
+memanaskan servo — mintalah robot digantung/dipegang sebelum uji pertama.
+
+### Dokumen yang harus dibaca sesuai tugasnya
+
+| Tugas | Dokumen |
+|---|---|
+| Memasang repo ini di robot baru | `SETUP_ROBOT_BARU.md` |
+| Parameter walking, tab Walking di Bascorro Studio | `PANDUAN_PARAMETER_WALKING.md` |
+| Menurunkan nilai `x/y/z_offset` dari page 2, teori FK | `ROBOT1_WALKING_HANDOFF.md` |
+| Serial/OpenCR tidak terdeteksi | `RANGKUMAN_DIAGNOSA_OPENCR.md`, `TROUBLESHOOT_OPENCR_POWER.md` |
+
+Bagian di bawah ini adalah konvensi umum ROS 2 dan tetap berlaku untuk hal-hal
+yang tidak menyentuh hardware.
+
 ## Project Structure & Module Organization
 The workspace follows a standard ROS 2 layout: `src/` houses all packages, `build/`, `install/`, and `log/` are colcon artifacts. Key domains include `src/ROBOTIS-OP3*` for motion, hardware, and demo nodes, `src/ROBOTIS-OP3-Simulations` for Webots/Gazebo launch files, `src/humanoid_navigation` for localization and footstep planners, and `src/walking_imu_to_odometry` for IMU-based walking control. Keep robotics-specific assets (meshes, worlds, configs) inside their package to preserve `rosdep` compatibility.
 
 ## Build, Test, and Development Commands
-- `source /opt/ros/humble/setup.bash && colcon build --continue-on-error`: primary build; keep warnings clean because downstream launch files assume every package installs.
+- `source /opt/ros/humble/setup.bash && colcon build --continue-on-error`: full build — **di dalam container `op3`**, lihat "Start here". Untuk build sebagian pakai `--packages-above`. Keep warnings clean because downstream launch files assume every package installs.
 - `colcon test --packages-select humanoid_navigation walking_imu_to_odometry`: run unit and launch tests for targeted stacks before opening a PR.
 - `ros2 launch op3_webots_ros2 robot_launch.py world:=worlds/op3_env.wbt`: start the Webots simulation to validate motion controllers.
-After building, always `source install/setup.bash` in any new terminal before invoking ROS 2 CLI tools.
+After building, always `source install/setup.bash` in any new terminal before invoking ROS 2 CLI tools — **di dalam container**. Di host perintah itu berhasil tanpa keluhan tapi hampir tidak memuat apa pun, karena symlink-nya menunjuk ke `/ros2_ws` yang tidak ada di host.
 
 ## Coding Style & Naming Conventions
 C++ nodes follow `ament_cmake` defaults: 2-space indentation, UpperCamelCase class names, and snake_case topics/services. Python uses PEP 8 with 4-space indents, type hints where practical, and lowercase_with_underscores modules (see `walking_step_planner.py`). Run `ament_uncrustify` or `ament_clang_format` for C++ and `ament_flake8` for Python packages via `colcon test --ctest-args -R lint`.
