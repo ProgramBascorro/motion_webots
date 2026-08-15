@@ -20,6 +20,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
+import { parseWalkingNumber } from "./walkingParams.js";
 
 // --- Constants ---
 
@@ -189,9 +190,14 @@ const SectionCard = ({
   </div>
 );
 
+// type="text" + inputMode="decimal", BUKAN type="number". <input type="number">
+// mengembalikan "" untuk apa pun yang dianggap browser setengah jadi (sedang
+// mengetik "0.", hasil paste, koma desimal), dan Number("") === 0 -- field yang
+// dihapus untuk diketik ulang jadi terkirim ke robot sebagai 0.
 const NumberInput = ({ value, onChange, step = 1, className = "" }) => (
   <input
-    type="number"
+    type="text"
+    inputMode="decimal"
     step={step}
     value={value}
     onChange={onChange}
@@ -449,12 +455,20 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
       sendStatus("Load params first", true);
       return false;
     }
-    const payload = { ...walkingFull, ...walkingParams };
-    // Ensure numbers
-    payload.x_move_amplitude = Number(payload.x_move_amplitude);
-    payload.y_move_amplitude = Number(payload.y_move_amplitude);
-    payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
-    payload.period_time = Number(payload.period_time);
+    // Kartu ini hanya menampilkan 4 field, tapi walkingParameterCallback() di
+    // walking module menimpa SELURUH walking_param_ (`walking_param_ = *msg`).
+    // Jadi kirim struct lengkap hasil Load, lalu timpa yang diedit saja --
+    // mengirim struct sebagian akan menolkan sisa gait.
+    const payload = { ...walkingFull };
+    WALKING_PARAM_FIELDS.forEach(({ key }) => {
+      payload[key] = parseWalkingNumber(walkingParams[key], toNumber(walkingFull[key], 0));
+    });
+    // updateTimeParam() membagi period_time, jadi 0 membuat SEMUA sudut gait
+    // jadi NaN dan kaki membeku tanpa pesan error apa pun.
+    if (!(payload.period_time > 0)) {
+      sendStatus("Period time harus lebih dari 0 (nilai 0 bikin gait NaN, kaki beku)", true);
+      return false;
+    }
     walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
     sendStatus("Walking Params Applied");
     return true;
@@ -804,7 +818,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                 <div key={field.key} className="space-y-2">
                    <div className="flex justify-between items-end">
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{field.label}</label>
-                      <span className="text-xs font-mono font-bold text-undip-blue">{Number(walkingParams[field.key]).toFixed(4)}</span>
+                      <span className="text-xs font-mono font-bold text-undip-blue">{parseWalkingNumber(walkingParams[field.key], toNumber(walkingFull?.[field.key], 0)).toFixed(4)}</span>
                    </div>
                    <div className="flex gap-2">
                      <NumberInput 
@@ -815,7 +829,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                      {field.quick.map(q => (
                        <button
                           key={q.label}
-                          onClick={() => setWalkingParams(p => ({ ...p, [field.key]: (Number(p[field.key]) + q.delta).toFixed(6) }))}
+                          onClick={() => setWalkingParams(p => ({ ...p, [field.key]: (parseWalkingNumber(p[field.key], toNumber(walkingFull?.[field.key], 0)) + q.delta).toFixed(6) }))}
                           className="px-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-[10px] font-bold transition-colors whitespace-nowrap"
                        >
                          {q.label}

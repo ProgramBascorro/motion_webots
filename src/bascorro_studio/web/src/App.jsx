@@ -40,6 +40,11 @@ import {
   normalizeRosbridgeUrl,
   rewriteLoopbackToCurrentHost,
 } from "./net/rosbridge.js";
+import {
+  WALKING_BOOL_FIELDS,
+  normalizeWalkingParams,
+  parseWalkingNumber,
+} from "./walkingParams.js";
 
 const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
 const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
@@ -62,36 +67,6 @@ const YOLO_PARAM_KEYS = [
   "goalpost_confidence_threshold",
   "robot_confidence_threshold",
 ];
-
-const WALKING_DEFAULT_PARAMS = {
-  init_x_offset: -0.015,
-  init_y_offset: 0.015,
-  init_z_offset: 0.075,
-  init_roll_offset: 0,
-  init_pitch_offset: 0.069813,
-  init_yaw_offset: 0,
-  period_time: 0.78,
-  dsp_ratio: 0.3,
-  step_fb_ratio: 0.25,
-  x_move_amplitude: 0,
-  y_move_amplitude: 0,
-  z_move_amplitude: 0.033,
-  angle_move_amplitude: 0,
-  move_aim_on: false,
-  balance_enable: true,
-  balance_hip_roll_gain: 0.35,
-  balance_knee_gain: 0.4,
-  balance_ankle_roll_gain: 0.7,
-  balance_ankle_pitch_gain: 0.9,
-  y_swap_amplitude: 0.002,
-  z_swap_amplitude: 0.006,
-  arm_swing_gain: 0.2,
-  pelvis_offset: 0.008727,
-  hip_pitch_offset: 0.139626,
-  p_gain: 0,
-  i_gain: 0,
-  d_gain: 0,
-};
 
 const WALKING_PARAM_HELP = {
   init_x_offset: {
@@ -180,9 +155,9 @@ const WALKING_PARAM_HELP = {
   },
   balance_enable: {
     artinya: "Mengaktifkan koreksi balance dari feedback gyro/IMU.",
-    fungsi: "Walking module memakai gyro untuk koreksi hip, knee, dan ankle saat robot goyang.",
+    fungsi: "Menggerbang sensoryFeedback(), yang menulis ke PERSIS 8 sendi kaki: r/l_hip_roll, r/l_knee, r/l_ank_pitch, r/l_ank_roll. Di luar itu tidak disentuh.",
     tuning: "Untuk robot asli biasanya on. Untuk membandingkan efek gain, boleh off sebentar sambil robot dipegang.",
-    risk: "Balance off di hardware bisa membuat robot lebih mudah jatuh."
+    risk: "Balance off di hardware bisa membuat robot lebih mudah jatuh. Mematikannya TIDAK menghentikan ayunan tangan maupun sway badan -- itu bentuk gait, bukan balance."
   },
   balance_hip_roll_gain: {
     artinya: "Gain koreksi roll di joint hip.",
@@ -222,8 +197,8 @@ const WALKING_PARAM_HELP = {
   },
   arm_swing_gain: {
     artinya: "Gain ayunan tangan saat berjalan.",
-    fungsi: "Ayunan tangan membantu counterbalance terhadap gerakan kaki.",
-    tuning: "Naikkan jika badan terlalu kaku. Turunkan jika ayunan tangan justru mengganggu balance.",
+    fungsi: "Ayunan tangan membantu counterbalance terhadap gerakan kaki. BUKAN parameter IMU: rumusnya di computeArmAngle() murni gait, tanpa gyro sama sekali.",
+    tuning: "Naikkan jika badan terlalu kaku. Turunkan jika ayunan tangan justru mengganggu balance. Untuk benar-benar menghentikan ayunan tangan, set nilai ini 0 (atau x_move_amplitude 0) -- mematikan Balance tidak akan menghentikannya.",
     risk: "Ayunan besar bisa mengganggu vision/kamera dan menambah goyangan."
   },
   pelvis_offset: {
@@ -291,15 +266,26 @@ const WALKING_PARAM_GROUPS = [
       { key: "move_aim_on", label: "Move aim on", type: "bool", ...WALKING_PARAM_HELP.move_aim_on },
     ],
   },
+  // Balance dan bentuk gait sengaja DIPISAH. Checkbox "Balance enable" hanya
+  // menggerbang sensoryFeedback(), dan fungsi itu menulis ke persis 8 sendi kaki
+  // (r/l_hip_roll, r/l_knee, r/l_ank_pitch, r/l_ank_roll). Sebelumnya y_swap,
+  // z_swap, arm_swing_gain, pelvis_offset, dan hip_pitch_offset ikut satu grup
+  // bernama "Balance", jadi terbaca seolah checkbox itu mengatur semuanya juga.
   {
-    title: "Balance",
-    description: "IMU feedback gains and body sway.",
+    title: "Balance (IMU)",
+    description: "Gain koreksi dari IMU. Hanya bagian ini yang dimatikan checkbox Balance enable.",
     fields: [
       { key: "balance_enable", label: "Balance enable", type: "bool", ...WALKING_PARAM_HELP.balance_enable },
       { key: "balance_hip_roll_gain", label: "Hip roll gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_hip_roll_gain },
       { key: "balance_knee_gain", label: "Knee gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_knee_gain },
       { key: "balance_ankle_roll_gain", label: "Ankle roll gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_ankle_roll_gain },
       { key: "balance_ankle_pitch_gain", label: "Ankle pitch gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_ankle_pitch_gain },
+    ],
+  },
+  {
+    title: "Bentuk Gait",
+    description: "Ayunan badan dan lengan. Murni gait -- tetap jalan walau balance dimatikan.",
+    fields: [
       { key: "y_swap_amplitude", label: "Y swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.y_swap_amplitude },
       { key: "z_swap_amplitude", label: "Z swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_swap_amplitude },
       { key: "arm_swing_gain", label: "Arm swing gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.arm_swing_gain },
@@ -321,8 +307,6 @@ const WALKING_PARAM_GROUPS = [
 // Time to wait after enabling walking_module before sending a walking command,
 // so the controller has switched the active module and settled the init pose.
 const WALKING_ENABLE_SETTLE_MS = 1200;
-const WALKING_INT_FIELDS = new Set(["p_gain", "i_gain", "d_gain"]);
-const WALKING_BOOL_FIELDS = new Set(["move_aim_on", "balance_enable"]);
 
 // Soft torque-on: enabling torque makes each Dynamixel drive to its goal at full
 // speed, so the robot snaps/jerks. To avoid that we first limit the XM430
@@ -341,33 +325,6 @@ const TORQUE_SPEED_PRESETS = [
 // so two different items sent in the same cycle collide and the second is dropped.
 // Space successive items well past one cycle so each lands in its own batch.
 const SYNC_ITEM_GAP_MS = 60;
-
-// Parse a walking field value robustly. Accepts both "0.014" and the
-// Indonesian decimal form "0,014". Blank/partial input ("", " ", ".", "-")
-// falls back to `fallback` instead of 0 -- Number("") === 0 was silently
-// turning cleared or comma-typed fields into 0, which is why edited walking
-// values reset to 0 after Save/Load/Apply.
-function parseWalkingNumber(raw, fallback) {
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : fallback;
-  if (raw === null || raw === undefined) return fallback;
-  const text = String(raw).trim().replace(",", ".");
-  if (text === "" || text === "." || text === "-" || text === "-.") return fallback;
-  const numeric = Number(text);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function normalizeWalkingParams(params = {}) {
-  const next = { ...WALKING_DEFAULT_PARAMS, ...params };
-  Object.keys(WALKING_DEFAULT_PARAMS).forEach((key) => {
-    if (WALKING_BOOL_FIELDS.has(key)) {
-      next[key] = Boolean(next[key]);
-      return;
-    }
-    const numeric = parseWalkingNumber(next[key], WALKING_DEFAULT_PARAMS[key]);
-    next[key] = WALKING_INT_FIELDS.has(key) ? Math.round(numeric) : numeric;
-  });
-  return next;
-}
 
 function formatWalkingValue(value, field) {
   if (field.type === "bool") return value ? "true" : "false";
@@ -881,10 +838,11 @@ export default function App() {
   const sendWalkingCommand = (command, label) => {
     if (!walkingCommandPubRef.current || rosState !== "connected") {
       sendStatus("Walking command unavailable", true);
-      return;
+      return false;
     }
     walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
     sendStatus(label || `Walking command: ${command}`);
+    return true;
   };
 
   const sendTeleopCommand = (command, label) => {
@@ -944,6 +902,39 @@ export default function App() {
         sendStatus(message, true);
       }
     );
+  };
+
+  // Re-read the live params from the robot and refresh ONLY the "current"
+  // column. It deliberately does not touch `walkingParams`, so it is safe to
+  // call while the operator is typing in the grid. Used as proof-of-effect
+  // after a balance on/off command.
+  const refreshWalkingCurrent = (label) => {
+    if (!walkingGetServiceRef.current || rosState !== "connected") return;
+    walkingGetServiceRef.current.callService(
+      new ROSLIB.ServiceRequest({ get_param: true }),
+      (res) => {
+        if (!res?.parameters) return;
+        const normalized = normalizeWalkingParams(res.parameters);
+        setWalkingCurrentParams(normalized);
+        setWalkingLoaded(true);
+        if (label) sendStatus(`${label} (robot: balance_enable=${normalized.balance_enable})`);
+      },
+      () => {}
+    );
+  };
+
+  // walkingParameterCallback() in op3_walking_module does `walking_param_ = *msg`,
+  // overwriting the WHOLE struct. So a "balance off" command (which only flips one
+  // bool on the robot) gets undone by the next Apply if the grid checkbox is still
+  // checked. Keep the UI state in sync with the command, then read back from the
+  // robot as proof it actually landed.
+  const sendBalanceCommand = (enable) => {
+    const ok = sendWalkingCommand(enable ? "balance on" : "balance off");
+    if (!ok) return;
+    setWalkingParams((prev) => ({ ...prev, balance_enable: enable }));
+    window.setTimeout(() => {
+      refreshWalkingCurrent(enable ? "Balance on" : "Balance off");
+    }, 200);
   };
 
   const applyWalkingParams = () => {
@@ -1548,10 +1539,10 @@ export default function App() {
               <button title="Hentikan jalan dengan halus." className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected}>
                 <Square size={14} /> Stop
               </button>
-              <button title="Aktifkan balance control (koreksi pakai IMU saat berjalan)." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance on")} disabled={!rosConnected}>
+              <button title="Aktifkan balance control (koreksi pakai IMU saat berjalan)." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(true)} disabled={!rosConnected}>
                 Balance On
               </button>
-              <button title="Matikan balance control." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendWalkingCommand("balance off")} disabled={!rosConnected}>
+              <button title="Matikan balance control." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(false)} disabled={!rosConnected}>
                 Balance Off
               </button>
               <button title="Simpan parameter ke file di robot supaya tetap dipakai setelah restart." className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>

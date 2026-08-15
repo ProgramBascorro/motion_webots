@@ -107,33 +107,51 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   control_cycle_msec_ = control_cycle_msec;
 
   // m, s, rad
-  // init pose  --  all zero so WalkingReady matches ini_pose.yaml (all joints -> 2048)
-  walking_param_.init_x_offset = 0.0;
-  walking_param_.init_y_offset = 0.0;
-  walking_param_.init_z_offset = 0.0;
-  walking_param_.init_roll_offset = 0.0;
-  walking_param_.init_pitch_offset = 0.0 * DEGREE2RADIAN;
+  //
+  // FALLBACK DARURAT. loadWalkingParam(param_path_) di akhir initialize()
+  // menimpa SEMUA nilai di bawah dari config/param.yaml, jadi blok ini hanya
+  // terpakai kalau yaml itu hilang atau rusak (loadWalkingParam return lebih
+  // awal saat gagal parse).
+  //
+  // Nilainya sengaja disamakan dengan param.yaml robot INI (CHRONUS), supaya
+  // saat yaml gagal dimuat robot tetap dapat gait yang wajar, bukan gait asing.
+  // Nilai stock ROBOTIS dulu jauh berbeda (period 600 ms, y_swap 0.020,
+  // arm_swing 1.5) dan diam-diam bisa membuat robot berjalan dengan parameter
+  // yang tidak pernah dilihat operator.
+  //
+  // Ini salinan KETIGA dari angka yang sama -- dua lainnya: config/param.yaml
+  // dan WALKING_DEFAULT_PARAMS di bascorro_studio/web/src/walkingParams.js.
+  // Ubah satu, ubah ketiganya. Ingat konversi: yaml period_time dalam ms,
+  // yaml *_offset dalam derajat.
+  //
+  // init pose (yaml: x_offset, y_offset, z_offset, roll/pitch/yaw_offset)
+  walking_param_.init_x_offset = -0.015;
+  walking_param_.init_y_offset = 0.015;
+  walking_param_.init_z_offset = 0.075;
+  walking_param_.init_roll_offset = 0.0 * DEGREE2RADIAN;
+  walking_param_.init_pitch_offset = 4.0 * DEGREE2RADIAN;
   walking_param_.init_yaw_offset = 0.0 * DEGREE2RADIAN;
-  walking_param_.hip_pitch_offset = 0.0 * DEGREE2RADIAN;
-  // time
-  walking_param_.period_time = 600 * 0.001;
-  walking_param_.dsp_ratio = 0.1;
-  walking_param_.step_fb_ratio = 0.28;
-  // walking
+  walking_param_.hip_pitch_offset = 8.0 * DEGREE2RADIAN;
+  // time (yaml: period_time ms, dsp_ratio, step_forward_back_ratio)
+  walking_param_.period_time = 700 * 0.001;
+  walking_param_.dsp_ratio = 0.30;
+  walking_param_.step_fb_ratio = 0.25;
+  // walking -- x/y/angle amplitude bukan dari yaml, itu perintah runtime
   walking_param_.x_move_amplitude = 0.0;
   walking_param_.y_move_amplitude = 0.0;
-  walking_param_.z_move_amplitude = 0.040;    // foot height
+  walking_param_.z_move_amplitude = 0.050;    // foot height
   walking_param_.angle_move_amplitude = 0.0;
-  // balance
+  // balance -- balance_enable sengaja tidak dibaca loadWalkingParam(),
+  // jadi nilainya selalu berasal dari sini
   walking_param_.balance_enable = true;
-  walking_param_.balance_hip_roll_gain = 0.5;
-  walking_param_.balance_knee_gain = 0.3;
-  walking_param_.balance_ankle_roll_gain = 1.0;
-  walking_param_.balance_ankle_pitch_gain = 0.9;
-  walking_param_.y_swap_amplitude = 0.020;
-  walking_param_.z_swap_amplitude = 0.005;
-  walking_param_.pelvis_offset = 3.0 * DEGREE2RADIAN;
-  walking_param_.arm_swing_gain = 1.5;
+  walking_param_.balance_hip_roll_gain = 0.35;
+  walking_param_.balance_knee_gain = 0.40;
+  walking_param_.balance_ankle_roll_gain = 0.70;
+  walking_param_.balance_ankle_pitch_gain = 0.90;
+  walking_param_.y_swap_amplitude = 0.002;    // yaml swing_right_left
+  walking_param_.z_swap_amplitude = 0.006;    // yaml swing_top_down
+  walking_param_.pelvis_offset = 0.5 * DEGREE2RADIAN;
+  walking_param_.arm_swing_gain = 0.2;
 
   // member variable
   body_swing_y = 0;
