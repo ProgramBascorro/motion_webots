@@ -20,6 +20,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
+import { parseWalkingNumber } from "./walkingParams.js";
 
 // --- Constants ---
 
@@ -449,12 +450,22 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
       sendStatus("Load params first", true);
       return false;
     }
-    const payload = { ...walkingFull, ...walkingParams };
-    // Ensure numbers
-    payload.x_move_amplitude = Number(payload.x_move_amplitude);
-    payload.y_move_amplitude = Number(payload.y_move_amplitude);
-    payload.angle_move_amplitude = Number(payload.angle_move_amplitude);
-    payload.period_time = Number(payload.period_time);
+    // Every field not shown on this card is carried over from the last Load, because
+    // walkingParameterCallback() does walking_param_ = *msg -- publishing a partial
+    // struct would reset the whole gait (balance_enable included) to zero.
+    // A field the user is midway through typing falls back to that same loaded value
+    // instead of to 0; see walkingParams.js.
+    const payload = { ...walkingFull };
+    for (const field of WALKING_PARAM_FIELDS)
+      payload[field.key] = parseWalkingNumber(walkingParams[field.key], walkingFull[field.key]);
+
+    // period_time is a divisor in updateTimeParam(); 0 would make every gait angle NaN
+    // and freeze the legs mid-step.
+    if (!(payload.period_time > 0)) {
+      sendStatus("Period (s) harus lebih besar dari 0", true);
+      return false;
+    }
+
     walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
     sendStatus("Walking Params Applied");
     return true;
@@ -804,7 +815,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                 <div key={field.key} className="space-y-2">
                    <div className="flex justify-between items-end">
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{field.label}</label>
-                      <span className="text-xs font-mono font-bold text-undip-blue">{Number(walkingParams[field.key]).toFixed(4)}</span>
+                      <span className="text-xs font-mono font-bold text-undip-blue">{parseWalkingNumber(walkingParams[field.key], walkingFull?.[field.key] ?? 0).toFixed(4)}</span>
                    </div>
                    <div className="flex gap-2">
                      <NumberInput 
@@ -815,7 +826,10 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                      {field.quick.map(q => (
                        <button
                           key={q.label}
-                          onClick={() => setWalkingParams(p => ({ ...p, [field.key]: (Number(p[field.key]) + q.delta).toFixed(6) }))}
+                          onClick={() => setWalkingParams(p => ({
+                            ...p,
+                            [field.key]: (parseWalkingNumber(p[field.key], walkingFull?.[field.key] ?? 0) + q.delta).toFixed(6),
+                          }))}
                           className="px-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-[10px] font-bold transition-colors whitespace-nowrap"
                        >
                          {q.label}

@@ -648,7 +648,8 @@ void SoccerDemo::stopSoccerMode()
   // message can be silently dropped on the first try). Matched from CHRONUS_NEW.
   stop_following_ = true;
 
-  // Debounce window: 800 ms = period_time (~750 ms) + 50 ms safety.
+  // Debounce window: 800 ms, comfortably over one gait cycle (param.yaml
+  // period_time is 500 ms) so it still covers a slower gait that was tuned up.
   // Long enough to let walking_module fully wind down its last step,
   // short enough that a deliberate restart press feels responsive.
   // Bigger window (1200 ms) caused the press to feel "ignored".

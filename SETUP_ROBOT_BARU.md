@@ -7,6 +7,11 @@ salah kalau dibawa mentah-mentah. Dokumen ini memisahkan keduanya.
 Baca bagian 1-3 saja sudah cukup untuk menjalankan. Sisanya untuk kalau ada yang
 aneh.
 
+Khusus untuk parameter walking dan tab Walking di Bascorro Studio, ada dokumen
+terpisah: **`PANDUAN_PARAMETER_WALKING.md`** — mekanisme yang boleh disalin apa
+adanya, nilai mana yang wajib diturunkan ulang per robot, dan urutan verifikasi
+di robot.
+
 ---
 
 ## 1. Langkah cepat

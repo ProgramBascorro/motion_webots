@@ -149,13 +149,21 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
   // Walk-in-WALKING_READY: pose captured when walking is enabled (the WALKING_READY
-  // standing stance). Idle -> hold captured_init_pose_ (no snap to zero pose);
+  // standing stance). Idle -> legs follow the neutral stance of the offsets currently
+  // in force (identical to the captured pose right after the grab, see process());
   // walking -> walking_bias_ (= captured - neutral IK) + gait oscillation, so
   // the stance stays locked to WALKING_READY. capture_init_pose_ triggers the grab
   // on the first process() cycle after onModuleEnable().
   Eigen::MatrixXd captured_init_pose_;
   Eigen::MatrixXd walking_bias_;
   bool capture_init_pose_;
+  // False until a capture has produced a usable bias (the IK can fail). Idle offset
+  // tracking is only meaningful once the bias is trustworthy; otherwise the legs stay
+  // on the frozen captured pose.
+  bool walking_bias_valid_;
+  // Cap on how far a leg joint may move per control cycle while standing still, so a
+  // typed-in offset ramps instead of slamming. Radians per cycle.
+  double idle_track_max_step_;
   Eigen::MatrixXi joint_axis_direction_;
   std::map<std::string, int> joint_table_;
   int walking_state_;
