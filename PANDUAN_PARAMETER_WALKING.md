@@ -1,14 +1,18 @@
 # Panduan: mekanisme parameter walking + layout Bascorro Studio
 
 Catatan penerapan untuk robot berikutnya. Isinya **mekanisme**, bukan angka.
-Nilai `x/y/z_offset` dan kawan-kawannya wajib diturunkan ulang per robot —
-itu urusan `ROBOT1_WALKING_HANDOFF.md` dan `scripts/walking_ready_fk.py`
-(di `CHRONUS_NEW` skrip itu masih bernama `scripts/init_baru_fk.py` — isinya sama).
+Semua yang di bawah ini boleh disalin mentah ke robot lain.
+
+Nilai `x/y/z_offset` dan kawan-kawannya **wajib diturunkan ulang per robot** —
+itu urusan dokumen lain, namanya berbeda tiap branch:
+
+| | `ALPHONSE_NEW` | `CHRONUS_NEW` |
+|---|---|---|
+| Penurunan FK + teori | `ROBOT1_WALKING_HANDOFF.md` | `CLAUDE_ROBOT_HANDOFF.md` §1, §10 |
+| Skrip FK | `scripts/walking_ready_fk.py` | `scripts/init_baru_fk.py` (isi sama) |
 
 Berkas ini sengaja dijaga **identik di semua branch robot**. Kalau memperbaikinya,
-perbaiki di semua branch, jangan bikin salinan yang bercabang.
-
-Semua yang di bawah ini boleh disalin mentah ke robot lain.
+perbaiki di semua branch — jangan bikin salinan yang bercabang.
 
 ---
 
