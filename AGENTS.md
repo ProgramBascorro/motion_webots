@@ -34,7 +34,10 @@ memanaskan servo — mintalah robot digantung/dipegang sebelum uji pertama.
 | Memasang repo ini di robot baru | `SETUP_ROBOT_BARU.md` |
 | Parameter walking, tab Walking di Bascorro Studio | `PANDUAN_PARAMETER_WALKING.md` |
 | Menurunkan nilai `x/y/z_offset` dari page 2, teori FK | `ROBOT1_WALKING_HANDOFF.md` |
-| Serial/OpenCR tidak terdeteksi | `RANGKUMAN_DIAGNOSA_OPENCR.md`, `TROUBLESHOOT_OPENCR_POWER.md` |
+| Serial/OpenCR tidak terdeteksi | `TROUBLESHOOT_OPENCR_POWER.md`, lalu `scripts/op3_docker.sh doctor` |
+
+Tabel ini menyebut berkas yang ada **di branch ini**. Branch robot lain bisa
+punya sebagian saja — periksa dengan `ls *.md` sebelum menyimpulkan hilang.
 
 Bagian di bawah ini adalah konvensi umum ROS 2 dan tetap berlaku untuk hal-hal
 yang tidak menyentuh hardware.

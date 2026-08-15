@@ -2,7 +2,11 @@
 
 Catatan penerapan untuk robot berikutnya. Isinya **mekanisme**, bukan angka.
 Nilai `x/y/z_offset` dan kawan-kawannya wajib diturunkan ulang per robot —
-itu urusan `ROBOT1_WALKING_HANDOFF.md` dan `scripts/walking_ready_fk.py`.
+itu urusan `ROBOT1_WALKING_HANDOFF.md` dan `scripts/walking_ready_fk.py`
+(di `CHRONUS_NEW` skrip itu masih bernama `scripts/init_baru_fk.py` — isinya sama).
+
+Berkas ini sengaja dijaga **identik di semua branch robot**. Kalau memperbaikinya,
+perbaiki di semua branch, jangan bikin salinan yang bercabang.
 
 Semua yang di bawah ini boleh disalin mentah ke robot lain.
 
@@ -305,6 +309,7 @@ Turunkan ulang per robot — **jangan disalin**:
 
 - [ ] `param.yaml` `x/y/z_offset`, `pitch_offset`, `hip_pitch_offset`
       → `scripts/walking_ready_fk.py --yaml <export page 2>`
+      (`scripts/init_baru_fk.py` di `CHRONUS_NEW`)
 - [ ] Fallback di `initialize()` disamakan dengan `param.yaml` hasil di atas
 - [ ] `WALKING_DEFAULT_PARAMS` di `App.jsx` disamakan juga (ingat konversi satuan)
 
