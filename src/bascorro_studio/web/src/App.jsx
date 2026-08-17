@@ -102,11 +102,12 @@ const YOLO_PARAM_KEYS = [
 // <page 2 export> when the page is re-taught, and update param.yaml together with
 // this block.
 const WALKING_DEFAULT_PARAMS = {
-  // init_y_offset is 0 on purpose and is the one value here that is NOT FK-derived:
-  // the walking module leaves the lateral offset out of its reference stance, so this
-  // is extra foot separation while walking only. See the comment block in param.yaml.
+  // init_y_offset is the one value here that is NOT FK-derived: the walking module
+  // leaves the lateral offset out of the stance it derives walking_bias_ from, so this
+  // is extra foot separation on top of page 2 -- applied both standing and walking.
+  // 0.010 is a starting point to tune, not a derived number. See param.yaml.
   init_x_offset: 0.0046,
-  init_y_offset: 0.0,
+  init_y_offset: 0.010,
   init_z_offset: 0.0408,
   init_roll_offset: 0,
   init_pitch_offset: 0.0698,
@@ -142,10 +143,10 @@ const WALKING_PARAM_HELP = {
     risk: "Terlalu besar bisa bikin lutut/ankle bekerja keras dan robot langsung condong. Karena sekarang bergerak saat berdiri juga, pegang robot waktu mencoba nilai baru."
   },
   init_y_offset: {
-    artinya: "Tambahan jarak antar telapak kaki SAAT BERJALAN. Bukan bias kiri-kanan.",
-    fungsi: "Melebarkan jejak langkah di atas stance page 2. Modul walking sengaja tidak memasukkan offset ini ke stance acuannya, jadi inilah satu-satunya offset yang benar-benar mengubah lebar kaki saat gait jalan.",
-    tuning: "Naikkan 0.005 m per percobaan kalau kedua telapak bersenggolan waktu melangkah. Tambahan jarak kira-kira y_offset + 6 mm. Robot ini default 0 karena page 2 sudah mengangkang ~10.4 deg.",
-    risk: "Tidak menggerakkan robot saat berdiri, jadi efeknya baru kelihatan setelah start. Terlalu lebar bikin langkah terhuyung dan boros tenaga."
+    artinya: "Tambahan jarak antar telapak kaki. Bukan bias kiri-kanan — kedua kaki melebar simetris.",
+    fungsi: "Melebarkan pijakan di atas stance page 2, dan nilainya dipakai sama persis saat berdiri maupun saat gait berjalan. Inilah satu-satunya offset yang mengubah lebar kaki; kalau 0, lebar kaki murni ikut page 2.",
+    tuning: "Naikkan 0.005 m per percobaan sampai kedua telapak tidak lagi merapat/bersenggolan waktu melangkah. Tambahan jarak kira-kira y_offset + 6 mm. Nilai 0.010 adalah titik awal, bukan hasil FK — silakan disesuaikan.",
+    risk: "Sejak 2026-08-17 nilai ini ikut bergerak saat berdiri (dilandaikan maks 25 deg/detik), jadi pegang robot waktu mencoba nilai baru. Terlalu lebar bikin langkah terhuyung dan boros tenaga."
   },
   init_z_offset: {
     artinya: "Tinggi badan dasar saat gait walking dihitung.",
@@ -437,7 +438,7 @@ function makeWalkingVersionId() {
 const CLAUDE_WALKING_VERSION_NAME = "dari claude";
 const CLAUDE_WALKING_PARAMS = {
   init_x_offset: 0.0046,
-  init_y_offset: 0.0,
+  init_y_offset: 0.010,
   init_z_offset: 0.0408,
   init_roll_offset: 0,
   init_pitch_offset: 0.0698,

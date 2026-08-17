@@ -116,7 +116,11 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   // Leg joint angles for the standstill (zero-movement) neutral stance the gait
   // oscillates around — used to derive walking_bias_ so the stance locks to the
   // captured WALKING_READY pose. Returns false if the IK has no solution.
-  bool computeNeutralLegAngle(double *neutral);
+  // with_y_offset selects which of the two callers is asking: the bias derivation
+  // passes false (so init_y_offset survives the subtraction and stays a live knob),
+  // the idle tracking passes true (so standing already shows the same foot
+  // separation the gait will use). See computeNeutralLegAngle() for why.
+  bool computeNeutralLegAngle(double *neutral, bool with_y_offset);
   void computeArmAngle(double *arm_angle);
   void sensoryFeedback(const double &rlGyroErr, const double &fbGyroErr, double *balance_angle);
 

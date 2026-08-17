@@ -45,6 +45,9 @@ grep -q 'round(mov_time / smp_time + 1)' \
 grep -q 'payload.period_time > 0' src/bascorro_studio/web/src/TuningPage.jsx && echo "H ok"
 # I  grup Balance sudah dipecah                        -> bagian 3
 grep -q 'Bentuk Gait' src/bascorro_studio/web/src/App.jsx && echo "I ok"
+# J  y_offset hidup, lebar kaki sama berdiri & jalan   -> bagian 2J
+grep -q 'computeNeutralLegAngle(double \*neutral, bool with_y_offset)' \
+  src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp && echo "J ok"
 ```
 
 Untuk **G** (tiga salinan angka) tidak ada grep tunggal — bandingkan bertiga:
@@ -243,6 +246,56 @@ dibanding `calcMinimumJerkTra()`, memicu assertion Eigen, dan **op3_manager mati
 G: samakan `period_time` di `param.yaml`, `initialize()`, dan
 `WALKING_DEFAULT_PARAMS`. H: tolak `period_time <= 0` sebelum publish —
 `updateTimeParam()` membaginya, dan nol membuat semua sudut gait jadi NaN.
+
+### J. `y_offset` mati suri, lalu lebar kaki berubah pas start
+
+**Gejala:** lebar kaki saat berjalan tidak sesuai — kaki terasa merapat ke tengah
+begitu gait mulai atau berhenti — dan menaikkan `y_offset` tidak mengubah apa pun.
+
+**Sebab:** ada dua pemakai `computeNeutralLegAngle()` dan keduanya dulu memakai pose
+yang sama persis.
+
+1. **Penurunan bias** (saat modul di-enable): `walking_bias_ = pose_terkunci −
+   IK(neutral)`. Apa pun yang masuk ke `neutral` **dikurangkan lagi** dari gait,
+   karena gait dihitung `walking_bias_ + IK(gait)`. Jadi selama `y_offset` ada di
+   kedua sisi, dia saling meniadakan: parameternya ada, tapi tidak melakukan apa-apa.
+2. **Pelacakan idle** (saat berdiri): target = `walking_bias_ + IK(neutral)`. Di sini
+   tidak ada pengurangan, jadi apa pun yang masuk ke `neutral` langsung terlihat.
+
+Membuang `y_offset` dari keduanya (perbaikan pertama) menghidupkan knob-nya tapi
+melahirkan gejala kedua: lebar kaki hanya berlaku saat gait jalan, sehingga stance
+melebar tepat saat "start" dan kembali merapat saat "stop".
+
+**Perbaikan:** bedakan kedua pemakai lewat satu argumen.
+
+```cpp
+bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset)
+{
+  const double y_ep = (with_y_offset == true) ? y_offset_ / 2 : 0.0;
+  ep[1] = -y_ep;   // kaki kanan
+  ep[7] =  y_ep;   // kaki kiri
+```
+
+```cpp
+walking_bias_valid_ = computeNeutralLegAngle(neutral_leg, false);  // biar tidak batal sendiri
+idle_tracks_offsets = computeNeutralLegAngle(idle_leg, true);      // biar sama lebarnya saat berdiri
+```
+
+Hasilnya `y_offset` jadi satu-satunya knob lebar kaki, nilainya sama saat berdiri
+maupun berjalan, dan Apply langsung memperlihatkannya (dilandaikan 25 deg/detik)
+tanpa sentakan waktu start.
+
+**Nilainya per robot.** `walking_bias_` sudah menyimpan lebar kaki dari page 2, jadi
+`y_offset` adalah tambahan **di atas** itu — jarak ekstra kira-kira `y_offset + 6 mm`.
+Angka FK dari `walking_ready_fk.py` **bukan** yang dipakai di sini (itu lebar page 2
+yang sudah terwakili bias); mulai dari 0.010 lalu setel sambil melihat robot berdiri.
+
+**Catatan sisa yang sengaja tidak diubah:** `pelvis_offset` juga ditambahkan ke
+`hip_roll` di `computeLegAngle()` tanpa pasangan di `computeNeutralLegAngle()` —
+berbeda dengan `hip_pitch_offset` yang dikompensasi eksplisit. Efeknya melebarkan
+(bukan merapatkan) sekitar 1–1,5° per pinggul dan hanya saat gait jalan. Ini
+perilaku asli OP3/DARwIn-OP, jadi dibiarkan; catat saja kalau suatu saat mengejar
+sisa sentakan lateral di detik pertama.
 
 ---
 

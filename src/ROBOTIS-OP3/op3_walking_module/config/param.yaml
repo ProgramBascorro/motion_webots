@@ -12,13 +12,19 @@
 # after the capture the tracked pose equals the captured one exactly, so enabling the
 # module still causes no jump.
 #
-# y_offset is the exception: computeNeutralLegAngle() leaves it out of the reference
-# stance, so it survives walking_bias_ and is the one knob for foot separation *while
-# walking* -- it does NOT move the robot while standing. It is 0 here on purpose: this
-# robot's page 2 already stands splayed (hip_roll spread ~10.4 deg), and the FK-derived
-# 0.0205 that used to sit here cancelled out completely against the neutral stance, so
-# it never did anything. Keeping 0 reproduces today's gait exactly. Raise it only if the
-# feet clip each other while stepping; extra gap is roughly y_offset + 6 mm.
+# y_offset is the single knob for foot separation. computeNeutralLegAngle() leaves it
+# out of the pose used to derive walking_bias_ -- anything present in both the bias and
+# the gait cancels, which is why the FK-derived 0.0205 that used to sit here never did
+# anything -- but it DOES put it into the pose the legs track while standing. So the
+# stance is exactly as wide standing as it is walking: "start" and "stop" no longer pull
+# the feet toward the centreline, and Apply widens the stance right away (rate limited
+# to 25 deg/s) instead of hiding the change until the first step.
+#
+# The 0.010 below is a starting point, not an FK-derived number: this robot's page 2
+# already stands splayed (hip_roll spread ~10.4 deg) and walking_bias_ keeps that, so
+# this is *extra* gap on top of it -- roughly y_offset + 6 mm between the feet. Tune it
+# from Bascorro Studio (Walking -> Init Pose -> Y offset) with the robot standing and
+# walking_module enabled; 0 restores the pre-2026-08-17 stance exactly.
 #
 # Units here are NOT the units the WalkingParam message carries, which is what
 # Bascorro Studio's Walking tab shows: period_time is ms here / seconds there, and
@@ -31,7 +37,7 @@
 #
 # NOTE: sending "save" on /robotis/walking/command rewrites this file and drops comments.
 x_offset: 0.0046
-y_offset: 0.0
+y_offset: 0.010
 z_offset: 0.0408
 roll_offset: 0
 pitch_offset: 3.9992452331112465

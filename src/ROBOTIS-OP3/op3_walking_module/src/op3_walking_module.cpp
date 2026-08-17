@@ -121,10 +121,10 @@ void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::
   // fallback for a missing/broken param.yaml — loadWalkingParam() overwrites all
   // of these — but a fallback that disagrees with page 2 means the robot stands
   // somewhere else entirely, so it is kept in step with param.yaml.
-  // y stays 0: see computeNeutralLegAngle(), which deliberately leaves the lateral
-  // offset out of the reference stance.
+  // y is not FK-derived: see computeNeutralLegAngle(), which leaves the lateral offset
+  // out of the bias reference so it stays a live foot-separation knob.
   walking_param_.init_x_offset = 0.0046;
-  walking_param_.init_y_offset = 0.0;
+  walking_param_.init_y_offset = 0.010;
   walking_param_.init_z_offset = 0.0408;
   walking_param_.init_roll_offset = 0.0;
   walking_param_.init_pitch_offset = 4.0 * DEGREE2RADIAN;
@@ -522,7 +522,8 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       captured_init_pose_ = goal_position_;
       walking_bias_ = goal_position_;
       double neutral_leg[12];
-      walking_bias_valid_ = computeNeutralLegAngle(neutral_leg);
+      // false: keep init_y_offset out of the bias so it does not cancel itself out.
+      walking_bias_valid_ = computeNeutralLegAngle(neutral_leg, false);
       if (walking_bias_valid_ == true)
       {
         for (int i = 0; i < 12; i++)
@@ -554,10 +555,13 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     // other place they are read, runs solely while walking.
     // Falls back to the frozen pose whenever the bias is not trustworthy (IK failure
     // at capture time) or the IK has no solution for the offsets just entered.
+    // true: unlike the capture above, the idle pose *does* carry init_y_offset, so the
+    // feet stand as far apart as the gait will hold them. Standing and walking then
+    // have the same stance width and "start"/"stop" no longer pull the legs sideways.
     double idle_leg[12];
     bool idle_tracks_offsets = false;
     if (walking_idle == true && walking_bias_valid_ == true)
-      idle_tracks_offsets = computeNeutralLegAngle(idle_leg);
+      idle_tracks_offsets = computeNeutralLegAngle(idle_leg, true);
 
     // The gait pipeline only runs while a gait is actually running. It used to be
     // called every cycle, which cost a full leg IK plus a gyro feedback pass per 8 ms
@@ -1291,7 +1295,7 @@ void WalkingModule::onModuleDisable()
   walking_bias_valid_ = false;
 }
 
-bool WalkingModule::computeNeutralLegAngle(double *neutral)
+bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset)
 {
   // IK of the standing pose with zero swap/move amplitudes — used to derive
   // walking_bias_ so the gait oscillates around the captured WALKING_READY instead
@@ -1299,25 +1303,37 @@ bool WalkingModule::computeNeutralLegAngle(double *neutral)
   updatePoseParam();
 
   double leg_length = op3_kd_->thigh_length_m_ + op3_kd_->calf_length_m_ + op3_kd_->ankle_length_m_;
-  // The lateral offset is deliberately left out of this reference stance. Everything
-  // put in here is subtracted from the gait again through walking_bias_, so an offset
-  // present in both places has no effect on the robot at all. Dropping y_offset here
-  // is what turns it into a real "extra foot separation while walking" knob on top of
-  // the captured page 2 stance. The other offsets stay in: they only set the operating
-  // point the gait oscillation is linearised around — and, since the idle tracking
-  // above reads this same function, they are also what makes x/z/pitch visible while
-  // the robot is just standing.
+  // The lateral offset is the one offset that is treated differently by the two
+  // callers, because it is the one knob for foot separation.
+  //
+  // Everything put into the *bias* reference is subtracted from the gait again
+  // through walking_bias_, so an offset present in both places has no effect on the
+  // robot at all — that is exactly what used to make y_offset inert. So the capture
+  // (with_y_offset == false) leaves it out: what survives is a real "extra foot
+  // separation" on top of the captured page 2 stance.
+  //
+  // The idle tracking passes true instead. It has no such cancellation — it adds this
+  // pose to an already-fixed bias — so including y_offset there puts the same
+  // separation on the robot while it is merely standing. Without that the feet only
+  // spread at the moment "start" is pressed and pull back together on stop, which
+  // reads as the legs closing toward the centreline as soon as the gait ends. Now the
+  // stance width is identical standing and walking, and Apply shows it immediately
+  // (rate limited, like x/z/pitch) instead of hiding it until the first step.
+  //
+  // The other offsets stay in for both callers: they only set the operating point the
+  // gait oscillation is linearised around.
+  const double y_ep = (with_y_offset == true) ? y_offset_ / 2 : 0.0;
   double ep[12];
   // right leg
   ep[0] = x_offset_;
-  ep[1] = 0.0;
+  ep[1] = -y_ep;
   ep[2] = z_offset_ - leg_length;
   ep[3] = -r_offset_ / 2;
   ep[4] = p_offset_;
   ep[5] = -a_offset_ / 2;
   // left leg
   ep[6] = x_offset_;
-  ep[7] = 0.0;
+  ep[7] = y_ep;
   ep[8] = z_offset_ - leg_length;
   ep[9] = r_offset_ / 2;
   ep[10] = p_offset_;
