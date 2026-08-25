@@ -8,8 +8,8 @@
   ros__parameters:
     # OpenVINO model is a DIRECTORY (.xml + .bin + metadata.yaml), not a single
     # file. Relative to the package share dir or an absolute path. Re-export
-    # with: yolo export model=model/v8n.pt format=openvino imgsz=320
-    model_path: "model/v8n_openvino_model"
+    # with: yolo export model=model/ball_yolov8n_best.pt format=openvino imgsz=640
+    model_path: "model/ball_yolov8n_openvino_model"
 
     # OpenVINO carries no task in the way ultralytics auto-detects reliably;
     # set it explicitly. This is a detection model.
@@ -22,9 +22,10 @@
     confidence_threshold: 0.5
     iou_threshold: 0.45
 
-    # MUST match the imgsz the model was exported with (320 here). Re-export to
-    # change it (see model_path comment).
-    imgsz: 320
+    # MUST match the imgsz the model was exported with (640 here — ball_yolov8n
+    # was trained AND exported at 640; its IR input is a static [1,3,640,640]).
+    # Re-export to change it (see model_path comment).
+    imgsz: 640
 
     # OpenVINO runs on the Intel CPU; keep device "cpu" and half false. (FP16 is
     # handled inside the OpenVINO IR, not via this flag.)
@@ -32,16 +33,30 @@
     half: false
     max_detections: 10
 
-    # Model class names to treat as "the ball". The model exposes "Bola-baru".
+    # Model class names to treat as "the ball". ball_yolov8n exposes exactly one
+    # class: "ball" (class 0).
     # If none of these match the model, every class is treated as a ball.
-    target_classes: ["Bola-baru"]
+    target_classes: ["ball"]
 
-    # Inference loop rate (Hz). Always uses the freshest camera frame. Bumped
-    # from 15 → 25 Hz for a sharper head-tracker response: at 15 Hz the head
-    # was chasing a ball position that was already ~67 ms stale. 25 Hz cuts
-    # that to ~40 ms and OpenVINO on the i5-1340P still fits inside the
-    # cpu_affinity=0-3 budget, leaving the walking loop untouched. Lower it
-    # back to 15 (or drop cpu_affinity) if you see CPU thermal throttling.
+    # Inference loop rate (Hz). Always uses the freshest camera frame.
+    #
+    # Sempat diturunkan ke 12 Hz (2026-08-24) karena beban YOLO terlihat
+    # meruntuhkan pembacaan posisi servo dari 125 Hz jadi 0,2 Hz. Itu memang
+    # terukur, tapi DIAGNOSISNYA KELIRU: YOLO cuma memperbesar gejala, bukan
+    # sebabnya. Akarnya ada di penjadwalan USB -- OpenCR full-speed 12 Mbit
+    # menempel di hub yang sama dengan U2D2 dan menggerus byte balasan servo.
+    # Sudah diperbaiki di robotis_controller.cpp (commit 2b76d84); baca alasan
+    # lengkapnya di sana.
+    #
+    # Sesudah akar itu dibereskan, 25 Hz dikembalikan.
+    #
+    # Catatan jujur soal angkanya: model ini terukur ~43 ms/frame (OpenVINO
+    # CPU, imgsz 640), jadi langit-langitnya ~23 FPS. Menyetel 25 di sini tidak
+    # membuatnya 25 Hz -- ia berjalan di langit-langitnya. Node akan bilang
+    # sendiri saat start ("Model ceiling on this machine: NN.N FPS"). Kalau mau
+    # benar-benar 25 Hz, ekspor ulang di 320 px (~4x lebih cepat):
+    #   yolo export model=model/ball_yolov8n_best.pt format=openvino imgsz=320
+    # (lalu setel imgsz: 320 di atas -- input IR sekarang STATIS 640x640)
     detection_rate: 25.0
 
     # Publish an annotated debug image on image_out.
@@ -50,3 +65,8 @@
 
     # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
     enable_at_start: true
+    # Also publish the ball center as geometry_msgs/PointStamped in [0,1] image
+    # coords on this topic (only while a ball is seen), feeding
+    # op3_ball_localization/head_tracking_node in demo.launch.xml. Set "" to
+    # disable. Leave absolute (leading /) so it is global across namespaces.
+    ball_center_topic: "/vision/yolo/ball_center"
