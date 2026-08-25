@@ -70,6 +70,11 @@ class HeadTrackingNode(Node):
         self._head_enable_boot_sec = float(
             self.declare_parameter("head_enable_boot_sec", 5.0).value
         )
+        # Berapa lama kepala boleh dipegang modul LAIN sebelum node ini
+        # merebutnya kembali. Lihat _ctrl_modules_callback.
+        self._module_reclaim_sec = float(
+            self.declare_parameter("module_reclaim_sec", 2.0).value
+        )
 
         # Original OP3 tracker FOV values.
         self._fov_width_rad = math.radians(
@@ -131,6 +136,14 @@ class HeadTrackingNode(Node):
             self._tracker_command_callback,
             10,
         )
+        # Siapa yang sedang memegang sendi kepala. Diterbitkan controller
+        # SETIAP KALI kepemilikan modul berubah.
+        self.create_subscription(
+            JointCtrlModule,
+            "/robotis/present_joint_ctrl_modules",
+            self._ctrl_modules_callback,
+            10,
+        )
 
         self._last_ball_time: Optional[float] = None
         self._last_ball_x: Optional[float] = None
@@ -154,6 +167,10 @@ class HeadTrackingNode(Node):
         self._ball_unused = False
         # False selama belum ada galat sebelumnya yang boleh dipakai suku D.
         self._prev_error_valid = False
+        # Pemilik sendi kepala menurut controller, dan sejak kapan ia bukan
+        # head_control_module.
+        self._head_owner: Optional[str] = None
+        self._head_lost_since: Optional[float] = None
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -242,6 +259,7 @@ class HeadTrackingNode(Node):
             return
 
         now = time.monotonic()
+        self._reclaim_head_if_lost(now)
 
         ball_visible = (
             self._last_ball_time is not None
@@ -367,6 +385,59 @@ class HeadTrackingNode(Node):
             f"offset=({pan_cmd:.3f},{tilt_cmd:.3f})",
             throttle_duration_sec=0.5,
         )
+
+    def _ctrl_modules_callback(self, msg: JointCtrlModule) -> None:
+        """Catat modul mana yang sedang memegang sendi kepala."""
+        owner = None
+        for joint, module in zip(msg.joint_name, msg.module_name):
+            if joint in (self._head_pan_joint, self._head_tilt_joint):
+                owner = module
+                break
+        if owner is None:
+            return
+
+        if owner != self._head_owner:
+            self.get_logger().info(f"[MODUL] sendi kepala kini dipegang: {owner}")
+        self._head_owner = owner
+
+        if owner == self._head_module_name:
+            self._head_lost_since = None
+        elif self._head_lost_since is None:
+            self._head_lost_since = time.monotonic()
+
+    def _reclaim_head_if_lost(self, now: float) -> None:
+        """Rebut kembali kepala kalau ada yang menyapunya secara tidak sengaja.
+
+        Latar belakangnya nyata dan terekam di log robot: satu pesan "ini_pose"
+        ke /robotis/base/ini_pose membuat base_module meminta SELURUH 20 sendi
+        (base_module memang memiliki semuanya), jadi kepala ikut terbawa
+        walaupun yang dimaksud cuma init pose. Sesudah itu head_control_module
+        mati dan SEMUA perintah node ini dibuang diam-diam -- di log manager
+        muncul "Head module is not enable." berulang-ulang. Node ini dulu
+        berhenti mencoba enable sesudah head_enable_boot_sec (5 detik), jadi
+        kepala TIDAK PERNAH kembali sampai operator menekan START lagi.
+        Itulah gejala "di tengah demo tiba-tiba parameternya lain".
+
+        Sengaja TIDAK merebut dari action_module atau walking_module: keduanya
+        memang mengambil kepala dengan sengaja saat menendang atau bangun
+        (SoccerDemo::setModuleToDemo("action_module")), dan SoccerDemo
+        mengembalikannya sendiri sesudah selesai. Yang direbut hanya kalau
+        kepala nyangkut di base_module/none, yang tidak ada yang memulihkan.
+        """
+        if self._head_lost_since is None or self._head_owner is None:
+            return
+        if self._head_owner not in ("base_module", "none", ""):
+            return
+        if (now - self._head_lost_since) < self._module_reclaim_sec:
+            return
+
+        self.get_logger().warn(
+            f"[MODUL] kepala nyangkut di '{self._head_owner}' selama "
+            f"{now - self._head_lost_since:.1f} s -- direbut kembali"
+        )
+        self._ensure_head_module_enabled(force=True)
+        # beri jeda sebelum mencoba lagi kalau rebutannya gagal
+        self._head_lost_since = now
 
     def _publish_offset(self, pan: float, tilt: float) -> None:
         """Terbitkan koreksi RELATIF terhadap goal kepala saat ini."""
