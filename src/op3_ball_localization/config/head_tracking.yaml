@@ -28,7 +28,10 @@ head_tracking_node:
     lock_hold_sec: 2.0
 
     # When no ball is seen, sweep the head through forward + downward positions.
-    # Up-facing angles are intentionally excluded — the ball sits on the floor.
+    # CATATAN: sejak 2026-08-25 baris DEPAN memang menengadah sedikit di atas
+    # cakrawala (-6,9 deg), atas permintaan lapangan. Aslinya sudut menengadah
+    # sengaja dihindari karena bolanya di lantai -- lihat tabel jarak di bawah
+    # untuk tahu persis apa yang ditukar.
     scan_enabled: true
     # Satu titik sapuan per periode ini. Diturunkan 1,8 -> 1,6 bersamaan dengan
     # angle_unit 30 -> 35 deg/s di op3_manager.launch.py: KEDUANYA harus naik
@@ -45,24 +48,36 @@ head_tracking_node:
     scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
     # NOTE on this robot the head_tilt sign for the absolute scan command is
     # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
-    # Kedua sudut ini DINAIKKAN dua kali (2026-08-25) karena kepala masih
-    # terlalu menunduk:  0,25 -> 0,12 -> 0,05  dan  0,55 -> 0,40 -> 0,26.
+    # Kedua sudut ini DINAIKKAN tiga kali (2026-08-25) karena kepala masih
+    # terasa terlalu menunduk:
+    #   depan  0,25 -> 0,12 -> 0,05 -> -0,12
+    #   bawah  0,55 -> 0,40 -> 0,26 ->  0,09
+    # Langkah terakhir mengangkat KEDUANYA 0,17 rad (9,7 deg) sekaligus.
+    # Offset head_tilt di offset.yaml NOL, jadi sudut ini benar-benar sudut
+    # sendi -- bukan salah kalibrasi yang perlu digeser-geser.
     # Dengan setengah-FOV tegak 21,6 deg dan kamera di ketinggian ~40 cm,
     # sudut tunduk d menaruh pusat pandang di 0,4/tan(d) dan tepi BAWAH
     # bingkai di 0,4/tan(d+21,6):
     #                    pusat pandang   tepi bawah (batas dekat)
     #   depan  +14,3 deg      1,6 m           0,52 m   <- asli
     #   depan   +6,9 deg      3,3 m           0,74 m
-    #   depan   +2,9 deg      7,9 m           0,88 m   <- sekarang
+    #   depan   +2,9 deg      7,9 m           0,88 m
+    #   depan   -6,9 deg      (di atas        1,53 m   <- sekarang
+    #                          cakrawala)
     #   bawah  +31,5 deg      0,65 m          0,30 m   <- asli, itu kakinya
     #   bawah  +22,9 deg      0,95 m          0,41 m
-    #   bawah  +14,9 deg      1,50 m          0,54 m   <- sekarang
-    # Tebusannya jujur: batas dekat baris bawah bergeser 0,41 -> 0,54 m, jadi
-    # bola yang lebih dekat dari ~0,5 m tidak lagi masuk bingkai saat menyapu.
-    # Itu jarak menendang, bukan jarak mencari. Kalau ternyata perlu, naikkan
-    # lagi scan_tilt_down_rad -- baris depan tidak usah ikut diubah.
-    scan_tilt_forward_rad: 0.05    # forward tilt (~+3°, hampir rata memandang jauh)
-    scan_tilt_down_rad: 0.26       # down tilt (~+15°, lantai mulai ~0,54 m)
+    #   bawah  +14,9 deg      1,50 m          0,54 m
+    #   bawah   +5,2 deg      4,40 m          0,79 m   <- sekarang
+    #
+    # Tebusannya, dan ini perlu diketahui sebelum bertanding: lantai terdekat
+    # yang masih terlihat SAAT MENYAPU bergeser 0,54 -> 0,79 m, dan baris depan
+    # sekarang menengadah sehingga separuh atas bingkainya berisi dinding, bukan
+    # lapangan. Bola yang menggelinding sampai ke dekat kaki tidak akan ketemu
+    # lewat sapuan -- ia baru ketemu kalau kepala kebetulan sedang melacaknya.
+    # Kalau itu jadi masalah, turunkan LAGI scan_tilt_down_rad saja (baris
+    # bawahlah yang bertugas melihat dekat); baris depan tidak usah ikut.
+    scan_tilt_forward_rad: -0.12   # forward tilt (~-7°, sedikit menengadah)
+    scan_tilt_down_rad: 0.09       # down tilt (~+5°, lantai mulai ~0,79 m)
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2
