@@ -70,3 +70,25 @@
     # op3_ball_localization/head_tracking_node in demo.launch.xml. Set "" to
     # disable. Leave absolute (leading /) so it is global across namespaces.
     ball_center_topic: "/vision/yolo/ball_center"
+
+    # --- kunci SATU bola -----------------------------------------------------
+    # Begitu satu bola terkunci, bola lain DIABAIKAN sampai yang terkunci
+    # benar-benar hilang. Tanpa ini, tiap frame dipilih bola yang paling BESAR,
+    # jadi dua bola berukuran mirip membuat pilihannya bertukar bolak-balik dan
+    # kepala melompat di antara keduanya.
+    #
+    # Yang terkunci diterbitkan ke circle_set MAUPUN ball_center, jadi pelacak
+    # kepala (python) dan BallTracker (C++) tidak bisa berbeda pendapat.
+    # Kalau bola yang terkunci tidak terlihat di suatu frame, frame itu
+    # dilaporkan KOSONG -- bukan diganti bola lain -- sehingga kepala menahan
+    # posisi lewat lock_hold_sec, bukan melompat.
+    single_target: true
+    # Seberapa jauh bola boleh berpindah antar frame dan masih dianggap bola
+    # YANG SAMA. Koordinat ternormalisasi [-1, 1], jadi lebar bingkai = 2,0.
+    # Turunkan kalau dua bola berdekatan masih tertukar; naikkan kalau bola
+    # sering terlepas saat kepala menyapu cepat.
+    target_lock_radius: 0.40
+    # Berapa lama bola terkunci boleh hilang sebelum boleh mengunci bola lain.
+    # Sengaja lebih pendek dari lock_hold_sec (2,0 s) di head_tracking.yaml
+    # supaya detektor sudah mengunci ulang sebelum kepala menyerah dan menyapu.
+    target_lost_sec: 1.5

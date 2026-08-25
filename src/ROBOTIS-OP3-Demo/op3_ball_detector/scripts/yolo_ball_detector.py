@@ -37,6 +37,7 @@ Run under the ``ball_detector_node`` namespace so it publishes on
 ``/ball_detector_node/circle_set`` (see yolo_ball_detector.launch.py).
 """
 
+import math
 import os
 import threading
 
@@ -94,6 +95,28 @@ class YoloBallDetector(Node):
             self.declare_parameter('publish_image', True).value)
         self.detection_frame_id = str(
             self.declare_parameter('detection_frame_id', 'detector').value)
+        # --- kunci SATU bola -------------------------------------------------
+        # Begitu satu bola terpilih, bola lain DIABAIKAN sampai yang terkunci
+        # benar-benar hilang. Tanpa ini, tiap frame dipilih bola yang paling
+        # BESAR, jadi dua bola dengan ukuran mirip membuat pilihan bertukar
+        # bolak-balik dan kepala ikut melompat di antara keduanya.
+        self.single_target = bool(
+            self.declare_parameter('single_target', True).value)
+        # Seberapa jauh bola boleh berpindah antar frame dan masih dianggap
+        # bola YANG SAMA. Satuan koordinat ternormalisasi [-1, 1], jadi lebar
+        # bingkai penuh = 2,0. Kalau kepala sedang menyapu cepat, bola bisa
+        # bergeser cukup jauh dalam satu frame -- itu sebabnya nilainya tidak
+        # kecil. Turunkan kalau dua bola berdekatan masih tertukar.
+        self.target_lock_radius = float(
+            self.declare_parameter('target_lock_radius', 0.40).value)
+        # Berapa lama bola yang terkunci boleh tidak terlihat sebelum node ini
+        # boleh mengunci bola lain. Sengaja sedikit LEBIH PENDEK dari
+        # lock_hold_sec di head_tracking.yaml (2,0 s) supaya detektor sudah
+        # mengunci ulang sebelum kepala menyerah dan mulai menyapu lagi.
+        self.target_lost_sec = float(
+            self.declare_parameter('target_lost_sec', 1.5).value)
+        self._target_xy = None
+        self._target_seen = 0.0
         self.enabled = bool(
             self.declare_parameter('enable_at_start', True).value)
 
@@ -302,6 +325,7 @@ class YoloBallDetector(Node):
 
         height, width = cv_img.shape[:2]
         circles = self._extract_circles(results, width, height)
+        circles = self._select_target(circles)
         self._publish_circles(circles, header)
         self._publish_annotated(results, cv_img, header)
 
@@ -329,6 +353,55 @@ class YoloBallDetector(Node):
         # Largest ball first; downstream picks the circle with the biggest z.
         circles.sort(key=lambda c: c[2], reverse=True)
         return circles
+
+    def _select_target(self, circles):
+        """Kunci satu bola dan abaikan sisanya.
+
+        Mengembalikan daftar berisi 0 atau 1 bola. Yang dikembalikan inilah
+        yang diterbitkan ke circle_set MAUPUN ball_center, jadi pelacak kepala
+        (python) dan BallTracker (C++, memilih lingkaran ber-z terbesar)
+        sama-sama melihat bola yang sama -- tidak bisa berbeda pendapat.
+
+        Kalau bola yang terkunci tidak terlihat di suatu frame, frame itu
+        dilaporkan KOSONG, bukan diganti bola lain. Kepala lalu menahan posisi
+        lewat lock_hold_sec, bukan melompat ke bola lain.
+        """
+        if not self.single_target:
+            return circles
+
+        now = time.monotonic()
+
+        # target lama sudah terlalu lama hilang -> boleh mengunci yang baru
+        if (self._target_xy is not None
+                and (now - self._target_seen) > self.target_lost_sec):
+            self.get_logger().info(
+                'kunci bola dilepas (tidak terlihat %.1f s)'
+                % (now - self._target_seen))
+            self._target_xy = None
+
+        if not circles:
+            return []
+
+        if self._target_xy is None:
+            # circles sudah terurut dari yang paling besar = paling dekat
+            best = circles[0]
+            self._target_xy = (best[0], best[1])
+            self._target_seen = now
+            self.get_logger().info(
+                'kunci bola BARU di (%.2f, %.2f), %d kandidat'
+                % (best[0], best[1], len(circles)))
+            return [best]
+
+        tx, ty = self._target_xy
+        nearest = min(circles, key=lambda c: math.hypot(c[0] - tx, c[1] - ty))
+        if math.hypot(nearest[0] - tx, nearest[1] - ty) <= self.target_lock_radius:
+            self._target_xy = (nearest[0], nearest[1])
+            self._target_seen = now
+            return [nearest]
+
+        # ada bola, tapi tidak ada yang cukup dekat dengan yang terkunci:
+        # itu bola LAIN. Laporkan kosong dan biarkan target kedaluwarsa sendiri.
+        return []
 
     def _publish_circles(self, circles, header):
         msg = CircleSetStamped()
