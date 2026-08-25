@@ -152,6 +152,8 @@ class HeadTrackingNode(Node):
         self._locked = False
         # True hanya selama ada deteksi yang BELUM dipakai jadi perintah.
         self._ball_unused = False
+        # False selama belum ada galat sebelumnya yang boleh dipakai suku D.
+        self._prev_error_valid = False
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -286,6 +288,18 @@ class HeadTrackingNode(Node):
             self._publish_offset(0.0, 0.0)
         self._locked = True
 
+        # SATU deteksi = SATU evaluasi PID. Dulu PID dihitung tiap tick (20 Hz)
+        # sedangkan galatnya cuma berubah tiap deteksi (terukur 8 Hz di robot),
+        # jadi delta_time suku D memakai 0,05 s padahal galatnya butuh 0,125 s
+        # -- suku D jadi 2,5x terlalu besar. Digabung dengan tendangan turunan
+        # di bawah, perintah pertama terukur -12,6 deg untuk galat yang cuma
+        # -10,4 deg, dan kepala mengayun sampai -21,6 deg: LEWAT dari bolanya,
+        # bukan mengunci. Sekarang seluruh PID maju per deteksi, jadi
+        # delta_time-nya memang jarak antar deteksi yang sebenarnya.
+        if not self._ball_unused:
+            return
+        self._ball_unused = False
+
         # Deadzone: ball is within the inner box around image center, hold still.
         # Stops YOLO detection jitter from turning into head oscillation when the
         # ball is stationary.
@@ -293,8 +307,10 @@ class HeadTrackingNode(Node):
             abs(self._last_ball_x) < self._center_deadzone
             and abs(self._last_ball_y) < self._center_deadzone
         ):
-            self._prev_pan_error = 0.0
-            self._prev_tilt_error = 0.0
+            # Jangan simpan galat nol sebagai riwayat: begitu bola keluar
+            # deadzone lagi, selisihnya akan terbaca sebagai lonjakan dan suku
+            # D menendang. Cukup tandai riwayatnya tidak sahih.
+            self._prev_error_valid = False
             return
 
         # Preserve the original OP3 sign convention.
@@ -304,8 +320,17 @@ class HeadTrackingNode(Node):
         delta_time = max(now - self._last_control_time, 1.0 / 240.0)
         self._last_control_time = now
 
-        pan_error_diff = (pan_error - self._prev_pan_error) / delta_time
-        tilt_error_diff = (tilt_error - self._prev_tilt_error) / delta_time
+        # Tendangan turunan: saat bola BARU ketemu, _prev_*_error masih nol
+        # sedangkan galatnya sudah sebesar simpangan bola dari tengah. Selisih
+        # itu bukan gerakan bola, cuma awal pengukuran -- terukur menghasilkan
+        # suku D -9,4 deg melawan suku P yang cuma -3,1 deg. Deteksi pertama
+        # sekarang dijalankan tanpa suku D sama sekali.
+        if self._prev_error_valid:
+            pan_error_diff = (pan_error - self._prev_pan_error) / delta_time
+            tilt_error_diff = (tilt_error - self._prev_tilt_error) / delta_time
+        else:
+            pan_error_diff = 0.0
+            tilt_error_diff = 0.0
 
         self._pan_error_sum += pan_error
         self._tilt_error_sum += tilt_error
@@ -323,6 +348,7 @@ class HeadTrackingNode(Node):
 
         self._prev_pan_error = pan_error
         self._prev_tilt_error = tilt_error
+        self._prev_error_valid = True
 
         pan_cmd *= self._pan_sign
         tilt_cmd *= self._tilt_sign
@@ -332,18 +358,6 @@ class HeadTrackingNode(Node):
 
         if abs(pan_cmd) < self._min_command_rad and abs(tilt_cmd) < self._min_command_rad:
             return
-
-        # SATU deteksi = SATU perintah. Offset ini RELATIF terhadap goal kepala
-        # sekarang, jadi menerbitkan ulang deteksi yang sama menggeser kepala
-        # BERKALI-KALI. Tanpa gerbang ini, begitu detektor berhenti (bola
-        # tertutup kaki, satu frame meleset) loop 20 Hz mengulang koreksi
-        # terakhir sampai lost_timeout habis -- terukur 16 x (-8,8 deg) =
-        # kepala melesat ~140 deg menjauh, persis kebalikan dari mengunci.
-        # PID di atas tetap dihitung tiap tick supaya suku D tidak melompat
-        # saat deteksi berikutnya datang; yang dijarangkan hanya PENERBITANNYA.
-        if not self._ball_unused:
-            return
-        self._ball_unused = False
 
         self._publish_offset(pan_cmd, tilt_cmd)
 
@@ -387,6 +401,7 @@ class HeadTrackingNode(Node):
     def _reset_pid(self) -> None:
         self._prev_pan_error = 0.0
         self._prev_tilt_error = 0.0
+        self._prev_error_valid = False
         self._pan_error_sum = 0.0
         self._tilt_error_sum = 0.0
         self._last_control_time = time.monotonic()

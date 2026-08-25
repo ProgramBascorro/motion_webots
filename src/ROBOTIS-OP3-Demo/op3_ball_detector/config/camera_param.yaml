@@ -1,13 +1,27 @@
 /**:
     ros__parameters:
       video_device: "/dev/video0"
-      framerate: 30.0
+      framerate: 15.0
       io_method: "mmap"
       frame_id: "cam_link"
       pixel_format: "mjpeg2rgb"  # see usb_cam/supported_formats for list of supported formats
       av_device_format: "YUV422P"
-      image_width: 1280
-      image_height: 720
+      # 1280x720 @ 30 FPS DITURUNKAN ke 640x360 @ 15 FPS pada 2026-08-25.
+      #
+      # Bukan soal ketajaman, tapi soal KETERLAMBATAN. Terukur di robot:
+      # gambar sampai ke pelanggan sudah berumur 996 ms, dan deteksi bola
+      # 1241 ms. Kepala jadi mengejar posisi bola satu detik yang lalu --
+      # itulah sebabnya dia tidak pernah benar-benar mengunci.
+      # Sebabnya usb_cam harus membongkar MJPEG 720p lalu memampatkannya lagi
+      # 30 kali sedetik (73 % CPU) sementara YOLO sudah memakan 3,2 inti dari
+      # 8 (load average 9,6). Frame menumpuk di antrean.
+      #
+      # Sesudah diturunkan: usb_cam 73 % -> 13 % CPU, umur gambar 996 -> 170 ms.
+      # Rasio 16:9 SENGAJA dipertahankan supaya fov_width_deg/fov_height_deg
+      # di head_tracking.yaml tetap sahih -- jangan pindah ke 640x480.
+      # Modelnya sendiri mengecilkan gambar ke 640 px, jadi 720p memang mubazir.
+      image_width: 640
+      image_height: 360
       camera_name: "camera"
       camera_info_url: "package://op3_ball_detector/config/camera_info.yaml"
       brightness: -1

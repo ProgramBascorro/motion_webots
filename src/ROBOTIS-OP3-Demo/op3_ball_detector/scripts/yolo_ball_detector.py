@@ -42,7 +42,7 @@ import threading
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.executors import ExternalShutdownException
 
 from ament_index_python.packages import get_package_share_directory
@@ -117,14 +117,26 @@ class YoloBallDetector(Node):
         else:
             self.image_pub = None
 
+        # Antrean gambar KEDALAMAN 1, bukan 5 (qos_profile_sensor_data).
+        # Node ini cuma menyimpan gambar TERBARU (_latest_image ditimpa tiap
+        # callback), jadi antrean yang dalam tidak menambah informasi -- ia
+        # cuma menyimpan gambar BASI. Dan executor rclpy itu satu utas: selama
+        # inferensi (~80 ms) tidak ada callback yang jalan, jadi antrean 5 itu
+        # benar-benar terisi dan callback berikutnya mengolahnya satu per satu
+        # dari yang PALING LAMA. Terukur menyumbang ~0,25 detik umur deteksi.
+        # Kedalaman 1 + best effort = frame lama dibuang di lapisan DDS.
+        image_qos = QoSProfile(
+            depth=1,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
         if self.use_compressed:
             self.image_sub = self.create_subscription(
                 CompressedImage, 'image_in',
-                self._compressed_image_callback, qos_profile_sensor_data)
+                self._compressed_image_callback, image_qos)
         else:
             self.image_sub = self.create_subscription(
-                Image, 'image_in',
-                self._image_callback, qos_profile_sensor_data)
+                Image, 'image_in', self._image_callback, image_qos)
 
         self.enable_sub = self.create_subscription(
             Bool, 'enable', self._enable_callback, 1)
