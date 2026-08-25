@@ -21,6 +21,11 @@ head_tracking_node:
     # Control loop
     control_rate: 20.0
     lost_timeout: 0.8
+    # Sesudah bola terkunci, kepala DITAHAN diam (tidak menyapu) sampai
+    # deteksinya hilang selama ini. Harus lebih besar dari lost_timeout.
+    # Naikkan kalau bola sering tertutup kaki lawan; turunkan kalau kepala
+    # terasa terlalu lama mematung sesudah bolanya benar-benar pergi.
+    lock_hold_sec: 2.0
 
     # When no ball is seen, sweep the head through forward + downward positions.
     # Up-facing angles are intentionally excluded — the ball sits on the floor.
@@ -29,8 +34,17 @@ head_tracking_node:
     scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
     # NOTE on this robot the head_tilt sign for the absolute scan command is
     # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
-    scan_tilt_forward_rad: 0.25    # forward tilt (~+14°, looking a little down)
-    scan_tilt_down_rad: 0.55       # down tilt (~+31°, looking toward floor near the feet)
+    # Kedua sudut ini DINAIKKAN 2026-08-25 (0,25 -> 0,12 dan 0,55 -> 0,40)
+    # karena kepala terlalu menunduk. Dengan setengah-FOV tegak 21,6 deg dan
+    # kamera di ketinggian ~40 cm, sudut tunduk d menaruh titik pusat pandang
+    # di jarak 0,4/tan(d):
+    #   baris depan  +14,3 deg -> pusat ~1,6 m   ||  +6,9 deg -> pusat ~3,3 m
+    #   baris bawah  +31,5 deg -> pusat ~0,65 m  || +22,9 deg -> pusat ~0,95 m
+    # Nilai lama membuat tepi bawah bingkai jatuh di 53 deg = ~0,30 m, yaitu
+    # kaki robot sendiri. Nilai baru masih menutup lantai mulai ~0,5 m tapi
+    # tidak lagi membuang setengah bingkai untuk memandangi kakinya.
+    scan_tilt_forward_rad: 0.12    # forward tilt (~+7°, memandang jauh ke depan)
+    scan_tilt_down_rad: 0.40       # down tilt (~+23°, memandang lantai di depan kaki)
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2

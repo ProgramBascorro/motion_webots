@@ -47,6 +47,14 @@ class HeadTrackingNode(Node):
 
         self._control_rate = float(self.declare_parameter("control_rate", 20.0).value)
         self._lost_timeout = float(self.declare_parameter("lost_timeout", 0.8).value)
+        # Sesudah bola pernah terkunci, jangan buru-buru menyapu lagi kalau
+        # deteksinya cuma putus sekejap. Diukur dari deteksi TERAKHIR, sama
+        # seperti lost_timeout, jadi nilainya harus lebih besar dari itu:
+        # di bawah lost_timeout bolanya masih dilacak seperti biasa, di antara
+        # keduanya kepala DITAHAN diam, di atasnya baru boleh menyapu lagi.
+        self._lock_hold_sec = float(
+            self.declare_parameter("lock_hold_sec", 2.0).value
+        )
         self._scan_enabled = bool(self.declare_parameter("scan_enabled", True).value)
         self._scan_period_sec = float(self.declare_parameter("scan_period_sec", 2.5).value)
         self._scan_pan_rad = float(self.declare_parameter("scan_pan_rad", 0.7).value)
@@ -139,6 +147,11 @@ class HeadTrackingNode(Node):
         self._scan_active = False
         self._last_scan_cmd_time = 0.0
         self._scan_idx = 0
+        # True sejak bola benar-benar dilacak. Dipakai untuk menahan sapuan
+        # selama lock_hold_sec sesudah deteksinya hilang.
+        self._locked = False
+        # True hanya selama ada deteksi yang BELUM dipakai jadi perintah.
+        self._ball_unused = False
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -174,6 +187,8 @@ class HeadTrackingNode(Node):
             self._last_ball_x = None
             self._last_ball_y = None
             self._last_ball_time = None
+            self._locked = False
+            self._ball_unused = False
             self._last_head_enable_time = 0.0
             self._joint_ctrl_modules_sent = False
             self._ensure_head_module_enabled(force=True)
@@ -183,6 +198,8 @@ class HeadTrackingNode(Node):
             self._reset_pid()
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
+            self._locked = False
+            self._ball_unused = False
             # Snap the head to a neutral forward pose so it doesn't keep
             # executing the last SCAN target after the stop.
             neutral = JointState()
@@ -216,6 +233,7 @@ class HeadTrackingNode(Node):
             self._last_ball_x = a * raw_x + (1.0 - a) * self._last_ball_x
             self._last_ball_y = a * raw_y + (1.0 - a) * self._last_ball_y
         self._last_ball_time = time.monotonic()
+        self._ball_unused = True
 
     def _control_loop(self) -> None:
         if not self._active:
@@ -232,7 +250,19 @@ class HeadTrackingNode(Node):
 
         if ball_visible:
             self._track_ball(now)
+        elif (
+            self._locked
+            and self._last_ball_time is not None
+            and (now - self._last_ball_time) < self._lock_hold_sec
+        ):
+            # Bola sempat terkunci lalu deteksinya putus sebentar -- tertutup
+            # kaki, satu frame meleset, bola diam di pinggir bingkai. Kepala
+            # DITAHAN di tempat, tidak menyapu: sekali menyapu kuncinya lepas
+            # dan bolanya baru ketemu lagi satu putaran kemudian.
+            self._reset_pid()
+            self._ensure_head_module_enabled(now)
         else:
+            self._locked = False
             self._reset_pid()
             self._ensure_head_module_enabled(now)  # retry only when idle
             if self._scan_enabled:
@@ -245,6 +275,16 @@ class HeadTrackingNode(Node):
         if self._scan_active:
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
+            # Sapuan meninggalkan trajektori ABSOLUT yang MASIH BERJALAN di
+            # head_control_module -- satu segmen bisa 2,7 detik. Koreksi di
+            # bawah belum tentu jadi diterbitkan (bola sudah di dalam
+            # center_deadzone, atau koreksinya lebih kecil dari min_command),
+            # dan kalau itu terjadi kepala MENERUSKAN sapuannya lalu melewati
+            # bolanya. Offset nol menyetel target = goal sekarang dengan
+            # moving_time 0,1 s, jadi kepala berhenti di tempat begitu bola
+            # terlihat, sebelum PID mulai membetulkan posisinya.
+            self._publish_offset(0.0, 0.0)
+        self._locked = True
 
         # Deadzone: ball is within the inner box around image center, hold still.
         # Stops YOLO detection jitter from turning into head oscillation when the
@@ -293,11 +333,19 @@ class HeadTrackingNode(Node):
         if abs(pan_cmd) < self._min_command_rad and abs(tilt_cmd) < self._min_command_rad:
             return
 
-        msg = JointState()
-        msg.name = [self._head_pan_joint, self._head_tilt_joint]
-        msg.position = [pan_cmd, tilt_cmd]
-        msg.header.stamp = self.get_clock().now().to_msg()
-        self._head_offset_pub.publish(msg)
+        # SATU deteksi = SATU perintah. Offset ini RELATIF terhadap goal kepala
+        # sekarang, jadi menerbitkan ulang deteksi yang sama menggeser kepala
+        # BERKALI-KALI. Tanpa gerbang ini, begitu detektor berhenti (bola
+        # tertutup kaki, satu frame meleset) loop 20 Hz mengulang koreksi
+        # terakhir sampai lost_timeout habis -- terukur 16 x (-8,8 deg) =
+        # kepala melesat ~140 deg menjauh, persis kebalikan dari mengunci.
+        # PID di atas tetap dihitung tiap tick supaya suku D tidak melompat
+        # saat deteksi berikutnya datang; yang dijarangkan hanya PENERBITANNYA.
+        if not self._ball_unused:
+            return
+        self._ball_unused = False
+
+        self._publish_offset(pan_cmd, tilt_cmd)
 
         self.get_logger().info(
             f"[TRACK] norm=({self._last_x_norm:.2f},{self._last_y_norm:.2f}) "
@@ -305,6 +353,14 @@ class HeadTrackingNode(Node):
             f"offset=({pan_cmd:.3f},{tilt_cmd:.3f})",
             throttle_duration_sec=0.5,
         )
+
+    def _publish_offset(self, pan: float, tilt: float) -> None:
+        """Terbitkan koreksi RELATIF terhadap goal kepala saat ini."""
+        msg = JointState()
+        msg.name = [self._head_pan_joint, self._head_tilt_joint]
+        msg.position = [pan, tilt]
+        msg.header.stamp = self.get_clock().now().to_msg()
+        self._head_offset_pub.publish(msg)
 
     def _ensure_scan_mode(self, now: Optional[float] = None) -> None:
         if now is None:
