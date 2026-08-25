@@ -44,7 +44,14 @@ def generate_launch_description():
             # name='op3_manager',
             output='screen',
             parameters=[{
-                'angle_unit': 30.0,
+                # Batas laju kepala, deg/s. Dipakai head_control_module untuk
+                # menghitung moving_time = MAX(1,0 ; |delta| / angle_unit) pada
+                # perintah absolut (sapuan), dan angle_unit * 1,5 pada perintah
+                # offset (pelacakan bola). Dinaikkan 30 -> 35 pada 2026-08-25
+                # supaya kepala lebih gesit; 35 juga nilai bawaan modulnya
+                # sendiri. Harus seiring dengan scan_period_sec di
+                # head_tracking.yaml -- alasannya ada di komentar sana.
+                'angle_unit': 35.0,
                 'gazebo': gazebo_default,
                 'gazebo_robot_name': gazebo_robot_name_default,
                 'offset_file_path': offset_file_path_default,
