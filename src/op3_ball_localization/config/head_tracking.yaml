@@ -1,59 +1,36 @@
 head_tracking_node:
   ros__parameters:
-    # CircleSetStamped topic — same topic the classic Hough detector and
-    # the ported YOLO detector publish. Coordinates are already [-1, +1].
-    ball_center_topic: /ball_detector_node/circle_set
+    # Direct YOLO center tracking
+    ball_center_topic: /vision/yolo/ball_center
 
-    # PID gains. p_gain bumped 0.30 → 0.45 to match the original OP3 default
-    # (each frame the head closes 45 % of the remaining pixel error instead of
-    # 30 %). d_gain stays modest to damp the extra P without overshooting.
-    p_gain: 0.45
+    # PID gains based on the original OP3 tracker
+    p_gain: 0.30
     i_gain: 0.0
     d_gain: 0.045
 
     # Ignore corrections while the ball sits within this fraction of the frame
-    # from center (0.05 = inner 10% square). Shrunk 0.10 → 0.05 so the head
-    # snaps to a re-acquired ball earlier; YOLO jitter is already tamed by the
-    # EMA below.
-    center_deadzone: 0.05
+    # from center (e.g., 0.10 = inner 20% square). Prevents the camera from
+    # hunting when YOLO's bbox center jitters frame-to-frame.
+    center_deadzone: 0.10
 
     # Exponential smoothing on the ball center. 1.0 = no smoothing (raw YOLO),
-    # lower = more smoothing but more lag. Bumped 0.4 → 0.7 (a=0.7 means each
-    # new sample contributes 70 %, effective time constant ~0.5 frames instead
-    # of ~1.5). Cuts ~50 ms of tracking lag while still rejecting single-frame
-    # detection jitter.
-    input_smoothing: 0.7
+    # lower = more smoothing but more lag. 0.4 keeps the response snappy while
+    # rejecting single-frame noise.
+    input_smoothing: 0.4
 
-    # Control loop. Bumped 20 → 25 Hz to match the new YOLO detection_rate so
-    # every fresh detection is consumed the same tick.
-    control_rate: 25.0
+    # Control loop
+    control_rate: 20.0
     lost_timeout: 0.8
-    # Lock-hold: setelah kepala mengunci (lock) bola yang terdeteksi, tahan
-    # posisi kepala selama ini sebelum kembali menyapu (scan) ketika deteksi
-    # sempat hilang. Mencegah kepala langsung ngeloyor scan gara-gara YOLO
-    # drop 1-2 frame — begitu bola terdeteksi kepala mengunci dan diam di situ.
-    # Stickiness efektif ~= lost_timeout + lock_hold_sec (~2.3 s). 0 = nonaktif.
-    lock_hold_sec: 1.5
 
     # When no ball is seen, sweep the head through forward + downward positions.
     # Up-facing angles are intentionally excluded — the ball sits on the floor.
     scan_enabled: true
-    scan_period_sec: 2.5           # seconds per position (move + focus dwell)
-    # Warmup setelah tombol START ditekan: head_control_module masih menyelesaikan
-    # enable-handshake dan membuang command sampai process() cycle pertama mengisi
-    # goal_position_. Selama window ini kepala mengulang target scan pertama tiap
-    # scan_warmup_retry_sec (cepat) supaya langsung bergerak begitu module siap,
-    # bukan nganggur ~5 s. Setelah lewat, kembali ke sweep normal 2.5 s.
-    scan_warmup_sec: 6.0
-    scan_warmup_retry_sec: 0.4
+    scan_period_sec: 1.8           # seconds per position (move + focus dwell) — a bit faster
     scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
-    # Tilted lebih menunduk dari sebelumnya (-0.10/-0.35 → -0.20/-0.50) supaya
-    # YOLO punya peluang lebih besar nangkep bola di lapangan. Diambil arahnya
-    # dari CHRONUS (forward ~14° / down ~31°) tapi tidak verbatim — ALPHONSE
-    # punya mounting kamera yang lebih tinggi, jadi cukup ~12° / ~29° biar
-    # frame masih nyangkut horizon dan kaki sekaligus.
-    scan_tilt_forward_rad: -0.20   # forward/horizon tilt (~-12°, agak menunduk)
-    scan_tilt_down_rad: -0.50      # down tilt (~-29°, fokus ke lapangan dekat kaki)
+    # NOTE on this robot the head_tilt sign for the absolute scan command is
+    # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
+    scan_tilt_forward_rad: 0.25    # forward tilt (~+14°, looking a little down)
+    scan_tilt_down_rad: 0.55       # down tilt (~+31°, looking toward floor near the feet)
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2

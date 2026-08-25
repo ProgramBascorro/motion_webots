@@ -902,6 +902,30 @@ void RobotisController::loadOffset(const std::string path)
   }
 }
 
+// ---------------------------------------------------------------------------
+// Profil loop kontrol. Mati total kecuali env OP3_PROFILE=1 diset, jadi aman
+// ditinggal di kode. Dipakai melacak gerakan tersendat: yang mau dijawab adalah
+// "bulk read gagal karena datanya belum sampai, atau karena waktunya habis di
+// tempat lain?".
+// ---------------------------------------------------------------------------
+static inline double op3_prof_now_ms()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000.0 + ts.tv_nsec * 1e-6;
+}
+
+struct Op3ProfPort
+{
+  long ok = 0, fail = 0;
+  double rx_sum = 0.0, rx_max = 0.0;
+  long avail_sum = 0, avail_max = 0, avail_zero = 0;   // byte menganggur saat Rx mulai
+  long tx_ok = 0, tx_busy = 0, tx_other = 0;           // hasil BulkRead Tx
+  int  last_rx_result = 0;
+  long avail_presw_sum = 0;                            // byte sesaat sebelum sync write
+  long sw_ok = 0, sw_busy = 0, sw_other = 0;           // hasil sync write posisi
+};
+
 void RobotisController::process()
 {
   // avoid duplicated function call
@@ -933,6 +957,54 @@ void RobotisController::process()
   if (DEBUG_PRINT)
     start_time = rclcpp::Clock().now();
 
+  // ---------------------------------------------------------------------------
+  // Port yang isinya HANYA sensor (di ALPHONSE: OpenCR lewat USB CDC, karena
+  // transceiver TTL board-nya mati). Dipisahkan supaya transaksinya bisa
+  // dituntaskan di AWAL siklus -- lihat alasan panjangnya di bawah.
+  // Pada robot yang OpenCR-nya ikut bus servo (satu port, susunan OP3 normal)
+  // himpunan ini KOSONG dan tidak ada perilaku yang berubah.
+  // ---------------------------------------------------------------------------
+  // Berapa siklus sekali port sensor terpisah dibaca. 4 = 31 Hz pada
+  // control_cycle 8 ms; cukup untuk IMU (deteksi jatuh) dan tombol, yang tidak
+  // butuh 125 Hz. Menurunkan laju ini mengurangi rebutan slot USB dengan U2D2.
+  // Terukur, sambil kepala menyapu (rx_ok bulk read servo / laju perubahan
+  // head_pan di /robotis/present_joint_states):
+  //   div 1 ... 34-92 %,  88 Hz
+  //   div 4 ... 77-97 %, 104 Hz   <-- dipakai
+  //   div 8 ... 58-98 %,  96 Hz
+  // Bisa ditimpa saat jalan lewat OP3_SENSOR_DIV.
+  static const int sensor_div = (getenv("OP3_SENSOR_DIV") != NULL)
+                                ? std::max(1, atoi(getenv("OP3_SENSOR_DIV"))) : 4;
+  static long sensor_tick = 0;
+  const bool do_sensor = (sensor_tick++ % sensor_div) == 0;
+
+  static std::map<std::string, Op3ProfPort> prof_port_sensor;
+  static std::set<std::string> sensor_only_ports;
+  static bool sensor_only_scanned = false;
+  if (sensor_only_scanned == false)
+  {
+    sensor_only_scanned = true;
+    for (auto& it : port_to_bulk_read_)
+    {
+      bool has_dxl = false;
+      for (auto& d : robot_->dxls_)
+      {
+        if (d.second != NULL && d.second->port_name_ == it.first)
+        {
+          has_dxl = true;
+          break;
+        }
+      }
+      if (has_dxl == false)
+      {
+        sensor_only_ports.insert(it.first);
+        RCLCPP_INFO(this->get_logger(),
+                    "Port sensor terpisah: %s -- bulk read-nya dijalankan di awal siklus",
+                    it.first.c_str());
+      }
+    }
+  }
+
   sensor_msgs::msg::JointState goal_state;
   sensor_msgs::msg::JointState present_state;
 
@@ -943,18 +1015,121 @@ void RobotisController::process()
   {
     if (gazebo_mode_ == false)
     {
-      // BulkRead Rx
+      // -----------------------------------------------------------------------
+      // Transaksi port sensor terpisah dituntaskan di SINI, di awal siklus,
+      // Rx dan Tx sekaligus -- bukan ikut antre bersama port servo.
+      //
+      // Alasannya bukan soal ROS, tapi soal USB. Di robot ini OpenCR adalah
+      // perangkat full-speed (12 Mbit) yang menempel di hub 480 Mbit yang SAMA
+      // dengan U2D2. Perangkat 12 Mbit di balik hub high-speed memaksa host
+      // memakai split transaction, dan slot itu diambil dari jatah microframe
+      // yang juga dipakai U2D2. Kalau transaksi OpenCR jatuh bersamaan dengan
+      // saat 420 byte balasan 20 servo sedang mengalir masuk, sebagian byte itu
+      // HILANG -- bukan telat, hilang.
+      //
+      // Terukur (loop 125 Hz identik di luar ROS, agar bebas dari dugaan soal
+      // ROS/CPU):
+      //   port OpenCR dibuka tapi tak disentuh ....... 100 %  (420/420 byte)
+      //   disentuh tiap siklus, Tx di akhir .......... 3 %    (~300/420 byte)
+      //   disentuh tiap 2 siklus ..................... 54 %
+      //   disentuh tiap 4 siklus ..................... 78 %
+      //   disentuh tiap 8 siklus ..................... 90 %
+      //   disentuh tiap siklus, transaksi di AWAL .... 100 %  <-- yang dipakai
+      //
+      // Pola "tiap N siklus" membuktikan sebabnya: kegagalan jatuh persis pada
+      // siklus yang menyentuh OpenCR. Memindahkan transaksinya ke awal siklus
+      // menaruh lalu lintas USB-nya di jendela mati -- saat itu balasan servo
+      // siklus sebelumnya sudah lama lengkap, dan permintaan berikutnya belum
+      // dikirim -- sehingga jendela balasan servo bersih sepenuhnya.
+      //
+      // Kalau ini dikembalikan ke satu loop bersama port servo, gerakan kepala
+      // akan patah-patah lagi.
+      // -----------------------------------------------------------------------
       for (auto& it : port_to_bulk_read_)
       {
-        robot_->ports_[it.first]->setPacketTimeout(0.0);
-        if(DEBUG_PRINT)
+        if (sensor_only_ports.count(it.first) == 0 || do_sensor == false)
+          continue;
+        robot_->ports_[it.first]->setPacketTimeout(1.0);
+        if (getenv("OP3_PROFILE") != NULL)
         {
-          int result = it.second->rxPacket();
-          if(result != COMM_SUCCESS)
-            RCLCPP_ERROR(this->get_logger(), "Bulk Read Fail : %s", it.first.c_str());
+          Op3ProfPort &pp = prof_port_sensor[it.first];
+          const int av = robot_->ports_[it.first]->getBytesAvailable();
+          pp.avail_sum += av;
+          if (av > pp.avail_max) pp.avail_max = av;
+          if (av == 0) pp.avail_zero++;
+          if (it.second->rxPacket() == COMM_SUCCESS) pp.ok++; else pp.fail++;
         }
         else
           it.second->rxPacket();
+        it.second->txPacket();
+      }
+
+      static const bool prof_on = (getenv("OP3_PROFILE") != NULL);
+      static std::map<std::string, Op3ProfPort> prof_port;
+      static double prof_prev_tx_ms = 0.0;
+      static double prof_report_ms  = 0.0;
+      static long   prof_cycles     = 0;
+      static double prof_gap_sum = 0.0, prof_gap_min = 1e9;
+      static double prof_proc_sum = 0.0, prof_proc_max = 0.0;
+      static double prof_mod_sum = 0.0, prof_mod_max = 0.0;
+      static double prof_sw_sum = 0.0, prof_sw_max = 0.0;
+      const double prof_t_begin = prof_on ? op3_prof_now_ms() : 0.0;
+      if (prof_on && prof_prev_tx_ms > 0.0)
+      {
+        const double gap = prof_t_begin - prof_prev_tx_ms;
+        prof_gap_sum += gap;
+        if (gap < prof_gap_min) prof_gap_min = gap;
+      }
+
+      // BulkRead Rx
+      for (auto& it : port_to_bulk_read_)
+      {
+        if (sensor_only_ports.count(it.first) != 0)
+          continue;   // sudah diurus di awal siklus
+
+        // Anggaran tunggu Rx. Nilainya KECIL dengan sengaja -- ini bukan sekadar
+        // "berapa lama boleh menunggu", tapi penentu apakah loop ini stabil.
+        //
+        // Bulk read di sini dipipa: permintaan dikirim di AKHIR process(),
+        // balasannya dibaca di AWAL process() berikutnya. Jadi waktu yang
+        // dipunyai servo untuk menjawab = control_cycle - lama process(). Kalau
+        // Rx gagal lalu menunggu lama, process() jadi panjang, jeda untuk
+        // balasan BERIKUTNYA menyusut, dan kegagalan berikutnya jadi lebih
+        // mungkin. Umpan balik positif: sekali tersandung, loop terkunci gagal.
+        //
+        // Terukur di robot ini (2026-08-25, OP3_PROFILE=1): dengan timeout 3 ms
+        // manager mulai sehat (rx_ok 20%) lalu RUNTUH ke 0% dalam ~8 detik dan
+        // tidak pernah pulih. Sebabnya persis di atas: 3 ms tunggu + 0,15 ms
+        // hitung = jeda tinggal 4,87 ms, sedangkan balasan 20 servo baru
+        // lengkap ~4,5 ms setelah write() (3,88 ms di kabel + antrean tulis
+        // sync-write yang mendahuluinya). Sisa 0,4 ms -- terlalu tipis.
+        //
+        // Dengan 1 ms: jeda 6,85 ms lawan kebutuhan 4,5 ms. Kegagalan sesekali
+        // tetap termaafkan, tapi tidak bisa lagi memakan jeda sampai terkunci.
+        //
+        // Kalau ini dinaikkan lagi, gerakan kepala akan patah-patah lagi.
+        // Bukti tandingan yang penting: loop 125 Hz yang sama persis di luar ROS
+        // (scripts/op3_bus_loop.py) berhasil 100% selama 20 detik -- bus, servo,
+        // U2D2, dan latency_timer=1 semuanya SEHAT. Yang salah cuma anggaran
+        // waktunya.
+        robot_->ports_[it.first]->setPacketTimeout(1.0);
+        const int prof_avail = prof_on ? robot_->ports_[it.first]->getBytesAvailable() : 0;
+        const double prof_t_rx = prof_on ? op3_prof_now_ms() : 0.0;
+        int result = it.second->rxPacket();
+        if (prof_on)
+        {
+          Op3ProfPort &pp = prof_port[it.first];
+          pp.avail_sum += prof_avail;
+          if (prof_avail > pp.avail_max) pp.avail_max = prof_avail;
+          if (prof_avail == 0) pp.avail_zero++;
+          pp.last_rx_result = result;
+          const double d = op3_prof_now_ms() - prof_t_rx;
+          pp.rx_sum += d;
+          if (d > pp.rx_max) pp.rx_max = d;
+          if (result == COMM_SUCCESS) pp.ok++; else pp.fail++;
+        }
+        if (DEBUG_PRINT && result != COMM_SUCCESS)
+          RCLCPP_ERROR(this->get_logger(), "Bulk Read Fail : %s", it.first.c_str());
       }
 
       // -> save to robot->dxls_[]->dxl_state_
@@ -1046,6 +1221,17 @@ void RobotisController::process()
         fprintf(stderr, "(%2.6f) BulkRead Rx & update state \n", time_duration.nanoseconds() * 0.000001);
       }
 
+      const double prof_t_mod_end = prof_on ? op3_prof_now_ms() : 0.0;
+      if (prof_on)
+      {
+        for (auto& it : port_to_bulk_read_)
+        {
+          if (sensor_only_ports.count(it.first) != 0)
+            continue;   // port sensor punya baris laporannya sendiri
+          prof_port[it.first].avail_presw_sum += robot_->ports_[it.first]->getBytesAvailable();
+        }
+      }
+
       // SyncWrite
       queue_mutex_.lock();
 
@@ -1111,7 +1297,16 @@ void RobotisController::process()
       for (auto& it : port_to_sync_write_position_)
       {
         if (it.second != NULL)
-          it.second->txPacket();
+        {
+          int r = it.second->txPacket();
+          if (prof_on)
+          {
+            Op3ProfPort &pp = prof_port[it.first];
+            if (r == COMM_SUCCESS)        pp.sw_ok++;
+            else if (r == COMM_PORT_BUSY) pp.sw_busy++;
+            else                          pp.sw_other++;
+          }
+        }
       }
       for (auto& it : port_to_sync_write_velocity_)
       {
@@ -1126,9 +1321,89 @@ void RobotisController::process()
 
       queue_mutex_.unlock();
 
+      const double prof_t_sw_end = prof_on ? op3_prof_now_ms() : 0.0;
+
       // BulkRead Tx
       for (auto& it : port_to_bulk_read_)
-        it.second->txPacket();
+      {
+        if (sensor_only_ports.count(it.first) != 0)
+          continue;   // sudah dikirim di awal siklus
+
+        int tx_result = it.second->txPacket();
+        if (prof_on)
+        {
+          Op3ProfPort &pp = prof_port[it.first];
+          if (tx_result == COMM_SUCCESS)         pp.tx_ok++;
+          else if (tx_result == COMM_PORT_BUSY)  pp.tx_busy++;
+          else                                   pp.tx_other++;
+        }
+      }
+
+      if (prof_on)
+      {
+        const double now = op3_prof_now_ms();
+        prof_prev_tx_ms = now;
+        prof_cycles++;
+
+        const double mod = prof_t_mod_end - prof_t_begin;   // Rx + hitung modul
+        const double sw  = prof_t_sw_end  - prof_t_mod_end; // seluruh sync write
+        const double pr  = now - prof_t_begin;              // satu process()
+        prof_mod_sum += mod; if (mod > prof_mod_max) prof_mod_max = mod;
+        prof_sw_sum  += sw;  if (sw  > prof_sw_max)  prof_sw_max  = sw;
+        prof_proc_sum += pr; if (pr > prof_proc_max) prof_proc_max = pr;
+
+        if (prof_report_ms == 0.0)
+          prof_report_ms = now;
+        else if (now - prof_report_ms >= 2000.0)
+        {
+          const double n = (double) prof_cycles;
+          std::string line;
+          for (auto& pit : prof_port)
+          {
+            const Op3ProfPort &pp = pit.second;
+            const double tot = (double)(pp.ok + pp.fail);
+            char buf[256];
+            std::string tail = pit.first.substr(pit.first.find_last_of('/') + 1);
+            snprintf(buf, sizeof(buf),
+                     " | %.12s rx_ok=%.1f%% rx_avg=%.2f avail@rx=%ld avail@sw=%ld kosong=%.0f%% err=%d brtx[ok=%ld busy=%ld lain=%ld] swtx[ok=%ld busy=%ld lain=%ld]",
+                     tail.c_str(), tot > 0 ? 100.0 * pp.ok / tot : 0.0,
+                     tot > 0 ? pp.rx_sum / tot : 0.0,
+                     tot > 0 ? (long)(pp.avail_sum / (long)tot) : 0L,
+                     tot > 0 ? (long)(pp.avail_presw_sum / (long)tot) : 0L,
+                     tot > 0 ? 100.0 * pp.avail_zero / tot : 0.0, pp.last_rx_result,
+                     pp.tx_ok, pp.tx_busy, pp.tx_other,
+                     pp.sw_ok, pp.sw_busy, pp.sw_other);
+            line += buf;
+          }
+          for (auto& pit : prof_port_sensor)
+          {
+            const Op3ProfPort &pp = pit.second;
+            const double tot = (double)(pp.ok + pp.fail);
+            char buf[160];
+            std::string tail = pit.first.substr(pit.first.find_last_of('/') + 1);
+            snprintf(buf, sizeof(buf), " | %.12s(sensor) rx_ok=%.1f%% avail=%ld",
+                     tail.c_str(), tot > 0 ? 100.0 * pp.ok / tot : 0.0,
+                     tot > 0 ? (long)(pp.avail_sum / (long)tot) : 0L);
+            line += buf;
+          }
+          RCLCPP_INFO(this->get_logger(),
+                      "[PROF] siklus=%ld/dtk proc_avg=%.2f proc_max=%.2f mod_avg=%.2f mod_max=%.2f sw_avg=%.2f sw_max=%.2f jeda_avg=%.2f jeda_min=%.2f%s",
+                      (long)(n / ((now - prof_report_ms) / 1000.0)),
+                      prof_proc_sum / n, prof_proc_max,
+                      prof_mod_sum / n, prof_mod_max,
+                      prof_sw_sum / n, prof_sw_max,
+                      prof_gap_sum / n, prof_gap_min, line.c_str());
+
+          prof_report_ms = now;
+          prof_cycles = 0;
+          prof_gap_sum = 0.0; prof_gap_min = 1e9;
+          prof_proc_sum = 0.0; prof_proc_max = 0.0;
+          prof_mod_sum = 0.0; prof_mod_max = 0.0;
+          prof_sw_sum = 0.0; prof_sw_max = 0.0;
+          for (auto& pit : prof_port) pit.second = Op3ProfPort();
+          for (auto& pit : prof_port_sensor) pit.second = Op3ProfPort();
+        }
+      }
 
       if (DEBUG_PRINT)
       {
@@ -1190,10 +1465,50 @@ void RobotisController::process()
   {
     if(gazebo_mode_ == false)
     {
+      // Port sensor terpisah: Rx+Tx dituntaskan di awal siklus. Alasan lengkap
+      // ada di cabang MotionModuleMode di atas (split transaction USB memakan
+      // byte balasan servo kalau keduanya bertabrakan waktu).
+      for (auto& it : port_to_bulk_read_)
+      {
+        if (sensor_only_ports.count(it.first) == 0 || do_sensor == false)
+          continue;
+        robot_->ports_[it.first]->setPacketTimeout(1.0);
+        it.second->rxPacket();
+        it.second->txPacket();
+      }
+
       // BulkRead Rx
       for (auto& it : port_to_bulk_read_)
       {
-        robot_->ports_[it.first]->setPacketTimeout(0.0);
+        if (sensor_only_ports.count(it.first) != 0)
+          continue;   // sudah diurus di awal siklus
+
+        // Anggaran tunggu Rx. Nilainya KECIL dengan sengaja -- ini bukan sekadar
+        // "berapa lama boleh menunggu", tapi penentu apakah loop ini stabil.
+        //
+        // Bulk read di sini dipipa: permintaan dikirim di AKHIR process(),
+        // balasannya dibaca di AWAL process() berikutnya. Jadi waktu yang
+        // dipunyai servo untuk menjawab = control_cycle - lama process(). Kalau
+        // Rx gagal lalu menunggu lama, process() jadi panjang, jeda untuk
+        // balasan BERIKUTNYA menyusut, dan kegagalan berikutnya jadi lebih
+        // mungkin. Umpan balik positif: sekali tersandung, loop terkunci gagal.
+        //
+        // Terukur di robot ini (2026-08-25, OP3_PROFILE=1): dengan timeout 3 ms
+        // manager mulai sehat (rx_ok 20%) lalu RUNTUH ke 0% dalam ~8 detik dan
+        // tidak pernah pulih. Sebabnya persis di atas: 3 ms tunggu + 0,15 ms
+        // hitung = jeda tinggal 4,87 ms, sedangkan balasan 20 servo baru
+        // lengkap ~4,5 ms setelah write() (3,88 ms di kabel + antrean tulis
+        // sync-write yang mendahuluinya). Sisa 0,4 ms -- terlalu tipis.
+        //
+        // Dengan 1 ms: jeda 6,85 ms lawan kebutuhan 4,5 ms. Kegagalan sesekali
+        // tetap termaafkan, tapi tidak bisa lagi memakan jeda sampai terkunci.
+        //
+        // Kalau ini dinaikkan lagi, gerakan kepala akan patah-patah lagi.
+        // Bukti tandingan yang penting: loop 125 Hz yang sama persis di luar ROS
+        // (scripts/op3_bus_loop.py) berhasil 100% selama 20 detik -- bus, servo,
+        // U2D2, dan latency_timer=1 semuanya SEHAT. Yang salah cuma anggaran
+        // waktunya.
+        robot_->ports_[it.first]->setPacketTimeout(1.0);
         it.second->rxPacket();
       }
 
@@ -1267,7 +1582,11 @@ void RobotisController::process()
 
       // BulkRead Tx
       for (auto& it : port_to_bulk_read_)
+      {
+        if (sensor_only_ports.count(it.first) != 0)
+          continue;   // sudah dikirim di awal siklus
         it.second->txPacket();
+      }
     }
   }
 
