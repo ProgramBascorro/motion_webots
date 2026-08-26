@@ -93,6 +93,9 @@ void SoccerDemo::setNode(rclcpp::Node::SharedPtr node)
     ball_tracker_.setNode(node);
     ball_follower_.setNode(node);
     head_tracker_cmd_pub_ = node_->create_publisher<std_msgs::msg::String>("/ball_tracker/command", 10);
+    motion_index_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
+    rgb_led_pub_ = node_->create_publisher<robotis_controller_msgs::msg::SyncWriteItem>("/robotis/sync_write_item", 10);
+    debug_text_pub_ = node_->create_publisher<std_msgs::msg::String>("/debug_text", 10);
   }
   else
   {
@@ -840,11 +843,34 @@ void SoccerDemo::playMotion(int motion_index)
     return;
   }
 
-  auto motion_index_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/robotis/action/page_num", 10);
+  // Publisher ANGGOTA, bukan sekali-pakai.
+  //
+  // Versi lama membuat publisher di sini lalu langsung publish, dan pesan
+  // PERTAMA-nya hilang: kenalan DDS dengan op3_action_module belum selesai
+  // ketika publish dipanggil, sehingga tidak ada penerima yang cocok. Terekam
+  // di robot 2026-08-26 -- sesudah pemicu menyala, playMotion(LeftKick=104)
+  // TIDAK meninggalkan jejak apa pun di action_module (callback-nya selalu
+  // mencetak "Succeed"/"Failed"/"not enabled", jadi diamnya berarti pesannya
+  // memang tidak pernah tiba), lalu playMotion(Ceremony=17) dua detik kemudian
+  // berhasil -- publisher kedua sudah kebagian hasil discovery yang pertama.
+  // Dari luar robot terlihat "melompat ke gerakan lain": yang jalan cuma
+  // ceremony, tendangannya tidak pernah dimainkan.
+  //
+  // Dibuat sekali di setNode(), jauh sebelum tombol START ditekan, jadi saat
+  // dipakai discovery-nya sudah lama selesai.
+  if (motion_index_pub_ == nullptr)
+  {
+    RCLCPP_ERROR(rclcpp::get_logger("SoccerDemo"), "motion_index_pub_ belum dibuat");
+    return;
+  }
+
   std_msgs::msg::Int32 motion_msg;
   motion_msg.data = motion_index;
-
   motion_index_pub_->publish(motion_msg);
+
+  RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"),
+              "mainkan halaman aksi %d (penerima: %zu)",
+              motion_index, motion_index_pub_->get_subscription_count());
 }
 
 void SoccerDemo::setRGBLED(int blue, int green, int red)
@@ -855,7 +881,9 @@ void SoccerDemo::setRGBLED(int blue, int green, int red)
     return;
   }
 
-  auto rgb_led_pub_ = node_->create_publisher<robotis_controller_msgs::msg::SyncWriteItem>("/robotis/sync_write_item", 10);
+  if (rgb_led_pub_ == nullptr)
+    return;
+
   int led_full_unit = 0x1F;
   int led_value = (blue & led_full_unit) << 10 | (green & led_full_unit) << 5 | (red & led_full_unit);
   robotis_controller_msgs::msg::SyncWriteItem syncwrite_msg;
@@ -903,11 +931,13 @@ void SoccerDemo::sendDebugTopic(const std::string &msgs)
     return;
   }
 
-  auto test_pub_ = node_->create_publisher<std_msgs::msg::String>("/debug_text", 10);
+  if (debug_text_pub_ == nullptr)
+    return;
+
   std_msgs::msg::String debug_msg;
   debug_msg.data = msgs;
 
-  test_pub_->publish(debug_msg);
+  debug_text_pub_->publish(debug_msg);
 }
 
 }

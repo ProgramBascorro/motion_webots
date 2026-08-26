@@ -111,6 +111,14 @@ class SoccerDemo : public OPDemo
   BallFollower ball_follower_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_data_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_tracker_cmd_pub_;
+  // Publisher ANGGOTA, dibuat sekali di setNode(). Bukan gaya penulisan:
+  // publisher sekali-pakai yang dibuat lalu langsung publish di dalam satu
+  // fungsi kehilangan pesan PERTAMANYA, karena kenalan DDS dengan subscriber
+  // belum selesai saat publish dipanggil. Itulah yang membuat halaman
+  // tendangan tidak pernah jalan -- lihat catatan di playMotion().
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;
+  rclcpp::Publisher<robotis_controller_msgs::msg::SyncWriteItem>::SharedPtr rgb_led_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr debug_text_pub_;
 
   // rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
   // rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;
