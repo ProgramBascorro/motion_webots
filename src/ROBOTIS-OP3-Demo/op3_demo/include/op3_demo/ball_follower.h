@@ -88,6 +88,34 @@ class BallFollower // : public rclcpp::Node
   //   -1  head_tilt POSITIF berarti menunduk  (ALPHONSE)
   // Lihat penjelasan panjang di processFollowing() pada .cpp.
   double head_tilt_sign_;
+  // Pemicu tendangan berdasarkan sudut SERVO head_pan -- diukur langsung di
+  // robot oleh operator, dalam satuan yang dibaca Dynamixel/Studio (0..360,
+  // tengah 180). Bola di KANAN + kepala menoleh kanan sampai servo ~156-158
+  // -> tendang kaki kanan; bola di KIRI + servo ~182-184 -> kaki kiri.
+  //
+  // Konversi: XM430/MX-28 memetakan 0 rad ke nilai 2048 = 180 derajat servo,
+  // dan 4096 langkah menutup 360 derajat, jadi
+  //     servo_deg = pusat + arah * (head_pan dalam derajat).
+  // head_pan positif = menoleh KIRI, dan angka operator memang > 180 untuk
+  // kiri, jadi arah = +1. Keduanya tetap parameter kalau servo dipasang
+  // terbalik atau offset-nya diubah.
+  double kick_pan_right_min_deg_;
+  double kick_pan_right_max_deg_;
+  double kick_pan_left_min_deg_;
+  double kick_pan_left_max_deg_;
+  double head_pan_servo_center_deg_;
+  double head_pan_servo_dir_;
+  // Bola harus sedekat ini juga sebelum jendela pan boleh menendang.
+  // Jendela KIRI (servo 182-184 = +2..+4 derajat) duduk hampir di tengah,
+  // yaitu sudut leher yang WAJAR saat robot masih berjalan menuju bola yang
+  // jauh -- tanpa pagar ini robot bisa menendang angin dari 2 meter. Nilainya
+  // 0,54 m, jarak kamera-ke-bola yang diukur operator bersamaan dengan sudut
+  // servo di atas. Besarkan kalau ingin jendela pan berdiri sepenuhnya sendiri.
+  double kick_pan_max_distance_;
+  // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
+  // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang
+  // angka besar bikin pemicunya tidak pernah penuh -- turunkan kalau begitu.
+  int kick_ready_count_;
   const int NOT_FOUND_THRESHOLD;
   const double FOV_WIDTH;
   const double FOV_HEIGHT;
@@ -102,6 +130,12 @@ class BallFollower // : public rclcpp::Node
   const double SPOT_FB_OFFSET;
   const double SPOT_RL_OFFSET;
   const double SPOT_ANGLE_OFFSET;
+
+  // Sudut servo head_pan (0..360, tengah 180) dari sudut sendi saat ini.
+  double headPanServoDeg() const;
+  // OnRight / OnLeft kalau servo head_pan sedang berada di salah satu jendela
+  // tendang, OutOfRange kalau tidak.
+  int kickFootFromHeadPan() const;
 
   void currentJointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void setWalkingCommand(const std::string &command);

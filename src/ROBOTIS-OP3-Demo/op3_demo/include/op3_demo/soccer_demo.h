@@ -135,6 +135,11 @@ class SoccerDemo : public OPDemo
   int wait_count_;
   bool on_following_ball_;
   bool on_tracking_ball_;
+  // Niat OPERATOR: true sejak tombol START ditekan sampai ditekan lagi.
+  // Sengaja terpisah dari on_following_ball_, yang dinolkan sendiri oleh
+  // handleKick()/handleFallen() padahal robot masih jalan -- kalau tombol
+  // memakai flag itu, tekanan kedua malah MENYALAKAN lagi, bukan mematikan.
+  bool soccer_requested_;
   bool restart_soccer_;
   bool start_following_;
   bool stop_following_;

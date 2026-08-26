@@ -31,6 +31,7 @@ SoccerDemo::SoccerDemo()
     DEBUG_PRINT(false),
     wait_count_(0),
     on_following_ball_(false),
+    soccer_requested_(false),
     on_tracking_ball_(false),
     restart_soccer_(false),
     start_following_(false),
@@ -129,6 +130,7 @@ void SoccerDemo::setDemoDisable()
 
   enable_ = false;
   wait_count_ = 0;
+  soccer_requested_ = false;
   on_following_ball_ = false;
   on_tracking_ball_ = false;
   restart_soccer_ = false;
@@ -228,7 +230,9 @@ void SoccerDemo::process()
       if (restart_soccer_ == true)
       {
         restart_soccer_ = false;
-        startSoccerMode();
+        // Hanya kalau operator memang belum mematikan demo.
+        if (soccer_requested_ == true)
+          startSoccerMode();
         break;
       }
 
@@ -503,7 +507,14 @@ void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr ms
 
   if (msg->data == "start")
   {
-    if (on_following_ball_ == true)
+    // Pakai soccer_requested_, BUKAN on_following_ball_. handleKick() dan
+    // handleFallen() menolkan on_following_ball_ padahal robot masih hidup,
+    // dan handleKick() memblokir loop demo 4 detik lebih (dua sleep 2 detik +
+    // gerakan), jadi tekanan tombol saat menendang baru diproses SESUDAHNYA --
+    // saat itu on_following_ball_ sudah false, sehingga tekanan yang dimaksud
+    // "matikan" malah menyalakan lagi. Itu persis gejala "dipencet lagi tapi
+    // robot tidak mati".
+    if (soccer_requested_ == true)
     {
       stopSoccerMode();
     }
@@ -530,7 +541,7 @@ void SoccerDemo::demoCommandCallback(const std_msgs::msg::String::SharedPtr msg)
 
   if (msg->data == "start")
   {
-    if (on_following_ball_ == true)
+    if (soccer_requested_ == true)
     {
       stopSoccerMode();
     }
@@ -589,6 +600,7 @@ void SoccerDemo::startSoccerMode()
     return;
 
   is_start_soccer_running_ = true;
+  soccer_requested_ = true;
 
   // Switch the controller to walking_module FIRST. This is the slow path
   // (service call, ~100-300 ms) so we get it underway before we tell the
@@ -638,6 +650,14 @@ void SoccerDemo::stopSoccerMode()
     cmd.data = "stop";
     head_tracker_cmd_pub_->publish(cmd);
   }
+
+  soccer_requested_ = false;
+  // Batalkan juga restart otomatis yang dijadwalkan handleKick(). Tanpa ini,
+  // menekan tombol tepat sesudah menendang memang menghentikan jalan, lalu
+  // process() menyalakannya lagi sendiri pada tick berikutnya -- robot
+  // terlihat "tidak mau mati".
+  restart_soccer_ = false;
+  start_following_ = false;
 
   on_following_ball_ = false;
   on_tracking_ball_ = false;
@@ -708,8 +728,18 @@ void SoccerDemo::handleKick()
     return;
 
   // kick motion
-  ball_follower_.decideBallPositin(ball_tracker_.getPanOfBall(), ball_tracker_.getTiltOfBall());
+  //
+  // Kaki sudah diputuskan SAAT pemicu menyala di processFollowing(), waktu
+  // kepala masih memegang bola. Di titik ini kepala sudah diserahkan ke
+  // action_module dan sudah lewat 2 detik, jadi menghitung ulang dari sudut
+  // leher sekarang membaca posisi kepala milik GERAKAN, bukan posisi bola.
+  // decideBallPositin() tinggal jadi cadangan kalau belum ada keputusan.
   int ball_position = ball_follower_.getBallPosition();
+  if (ball_position != BallFollower::OnRight && ball_position != BallFollower::OnLeft)
+  {
+    ball_follower_.decideBallPositin(ball_tracker_.getPanOfBall(), ball_tracker_.getTiltOfBall());
+    ball_position = ball_follower_.getBallPosition();
+  }
   if(ball_position == BallFollower::NotFound || ball_position == BallFollower::OutOfRange)
   {
     on_following_ball_ = false;
