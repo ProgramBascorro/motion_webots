@@ -266,7 +266,17 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // head_tilt_sign_ = -1 mengembalikan sudutnya ke konvensi yang diasumsikan
   // rumus. Setel kick_head_tilt_sign := 1.0 untuk robot yang masih konvensi
   // asli.
-  const double tilt_for_geometry = head_tilt_sign_ * current_tilt_;
+  //
+  // + y_angle: sudut bola DI DALAM gambar, bukan cuma arah kepala. Rumus asli
+  // hanya memakai head_tilt, jadi ia mengukur "seberapa jauh titik yang
+  // DIPANDANG kepala", bukan "seberapa jauh BOLA". Selama kepala mengunci bola
+  // di tengah frame keduanya sama, tapi justru saat bola mendekat kaki keduanya
+  // berbeda jauh: bola turun ke tepi bawah gambar sementara kepala masih
+  // menyusul (atau sudah mentok di batas sendi). Setengah-FOV vertikal 21,6 deg,
+  // jadi selisih itu bisa 20 derajat lebih -- persis rentang yang menentukan
+  // menendang atau tidak. y_angle sudah dalam konvensi rumus (negatif = bola di
+  // bawah sumbu kamera), makanya ditambahkan apa adanya.
+  const double tilt_for_geometry = head_tilt_sign_ * current_tilt_ + y_angle;
   double distance_to_ball = camera_height_ * tan(M_PI * 0.5 + tilt_for_geometry - hip_pitch_offset_ - ball_size);
 
   double ball_y_angle = (current_tilt_ + y_angle) * 180 / M_PI;
@@ -281,9 +291,11 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // dekatkan bola sampai angka ini turun di bawah kick_distance.
   RCLCPP_INFO_THROTTLE(rclcpp::get_logger("BallFollower"),
                        *rclcpp::Clock::make_shared(), 1000,
-                       "jarak bola %.3f m (ambang %.3f) | head_tilt %+.1f deg | bola x %+.1f deg",
+                       "jarak bola %.3f m (ambang %.3f) | head_tilt %+.1f deg | bola dlm gambar %+.1f deg "
+                       "| tunduk total %+.1f deg | bola x %+.1f deg",
                        distance_to_ball, distance_to_kick,
-                       current_tilt_ * 180 / M_PI, ball_x_angle);
+                       current_tilt_ * 180 / M_PI, y_angle * 180 / M_PI,
+                       -tilt_for_geometry * 180 / M_PI, ball_x_angle);
 
   // check whether ball is correct position.
   if ((distance_to_ball < distance_to_kick) && (fabs(ball_x_angle) < 25.0))

@@ -37,6 +37,13 @@ NAME="${OP3_CONTAINER_NAME:-op3}"
 IMAGE="${OP3_IMAGE:-op3-webots-ros2:humble}"
 ROBOT_FILE="$WS/src/ROBOTIS-OP3/op3_manager/config/OP3.robot"
 
+# Isolasi jaringan ROS 2. Alasan lengkapnya ada di docker-entrypoint.sh: di LAN
+# lab ada robot lain di domain 0, dan graph-nya menyatu dengan punya kita --
+# perintah modul mereka menyapu kepala robot ini di tengah demo. Ubah lewat
+# OP3_ROS_DOMAIN_ID / OP3_ROS_LOCALHOST_ONLY kalau memang perlu.
+ROS_DOMAIN="${OP3_ROS_DOMAIN_ID:-42}"
+ROS_LOCALHOST="${OP3_ROS_LOCALHOST_ONLY:-1}"
+
 BOLD=$'\033[1m'; RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RST=$'\033[0m'
 ok()   { echo "${GREEN}  ok${RST}   $*"; }
 warn() { echo "${YELLOW}  warn${RST} $*"; }
@@ -165,7 +172,26 @@ except OSError as exc:
   [ "$missing" -eq 0 ] && ok "paket op3 inti terbaca (action_editor, manager, action_module)"
 
   echo
-  echo "${BOLD}6. Kesegaran build (ABI)${RST}"
+  echo "${BOLD}6. Isolasi jaringan ROS 2${RST}"
+  # Terukur 2026-08-26: dengan op3_manager MATI, topik /robotis/enable_ctrl_module
+  # dan /robotis/present_joint_ctrl_modules MASIH menerima pesan -- itu robot lain
+  # di LAN yang juga memakai domain 0. Graph-nya menyatu: modul kepala kita disapu
+  # ke base_module/none tiap 1,5 detik dan parameter jalan tertimpa punya mereka.
+  local dom lhost
+  dom="$($DOCKER exec "$NAME" bash -lc 'echo "${ROS_DOMAIN_ID:-0}"' 2>/dev/null | tr -d "\r")"
+  lhost="$($DOCKER exec "$NAME" bash -lc 'echo "${ROS_LOCALHOST_ONLY:-0}"' 2>/dev/null | tr -d "\r")"
+  if [ "$lhost" = "1" ]; then
+    ok "ROS_LOCALHOST_ONLY=1 (DDS terkunci ke loopback) -- domain $dom"
+  elif [ "$dom" != "0" ] && [ -n "$dom" ]; then
+    ok "ROS_DOMAIN_ID=$dom (bukan 0) -- terpisah dari robot lain, tapi masih lewat LAN"
+  else
+    bad "shell container lahir di ROS_DOMAIN_ID=${dom:-0} tanpa ROS_LOCALHOST_ONLY."
+    bad "  Robot lain di LAN yang juga domain 0 akan mengambil alih modul sendi robot ini."
+    bad "  Perbaiki: scripts/op3_docker.sh up   (memasang env-nya di .bashrc container)"
+  fi
+
+  echo
+  echo "${BOLD}7. Kesegaran build (ABI)${RST}"
   # Jebakan paling mahal yang pernah kena di repo ini (2026-08-12).
   #
   # robotis_controller.h diubah (menambah anggota data ke class RobotisController),
@@ -211,16 +237,33 @@ except OSError as exc:
 # Tanam sourcing-nya di .bashrc container supaya SEMUA jalan masuk beres.
 # Idempoten: aman dipanggil berkali-kali.
 harden_container_shell() {
-  $DOCKER exec "$NAME" bash -c '
-marker="# >>> op3: auto-source ROS (dipasang op3_docker.sh) >>>"
+  # `docker exec ... bash -lc` MELEWATI entrypoint, jadi domain ROS harus
+  # dipasang di sini juga -- kalau tidak, shell semacam itu lahir di domain 0
+  # dan kembali menyatu dengan robot sebelah. Penanda diberi versi supaya
+  # container yang sudah terlanjur punya blok lama ikut diperbarui.
+  $DOCKER exec -e "OP3_DOMAIN=$ROS_DOMAIN" -e "OP3_LOCALHOST=$ROS_LOCALHOST" "$NAME" bash -c '
+marker="# >>> op3: auto-source ROS v2 (dipasang op3_docker.sh) >>>"
 grep -qF "$marker" /root/.bashrc 2>/dev/null && exit 0
 cat >> /root/.bashrc <<EOF
 $marker
 [ -f /opt/ros/humble/setup.bash ] && source /opt/ros/humble/setup.bash
 [ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash
-# <<< op3: auto-source ROS <<<
+export ROS_DOMAIN_ID="\${ROS_DOMAIN_ID:-$OP3_DOMAIN}"
+export ROS_LOCALHOST_ONLY="\${ROS_LOCALHOST_ONLY:-$OP3_LOCALHOST}"
+# <<< op3: auto-source ROS v2 <<<
 EOF
 ' >/dev/null 2>&1 || warn "gagal memasang auto-source ROS di .bashrc container"
+
+  # .bashrc saja tidak cukup: `docker exec op3 bash -lc '...'` itu shell LOGIN,
+  # dan shell login membaca /etc/profile (-> /etc/profile.d/*.sh), bukan
+  # .bashrc. Tanpa berkas ini perintah semacam itu lahir di domain 0 lagi.
+  $DOCKER exec -e "OP3_DOMAIN=$ROS_DOMAIN" -e "OP3_LOCALHOST=$ROS_LOCALHOST" "$NAME" bash -c '
+cat > /etc/profile.d/op3-ros.sh <<EOF
+# Dipasang op3_docker.sh -- jangan diubah manual, akan ditimpa.
+export ROS_DOMAIN_ID="\${ROS_DOMAIN_ID:-$OP3_DOMAIN}"
+export ROS_LOCALHOST_ONLY="\${ROS_LOCALHOST_ONLY:-$OP3_LOCALHOST}"
+EOF
+' >/dev/null 2>&1 || warn "gagal memasang /etc/profile.d/op3-ros.sh di container"
 }
 
 cmd_up() {
@@ -277,6 +320,8 @@ cmd_up() {
     -v "$WS":/ros2_ws \
     -v "$WS/docker-entrypoint.sh":/docker-entrypoint.sh:ro \
     -w /ros2_ws \
+    -e "ROS_DOMAIN_ID=$ROS_DOMAIN" \
+    -e "ROS_LOCALHOST_ONLY=$ROS_LOCALHOST" \
     ${input_gid:+--group-add "$input_gid"} \
     ${dialout_gid:+--group-add "$dialout_gid"} \
     "${x11[@]}" \

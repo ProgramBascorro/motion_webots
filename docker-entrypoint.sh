@@ -27,6 +27,25 @@ if [ -f /ros2_ws/install/setup.bash ]; then
   fi
 fi
 
+# Domain ROS 2 milik robot ini SENDIRI.
+#
+# Latar belakangnya nyata dan terukur (2026-08-26): tanpa ini semua node lahir
+# di ROS_DOMAIN_ID 0 dengan DDS multicast ke seluruh LAN, jadi robot LAIN yang
+# juga memakai domain 0 masuk ke graph yang sama. Yang terekam waktu itu: dengan
+# op3_manager di sini MATI TOTAL, topik /robotis/enable_ctrl_module dan
+# /robotis/present_joint_ctrl_modules masih menerima pesan -- perintah modul
+# robot sebelah. Akibatnya di demo: kepala terlihat "dicuri" ke base_module/none
+# setiap 1,5 detik, pelacak merebutnya kembali, dan parameter jalan/kepala
+# tertimpa punya robot lain di tengah demo ("tiba-tiba parameternya lain").
+# Perintah kita pun ikut mendarat di robot mereka.
+#
+# ROS_LOCALHOST_ONLY=1 mengunci DDS ke loopback: seluruh stack ini (manager,
+# demo, kamera, studio agent) hidup di mesin yang sama, jadi tidak ada yang
+# hilang. Kalau suatu saat perlu node dari laptop lain, matikan dengan
+# `docker exec -e ROS_LOCALHOST_ONLY=0 ...` dan pastikan domain-nya unik.
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+
 # Webots env (redundant with Dockerfile ENV but harmless)
 export WEBOTS_HOME="${WEBOTS_HOME:-/usr/local/webots}"
 export LD_LIBRARY_PATH="$WEBOTS_HOME/lib:$WEBOTS_HOME/lib/controller:${LD_LIBRARY_PATH:-}"

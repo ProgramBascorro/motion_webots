@@ -2229,6 +2229,20 @@ bool RobotisController::loadOffsetService(const std::shared_ptr<robotis_controll
 
 void RobotisController::setJointCtrlModuleThread(robotis_controller_msgs::msg::JointCtrlModule::SharedPtr msg)
 {
+  // Siapa mengambil sendi apa. Kejadiannya jarang (hanya saat modul berpindah)
+  // tapi tanpa catatan ini "tiba-tiba parameternya lain" di tengah demo mustahil
+  // dilacak: permintaan lewat service tidak muncul di topik mana pun.
+  {
+    std::string ringkas;
+    for (unsigned int idx = 0; idx < msg->joint_name.size() && idx < msg->module_name.size(); idx++)
+    {
+      if (idx != 0)
+        ringkas += ", ";
+      ringkas += msg->joint_name[idx] + "=" + msg->module_name[idx];
+    }
+    RCLCPP_WARN(this->get_logger(), "SET MODUL per-sendi: %s", ringkas.c_str());
+  }
+
   // stop module list
   std::list<MotionModule *> _stop_modules;
   std::list<MotionModule *> _enable_modules;
@@ -2417,6 +2431,10 @@ void RobotisController::setJointCtrlModuleThread(robotis_controller_msgs::msg::J
 
 void RobotisController::setCtrlModuleThread(std::string ctrl_module)
 {
+  // Jalur "satu modul mengambil semua sendi miliknya". Dicatat karena inilah
+  // yang menyapu kepala/kaki secara tidak sengaja -- lihat catatan di atas.
+  RCLCPP_WARN(this->get_logger(), "SET MODUL seluruh-modul: '%s'", ctrl_module.c_str());
+
   // stop module
   std::list<MotionModule *> stop_modules;
 
