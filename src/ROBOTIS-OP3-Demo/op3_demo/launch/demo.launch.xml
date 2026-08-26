@@ -57,8 +57,17 @@
        (dan karena itu pemicu tendangan) meleset sebanding. -->
   <arg name="kick_camera_height" default="0.56"/>
 
+  <!-- Ambang tendangan, meter, dalam JARAK TANAH (bukan jarak lurus ke kamera).
+       kick_distance juga jadi jarak BERHENTI robot saat mendekati bola.
+       Dibuka di sini supaya bisa ditera langsung di robot tanpa build ulang;
+       bandingkan dengan angka "jarak bola" yang dicetak BallFollower 1x/detik. -->
+  <arg name="kick_distance" default="0.30"/>
+  <arg name="kick_pan_max_distance" default="0.40"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
     <param name="kick_camera_height" value="$(var kick_camera_height)"/>
+    <param name="kick_distance" value="$(var kick_distance)"/>
+    <param name="kick_pan_max_distance" value="$(var kick_pan_max_distance)"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>

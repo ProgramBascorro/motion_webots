@@ -34,15 +34,16 @@ BallFollower::BallFollower()
     camera_height_(0.56),
     // Ambang ini bukan cuma pemicu tendangan -- ia juga JARAK BERHENTI.
     // calcFootstep() diberi (jarak_bola - kick_distance), jadi robot berhenti
-    // mendekat begitu jarak bola sama dengan angka ini. Dipasang 0,54 m robot
-    // berhenti satu setengah langkah dari bola: bola tidak pernah sampai di
-    // depan kaki, jendela servo head_pan tidak pernah tercapai, dan tendangan
-    // tidak pernah terjadi.
+    // mendekat begitu jarak bola sama dengan angka ini. Terlalu besar = robot
+    // berhenti sebelum bola sampai di depan kaki dan tidak pernah menendang.
     //
-    // 0,54 m yang diukur operator itu jarak LURUS kamera-ke-bola. Angka yang
-    // dipakai di sini jarak TANAH. Dengan kamera ~0,50 m di atas lantai,
-    // sqrt(0,54^2 - 0,50^2) = 0,20 m -- itu padanannya.
-    kick_distance_(0.20),
+    // 0,54 m yang diukur operator itu jarak LURUS kamera-ke-bola; angka di sini
+    // jarak TANAH. Konversinya harus memakai tinggi kamera saat DIUKUR (robot
+    // berdiri, 0,56 m) dan jari-jari bola (0,11 m, ukuran 5), karena yang
+    // dilihat kamera adalah PUSAT bola, bukan titik di lantai:
+    //     beda tinggi = 0,56 - 0,11 = 0,45 m
+    //     jarak tanah = sqrt(0,54^2 - 0,45^2) = 0,298 m
+    kick_distance_(0.30),
     head_tilt_sign_(-1.0),   // head_tilt POSITIF = MENUNDUK (diukur, lihat catatan di bawah)
     log_clock_(rclcpp::Clock::make_shared()),
     // Pusatnya tetap angka yang diukur operator (157 dan 183), tapi jendelanya
@@ -58,7 +59,7 @@ BallFollower::BallFollower()
     kick_pan_left_max_deg_(187.0),
     head_pan_servo_center_deg_(180.0),
     head_pan_servo_dir_(1.0),
-    kick_pan_max_distance_(0.30),
+    kick_pan_max_distance_(0.40),
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
