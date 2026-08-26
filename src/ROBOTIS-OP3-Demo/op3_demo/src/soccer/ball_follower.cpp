@@ -45,10 +45,17 @@ BallFollower::BallFollower()
     kick_distance_(0.20),
     head_tilt_sign_(-1.0),   // ALPHONSE: head_tilt POSITIF = menunduk
     log_clock_(rclcpp::Clock::make_shared()),
-    kick_pan_right_min_deg_(156.0),
-    kick_pan_right_max_deg_(158.0),
-    kick_pan_left_min_deg_(182.0),
-    kick_pan_left_max_deg_(184.0),
+    // Pusatnya tetap angka yang diukur operator (157 dan 183), tapi jendelanya
+    // dilebarkan +-4 derajat. Alasannya terukur di robot 2026-08-26: kepala
+    // bergerak dalam LOMPATAN (tiap deteksi = satu perintah offset), bukan
+    // menyapu mulus, jadi pita selebar 2 derajat nyaris tidak pernah dipijak.
+    // Dari 93 sampel satu run: NOL yang masuk jendela, padahal kepala sempat
+    // singgah di 154,6 (jendela kanan 156-158) dan 187,2 (jendela kiri
+    // 182-184) -- meleset 1-3 derajat, dua-duanya.
+    kick_pan_right_min_deg_(153.0),
+    kick_pan_right_max_deg_(161.0),
+    kick_pan_left_min_deg_(179.0),
+    kick_pan_left_max_deg_(187.0),
     head_pan_servo_center_deg_(180.0),
     head_pan_servo_dir_(1.0),
     kick_pan_max_distance_(0.30),
