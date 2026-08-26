@@ -51,7 +51,12 @@ class BallFollower // : public rclcpp::Node
   BallFollower();
   ~BallFollower();
 
-  bool processFollowing(double x_angle, double y_angle, double ball_size);
+  // ball_size : sudut jari-jari bola dalam RADIAN (dipakai di dalam tan(), oper
+  //             0.0 kalau tidak dipakai -- JANGAN oper piksel ke sini).
+  // ball_radius_px : jari-jari bola dalam PIKSEL apa adanya dari detektor,
+  //             dipakai sebagai pengukur jarak yang berdiri sendiri.
+  bool processFollowing(double x_angle, double y_angle, double ball_size,
+                        double ball_radius_px = 0.0);
   void decideBallPositin(double x_angle, double y_angle);
   void waitFollowing();
   void startFollowing();
@@ -122,6 +127,21 @@ class BallFollower // : public rclcpp::Node
   // sebelum robot benar-benar berhenti. Besarkan kalau ingin jendela pan
   // berdiri sepenuhnya sendiri.
   double kick_pan_max_distance_;
+  // Ambang jari-jari bola (piksel) untuk menendang. Pengukur jarak yang jauh
+  // lebih sedikit asumsinya daripada sudut kepala: tidak peduli tinggi kamera,
+  // hip_pitch_offset, tanda head_tilt, ataupun apakah kepala benar-benar
+  // menunjuk ke bola -- semuanya sudah pernah salah dan memakan waktu berjam-jam.
+  // Bola yang dekat SELALU besar di gambar.
+  //
+  // Kalibrasinya satu angka: taruh bola di tempat yang diinginkan, baca
+  // "radius=NN.Npx" di log detektor, pasang angka itu.
+  //
+  // Terukur di robot: radius 13,2 px = 3,75 m ... 92 px = 0,30 m (berdiri).
+  // Bawaan 85 px (~0,38 m saat berdiri) SENGAJA sedikit lebih jauh dari titik
+  // kontak ideal: badan robot sendiri menutupi bola di bawah ~0,32 m, jadi
+  // memicu di titik kontak berarti memicu saat bola sudah tidak terlihat.
+  // Ayunan kaki yang menutup sisanya. Setel 0 untuk mematikan jalur ini.
+  double kick_ball_radius_px_;
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang
   // angka besar bikin pemicunya tidak pernah penuh -- turunkan kalau begitu.

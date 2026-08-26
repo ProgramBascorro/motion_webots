@@ -64,6 +64,18 @@
   <arg name="kick_distance" default="0.30"/>
   <arg name="kick_pan_max_distance" default="0.40"/>
 
+  <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
+       sedikit asumsinya: tidak bergantung tinggi kamera, hip_pitch, tanda
+       head_tilt, ataupun apakah kepala menunjuk ke bola. Bola dekat selalu
+       besar di gambar.
+       Kalibrasinya satu angka: taruh bola di tempat yang diinginkan, baca
+       "radius=NN.Npx" di log detektor YOLO, pasang angka itu di sini.
+       Terukur di robot ini: 13 px = 3,8 m ... 92 px = 0,30 m (saat berdiri).
+       Bawaan 85 px sengaja sedikit LEBIH JAUH dari titik kontak ideal, karena
+       badan robot menutupi bola di bawah ~0,32 m; ayunan kaki yang menutup
+       sisanya. Setel 0 untuk mematikan jalur ini. -->
+  <arg name="kick_ball_radius_px" default="85.0"/>
+
   <!-- Jendela sudut SERVO head_pan (0..360, tengah 180) yang dianggap "bola ada
        di depan kaki ini". Nilai bawaan berpusat pada angka yang diukur operator
        (157 kanan, 183 kiri), dilebarkan +-4 derajat karena kepala bergerak
@@ -87,6 +99,7 @@
     <param name="kick_camera_height" value="$(var kick_camera_height)" type="float"/>
     <param name="kick_distance" value="$(var kick_distance)" type="float"/>
     <param name="kick_pan_max_distance" value="$(var kick_pan_max_distance)" type="float"/>
+    <param name="kick_ball_radius_px" value="$(var kick_ball_radius_px)" type="float"/>
     <param name="kick_pan_right_min_deg" value="$(var kick_pan_right_min_deg)" type="float"/>
     <param name="kick_pan_right_max_deg" value="$(var kick_pan_right_max_deg)" type="float"/>
     <param name="kick_pan_left_min_deg" value="$(var kick_pan_left_min_deg)" type="float"/>

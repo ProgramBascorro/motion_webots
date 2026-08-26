@@ -184,7 +184,14 @@ void SoccerDemo::process()
       switch(tracking_status_)
       {
       case BallTracker::Found:
-        ball_follower_.processFollowing(ball_tracker_.getPanOfBall(), ball_tracker_.getTiltOfBall(), 0.0);
+        // Argumen ke-3 tetap 0.0: itu SUDUT jari-jari dalam radian, dipakai di
+        // dalam tan(). Radius piksel masuk lewat argumen ke-4 -- mengopernya ke
+        // slot ke-3 berarti 45 RADIAN di dalam tan() dan merusak seluruh
+        // perhitungan jarak.
+        ball_follower_.processFollowing(ball_tracker_.getPanOfBall(),
+                                        ball_tracker_.getTiltOfBall(),
+                                        0.0,
+                                        ball_tracker_.getBallSize());
         break;
 
       case BallTracker::NotFound:

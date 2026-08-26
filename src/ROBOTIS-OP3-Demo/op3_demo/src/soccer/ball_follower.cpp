@@ -60,6 +60,7 @@ BallFollower::BallFollower()
     head_pan_servo_center_deg_(180.0),
     head_pan_servo_dir_(1.0),
     kick_pan_max_distance_(0.40),
+    kick_ball_radius_px_(85.0),
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
@@ -162,6 +163,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     head_pan_servo_center_deg_ = read_param("head_pan_servo_center_deg", head_pan_servo_center_deg_);
     head_pan_servo_dir_        = read_param("head_pan_servo_dir", head_pan_servo_dir_);
     kick_pan_max_distance_     = read_param("kick_pan_max_distance", kick_pan_max_distance_);
+    kick_ball_radius_px_       = read_param("kick_ball_radius_px", kick_ball_radius_px_);
     kick_ready_count_ = (int) read_param("kick_ready_count", (double) kick_ready_count_);
 
     RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
@@ -174,6 +176,9 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
                 kick_pan_left_min_deg_, kick_pan_left_max_deg_,
                 head_pan_servo_center_deg_, head_pan_servo_dir_,
                 kick_pan_max_distance_, kick_ready_count_);
+    RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                "Kick radius bola: >= %.1f px (%s)", kick_ball_radius_px_,
+                (kick_ball_radius_px_ > 0.0) ? "aktif" : "MATI");
 
     current_joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         "/robotis/goal_joint_states", 10, std::bind(&BallFollower::currentJointStatesCallback, this, std::placeholders::_1));
@@ -330,7 +335,8 @@ int BallFollower::kickFootFromHeadPan() const
   return OutOfRange;
 }
 
-bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_size)
+bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_size,
+                                   double ball_radius_px)
 {
   rclcpp::Time curr_time = rclcpp::Clock().now();
   rclcpp::Duration dur = curr_time - prev_time_;
@@ -423,6 +429,16 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   const bool pan_ready = pan_side_ok && (distance_to_ball < kick_pan_max_distance_);
   const bool near_enough = (distance_to_ball < distance_to_kick) && (fabs(ball_x_angle) < 25.0);
 
+  //  (3) Jari-jari bola di gambar. Pengukur jarak yang berdiri sendiri, dan
+  //      paling sedikit asumsinya: tidak peduli tinggi kamera, hip_pitch,
+  //      tanda head_tilt, atau apakah kepala menunjuk ke bola. Bola dekat
+  //      SELALU besar. Gerbang +-25 derajat tetap dipakai di sini (beda dengan
+  //      jalur jendela pan) supaya bola yang dekat tapi jauh di samping tidak
+  //      ikut memicu.
+  const bool radius_ready = (kick_ball_radius_px_ > 0.0)
+                         && (ball_radius_px >= kick_ball_radius_px_)
+                         && (fabs(ball_x_angle) < 25.0);
+
   // Selalu dicetak (1x/detik) supaya ambangnya bisa ditera langsung di robot:
   // dekatkan bola sampai jaraknya turun di bawah ambang, atau sampai servo
   // head_pan masuk salah satu jendela.
@@ -430,19 +446,21 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
                        *log_clock_, 1000,
                        "jarak bola %.3f m (ambang %.3f) | servo head_pan %.1f deg "
                        "(kanan %.0f-%.0f, kiri %.0f-%.0f) | head_tilt %+.1f deg "
-                       "| bola dlm gambar %+.1f deg | tunduk total %+.1f deg | bola x %+.1f deg | siap: %s",
+                       "| bola dlm gambar %+.1f deg | radius %.1f px (ambang %.0f) "
+                       "| bola x %+.1f deg | siap: %s",
                        distance_to_ball, distance_to_kick, head_pan_servo_deg,
                        kick_pan_right_min_deg_, kick_pan_right_max_deg_,
                        kick_pan_left_min_deg_, kick_pan_left_max_deg_,
                        current_tilt_ * 180 / M_PI, y_angle * 180 / M_PI,
-                       -tilt_for_geometry * 180 / M_PI, ball_x_angle,
-                       pan_ready ? "jendela pan"
-                                 : (near_enough ? "jarak"
-                                                : (pan_side_ok ? "jendela pan cocok tapi bola masih jauh"
-                                                               : "belum")));
+                       ball_radius_px, kick_ball_radius_px_, ball_x_angle,
+                       radius_ready ? "radius"
+                                    : (pan_ready ? "jendela pan"
+                                                 : (near_enough ? "jarak"
+                                                                : (pan_side_ok ? "jendela pan cocok tapi bola masih jauh"
+                                                                               : "belum"))));
 
   // check whether ball is correct position.
-  if (pan_ready || near_enough)
+  if (pan_ready || near_enough || radius_ready)
   {
     count_to_kick_ += 1;
 
@@ -478,10 +496,11 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
         approach_ball_position_ = OnRight;
 
       RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
-                  "TENDANG kaki %s -- pemicu: %s | servo head_pan %.1f deg | jarak %.3f m",
+                  "TENDANG kaki %s -- pemicu: %s | servo head_pan %.1f deg "
+                  "| jarak %.3f m | radius %.1f px",
                   (approach_ball_position_ == OnLeft) ? "KIRI" : "KANAN",
-                  pan_ready ? "jendela pan" : "jarak",
-                  head_pan_servo_deg, distance_to_ball);
+                  radius_ready ? "radius bola" : (pan_ready ? "jendela pan" : "jarak"),
+                  head_pan_servo_deg, distance_to_ball, ball_radius_px);
 
       return true;
     }
