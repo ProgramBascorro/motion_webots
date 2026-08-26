@@ -64,10 +64,26 @@
   <arg name="kick_distance" default="0.30"/>
   <arg name="kick_pan_max_distance" default="0.40"/>
 
+  <!-- Jendela sudut SERVO head_pan (0..360, tengah 180) yang dianggap "bola ada
+       di depan kaki ini". Nilai bawaan berpusat pada angka yang diukur operator
+       (157 kanan, 183 kiri), dilebarkan +-4 derajat karena kepala bergerak
+       dalam lompatan, bukan sapuan mulus.
+       Terukur 2026-08-26: saat bola benar-benar di sisi KIRI, servo justru
+       duduk di 193..208 (paling sering 200), bukan 179..187. Kalau kaki kiri
+       tidak pernah terpicu, itu tempat pertama yang harus disetel. -->
+  <arg name="kick_pan_right_min_deg" default="153.0"/>
+  <arg name="kick_pan_right_max_deg" default="161.0"/>
+  <arg name="kick_pan_left_min_deg" default="179.0"/>
+  <arg name="kick_pan_left_max_deg" default="187.0"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
     <param name="kick_camera_height" value="$(var kick_camera_height)"/>
     <param name="kick_distance" value="$(var kick_distance)"/>
     <param name="kick_pan_max_distance" value="$(var kick_pan_max_distance)"/>
+    <param name="kick_pan_right_min_deg" value="$(var kick_pan_right_min_deg)"/>
+    <param name="kick_pan_right_max_deg" value="$(var kick_pan_right_max_deg)"/>
+    <param name="kick_pan_left_min_deg" value="$(var kick_pan_left_min_deg)"/>
+    <param name="kick_pan_left_max_deg" value="$(var kick_pan_left_max_deg)"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>
