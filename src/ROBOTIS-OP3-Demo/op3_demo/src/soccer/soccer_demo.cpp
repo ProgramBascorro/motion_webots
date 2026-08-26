@@ -502,6 +502,16 @@ bool SoccerDemo::isHeadJoint(const int &id)
 
 void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 {
+  // Dicetak SELALU, bahkan saat demo mati. Tanpa ini "tombol dipencet tapi
+  // tidak ada yang terjadi" tidak bisa dibedakan dari tiga hal yang sangat
+  // berbeda: pesannya tidak pernah sampai, sampai tapi demo belum aktif, atau
+  // sampai dan memang ditolak debounce.
+  RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+              "TOMBOL '%s' diterima -- demo %s, soccer %s",
+              msg->data.c_str(),
+              enable_ ? "aktif" : "TIDAK aktif",
+              soccer_requested_ ? "JALAN (tekan = matikan)" : "berhenti (tekan = nyalakan)");
+
   if (enable_ == false)
     return;
 

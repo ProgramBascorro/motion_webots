@@ -108,9 +108,10 @@ class BallFollower // : public rclcpp::Node
   // Bola harus sedekat ini juga sebelum jendela pan boleh menendang.
   // Jendela KIRI (servo 182-184 = +2..+4 derajat) duduk hampir di tengah,
   // yaitu sudut leher yang WAJAR saat robot masih berjalan menuju bola yang
-  // jauh -- tanpa pagar ini robot bisa menendang angin dari 2 meter. Nilainya
-  // 0,54 m, jarak kamera-ke-bola yang diukur operator bersamaan dengan sudut
-  // servo di atas. Besarkan kalau ingin jendela pan berdiri sepenuhnya sendiri.
+  // jauh -- tanpa pagar ini robot bisa menendang angin dari 2 meter. Sedikit
+  // lebih longgar dari kick_distance supaya jendela pan boleh menyala sesaat
+  // sebelum robot benar-benar berhenti. Besarkan kalau ingin jendela pan
+  // berdiri sepenuhnya sendiri.
   double kick_pan_max_distance_;
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang

@@ -253,7 +253,15 @@ int main(int argc, char **argv)
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 {
   if(apply_desired == true)
+  {
+    // Tekanan tombol DIBUANG di sini selama perpindahan mode masih diproses
+    // (loop demo sedang menjalankan setDemoEnable, yang memanggil service).
+    // Sunyi total selama ini, jadi kelihatannya seperti tombol rusak.
+    RCLCPP_WARN(node->get_logger(),
+                "tombol '%s' diabaikan: perpindahan mode masih diproses",
+                msg->data.c_str());
     return;
+  }
 
   if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
     soccer_demo->buttonHandlerCallback(msg);

@@ -54,6 +54,9 @@ OpenCRModule::OpenCRModule()
   buttons_["published_start"] = false;
   buttons_["published_user"] = false;
 
+  // Jendela debounce tombol. Lihat handleButton() untuk alasannya.
+  button_debounce_sec_ = 0.40;
+
   previous_result_["gyro_x"] = 0.0;
   previous_result_["gyro_y"] = 0.0;
   previous_result_["gyro_z"] = 0.0;
@@ -218,9 +221,11 @@ void OpenCRModule::handleButton(const std::string &button_name)
     if (pushed && !buttons_[button_published]) {
       auto press_time_it = buttons_press_time_.find(button_name);
       if (press_time_it == buttons_press_time_.end()) {
-        buttons_press_time_.emplace(
-          button_name,
-          rclcpp::Time(0, 0, this->get_clock()->get_clock_type()));
+        // Waktu tekannya belum pernah tercatat. Pakai SEKARANG, bukan epoch:
+        // dengan epoch, selisihnya jadi puluhan tahun sehingga "> 2 detik"
+        // langsung benar dan tombol menerbitkan "_long" palsu pada siklus
+        // pertama, tanpa ada yang menekan apa pun.
+        buttons_press_time_.emplace(button_name, this->get_clock()->now());
         return;
       }
       rclcpp::Duration button_duration = this->get_clock()->now() - buttons_press_time_[button_name];
@@ -245,10 +250,46 @@ void OpenCRModule::handleButton(const std::string &button_name)
       }
       rclcpp::Duration button_duration = this->get_clock()->now() - buttons_press_time_[button_name];
       if (button_duration.seconds() < 2.0) {
-        publishButtonMsg(button_name);
+        // DEBOUNCE. Tombolnya mekanis dan dibaca tiap siklus kendali (8 ms).
+        // Kontak yang memantul terbaca sebagai beberapa tekan-lepas berturut-
+        // turut dalam beberapa milidetik, dan tiap tepi-lepas menerbitkan satu
+        // "start" lagi. "start" itu TOGGLE di SoccerDemo, jadi dua pesan dari
+        // SATU tekanan = nyala lalu mati lagi -- persis gejala "dipencet untuk
+        // mematikan tapi robot tetap jalan".
+        //
+        // Tekanan manusia yang sungguhan tidak pernah lebih rapat dari ~400 ms,
+        // jadi jendela ini tidak pernah membuang tekanan yang disengaja.
+        if (publishAllowed(button_name)) {
+          publishButtonMsg(button_name);
+        } else {
+          RCLCPP_WARN(this->get_logger(),
+                      "tombol '%s' dibuang: pantulan kontak (%.0f ms sejak yang terakhir)",
+                      button_name.c_str(),
+                      (this->get_clock()->now() - buttons_publish_time_[button_name]).seconds() * 1000.0);
+        }
       }
     }
   }
+}
+
+// true kalau nama tombol ini boleh diterbitkan sekarang; sekaligus mencatat
+// waktunya. Jendelanya dihitung dari penerbitan TERAKHIR, bukan dari tekanan,
+// supaya rentetan pantulan tidak bisa lolos satu per satu.
+bool OpenCRModule::publishAllowed(const std::string &button_name)
+{
+  const rclcpp::Time now = this->get_clock()->now();
+
+  auto it = buttons_publish_time_.find(button_name);
+  if (it != buttons_publish_time_.end()) {
+    if ((now - it->second).seconds() < button_debounce_sec_) {
+      return false;
+    }
+    it->second = now;
+    return true;
+  }
+
+  buttons_publish_time_.emplace(button_name, now);
+  return true;
 }
 
 void OpenCRModule::publishButtonMsg(const std::string &button_name)

@@ -59,6 +59,7 @@ private:
   void publishIMU();
 
   void handleButton(const std::string &button_name);
+  bool publishAllowed(const std::string &button_name);
   void publishButtonMsg(const std::string &button_name);
   void handleVoltage(double present_volt);
   void publishStatusMsg(unsigned int type, std::string msg);
@@ -69,6 +70,10 @@ private:
   std::thread queue_thread_;
   std::map<std::string, bool> buttons_;
   std::map<std::string, rclcpp::Time> buttons_press_time_;
+  // Kapan terakhir kali nama tombol ini benar-benar diterbitkan. Dipakai
+  // sebagai debounce: lihat penjelasan panjang di handleButton().
+  std::map<std::string, rclcpp::Time> buttons_publish_time_;
+  double button_debounce_sec_;
   rclcpp::Time button_press_time_;
   rclcpp::Time last_msg_time_;
   std::map<std::string, double> previous_result_;

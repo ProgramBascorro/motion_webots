@@ -31,11 +31,17 @@ BallFollower::BallFollower()
     approach_ball_position_(NotFound),
     kick_motion_index_(40),
     camera_height_(0.56),
-    // 0,54 m: jarak kamera-ke-bola yang diukur operator saat bola sudah di
-    // posisi tendang. Dibandingkan dengan angka "jarak bola" yang dicetak node
-    // ini, yaitu jarak TANAH menurut model H*cot(tunduk). Kalau robot terasa
-    // menendang terlalu dini, turunkan kick_distance (nilai lama 0,23).
-    kick_distance_(0.54),
+    // Ambang ini bukan cuma pemicu tendangan -- ia juga JARAK BERHENTI.
+    // calcFootstep() diberi (jarak_bola - kick_distance), jadi robot berhenti
+    // mendekat begitu jarak bola sama dengan angka ini. Dipasang 0,54 m robot
+    // berhenti satu setengah langkah dari bola: bola tidak pernah sampai di
+    // depan kaki, jendela servo head_pan tidak pernah tercapai, dan tendangan
+    // tidak pernah terjadi.
+    //
+    // 0,54 m yang diukur operator itu jarak LURUS kamera-ke-bola. Angka yang
+    // dipakai di sini jarak TANAH. Dengan kamera ~0,50 m di atas lantai,
+    // sqrt(0,54^2 - 0,50^2) = 0,20 m -- itu padanannya.
+    kick_distance_(0.20),
     head_tilt_sign_(-1.0),   // ALPHONSE: head_tilt POSITIF = menunduk
     kick_pan_right_min_deg_(156.0),
     kick_pan_right_max_deg_(158.0),
@@ -43,7 +49,7 @@ BallFollower::BallFollower()
     kick_pan_left_max_deg_(184.0),
     head_pan_servo_center_deg_(180.0),
     head_pan_servo_dir_(1.0),
-    kick_pan_max_distance_(0.54),
+    kick_pan_max_distance_(0.30),
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
