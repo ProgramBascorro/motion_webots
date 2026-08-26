@@ -104,10 +104,49 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     // Geometri pemicu tendangan, bisa ditera di robot tanpa compile ulang.
     // Dijaga has_parameter(): declare_parameter yang kedua kali pada nama yang
     // sama melempar exception, dan node ini dipakai bersama demo lain.
+    // Tahan banting terhadap tipe yang salah. declare_parameter MELEMPAR kalau
+    // nilai yang dioper dari launch bertipe lain dari nilai bawaannya -- dan
+    // "193" (tanpa titik desimal) memang dibaca ROS sebagai integer, bukan
+    // double. Exception itu tidak tertangkap siapa pun dan mematikan seluruh
+    // op_demo_node seketika (exit -6), padahal yang terjadi cuma salah ketik
+    // satu argumen. Sekarang: integer diterima apa adanya, tipe lain memakai
+    // nilai bawaan sambil mencetak alasannya.
     auto read_param = [this](const std::string &name, double fallback) -> double
     {
-      if (node_->has_parameter(name) == false)
-        return node_->declare_parameter(name, fallback);
+      try
+      {
+        if (node_->has_parameter(name) == false)
+          node_->declare_parameter(name, fallback);
+      }
+      catch (const rclcpp::exceptions::InvalidParameterTypeException &)
+      {
+        // Nilainya ada tapi bertipe lain; coba baca sebagai integer.
+        try
+        {
+          node_->undeclare_parameter(name);
+        }
+        catch (const std::exception &) { }
+
+        try
+        {
+          rclcpp::ParameterValue v = node_->declare_parameter(
+              name, rclcpp::ParameterValue(static_cast<int64_t>(fallback)));
+          const double as_double = static_cast<double>(v.get<int64_t>());
+          RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                      "parameter '%s' dioper sebagai bilangan bulat (%.0f); "
+                      "dipakai sebagai %.3f. Tulis dengan titik desimal untuk menghindari ini.",
+                      name.c_str(), as_double, as_double);
+          return as_double;
+        }
+        catch (const std::exception &e)
+        {
+          RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
+                       "parameter '%s' tidak terbaca (%s); memakai bawaan %.3f",
+                       name.c_str(), e.what(), fallback);
+          return fallback;
+        }
+      }
+
       double value = fallback;
       node_->get_parameter(name, value);
       return value;
