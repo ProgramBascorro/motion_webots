@@ -43,7 +43,7 @@ BallFollower::BallFollower()
     // dipakai di sini jarak TANAH. Dengan kamera ~0,50 m di atas lantai,
     // sqrt(0,54^2 - 0,50^2) = 0,20 m -- itu padanannya.
     kick_distance_(0.20),
-    head_tilt_sign_(-1.0),   // ALPHONSE: head_tilt POSITIF = menunduk
+    head_tilt_sign_(1.0),    // head_tilt NEGATIF = menunduk (konvensi OP3 asli)
     log_clock_(rclcpp::Clock::make_shared()),
     // Pusatnya tetap angka yang diukur operator (157 dan 183), tapi jendelanya
     // dilebarkan +-4 derajat. Alasannya terukur di robot 2026-08-26: kepala
@@ -324,17 +324,18 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // asli): dengan hip_pitch_offset 0 ia menjadi H*cot(sudut tunduk) = jarak
   // bola yang sebenarnya, persis.
   //
-  // ALPHONSE TERBALIK -- head_tilt POSITIF berarti menunduk. Tercatat di
-  // op3_ball_localization/config/head_tracking.yaml ("POSITIVE = look DOWN")
-  // dan dibuktikan lagi 2026-08-25: nilai scan_tilt_* diturunkan tiga kali
-  // (0,25 -> 0,12 -> 0,05 -> -0,12) dan kepala memang makin MENDONGAK.
+  // KOREKSI 2026-08-26: robot ini memakai konvensi OP3 ASLI, head_tilt NEGATIF
+  // berarti MENUNDUK. Sempat disimpulkan sebaliknya dari komentar di
+  // head_tracking.yaml dan dari cara kepala bereaksi saat scan_tilt_* diubah;
+  // kesimpulan itu SALAH dan sempat mematikan tendangan sama sekali.
   //
-  // Tanpa koreksi tanda, syaratnya menjadi |head_tilt - 8,0| > 67,7 deg, yaitu
-  // head_tilt > +75,7 deg ATAU < -59,7 deg. Sapuan robot ini cuma bergerak di
-  // -6,9 .. +5,2 deg, jadi in_range TIDAK PERNAH benar dan handleKick() tidak
-  // pernah dipanggil -- persis gejala "didekatkan ke kaki tapi tidak menendang".
-  // Rumusnya juga melebih-lebihkan jarak: pada head_tilt +59,7 deg ia melaporkan
-  // 0,443 m padahal geometrinya 0,230 m -- hampir dua kali lipat.
+  // Buktinya langsung, bukan penalaran: satu frame kamera diambil saat
+  // head_tilt terbaca -22,0 deg dan bola terkunci di tengah gambar. Isinya
+  // rumput, bola di lantai, dan rangka robot sendiri di tepi bawah -- kamera
+  // jelas MENUNDUK. Kalau negatif berarti mendongak, pemandangan itu mustahil.
+  //
+  // Jadi head_tilt_sign_ = +1 di sini. Setel kick_head_tilt_sign := -1.0 kalau
+  // suatu saat ada robot yang benar-benar terbalik.
   //
   // head_tilt_sign_ = -1 mengembalikan sudutnya ke konvensi yang diasumsikan
   // rumus. Setel kick_head_tilt_sign := 1.0 untuk robot yang masih konvensi
