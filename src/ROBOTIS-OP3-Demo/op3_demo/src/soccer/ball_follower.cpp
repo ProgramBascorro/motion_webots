@@ -43,7 +43,7 @@ BallFollower::BallFollower()
     // dipakai di sini jarak TANAH. Dengan kamera ~0,50 m di atas lantai,
     // sqrt(0,54^2 - 0,50^2) = 0,20 m -- itu padanannya.
     kick_distance_(0.20),
-    head_tilt_sign_(1.0),    // head_tilt NEGATIF = menunduk (konvensi OP3 asli)
+    head_tilt_sign_(-1.0),   // head_tilt POSITIF = MENUNDUK (diukur, lihat catatan di bawah)
     log_clock_(rclcpp::Clock::make_shared()),
     // Pusatnya tetap angka yang diukur operator (157 dan 183), tapi jendelanya
     // dilebarkan +-4 derajat. Alasannya terukur di robot 2026-08-26: kepala
@@ -324,18 +324,22 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // asli): dengan hip_pitch_offset 0 ia menjadi H*cot(sudut tunduk) = jarak
   // bola yang sebenarnya, persis.
   //
-  // KOREKSI 2026-08-26: robot ini memakai konvensi OP3 ASLI, head_tilt NEGATIF
-  // berarti MENUNDUK. Sempat disimpulkan sebaliknya dari komentar di
-  // head_tracking.yaml dan dari cara kepala bereaksi saat scan_tilt_* diubah;
-  // kesimpulan itu SALAH dan sempat mematikan tendangan sama sekali.
+  // Robot ini TERBALIK dari konvensi OP3 asli: head_tilt POSITIF = MENUNDUK.
   //
-  // Buktinya langsung, bukan penalaran: satu frame kamera diambil saat
-  // head_tilt terbaca -22,0 deg dan bola terkunci di tengah gambar. Isinya
-  // rumput, bola di lantai, dan rangka robot sendiri di tepi bawah -- kamera
-  // jelas MENUNDUK. Kalau negatif berarti mendongak, pemandangan itu mustahil.
+  // Ini DIUKUR, bukan disimpulkan. Cara mengukurnya (30 detik, aman, cuma
+  // menggerakkan kepala) -- hentikan pelacak lalu perintahkan dua sudut mutlak
+  // berturut-turut DALAM RUN YANG SAMA, ambil satu frame kamera di tiap sudut:
+  //     head_tilt -25,8 deg -> kamera MENDONGAK (langit-langit/ruangan)
+  //     head_tilt +25,8 deg -> kamera MENUNDUK  (lantai, bola, badan sendiri)
   //
-  // Jadi head_tilt_sign_ = +1 di sini. Setel kick_head_tilt_sign := -1.0 kalau
-  // suatu saat ada robot yang benar-benar terbalik.
+  // Harus dalam run yang sama dan berselang detik. Membandingkan foto dari dua
+  // run berbeda pernah menyesatkan sampai tanda ini dibalik keliru: bolanya
+  // sudah dipindah di antara kedua run, jadi "sama-sama kelihatan lantai"
+  // tidak membuktikan apa pun. Jangan pula percaya komentar di
+  // head_tracking.yaml atau kesan arah gerak kepala -- keduanya pernah salah.
+  //
+  // head_tilt_sign_ = -1 mengembalikan sudutnya ke konvensi yang diasumsikan
+  // rumus. Setel kick_head_tilt_sign := 1.0 untuk robot konvensi asli.
   //
   // head_tilt_sign_ = -1 mengembalikan sudutnya ke konvensi yang diasumsikan
   // rumus. Setel kick_head_tilt_sign := 1.0 untuk robot yang masih konvensi

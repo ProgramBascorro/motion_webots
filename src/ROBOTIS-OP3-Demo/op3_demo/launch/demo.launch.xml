@@ -47,7 +47,18 @@
   <!-- robotis op3 demo. use_head_control:=false hands the head off to the
        external head_tracking_node above; SoccerDemo still owns the FSM,
        walking module switching, ball following, and kicking. -->
+  <!-- Tinggi kamera dari LANTAI, meter. Bukan konstanta robot: dipakai untuk
+       menghitung jarak bola dari sudut tunduk kepala, jadi harus mengikuti di
+       mana robot berada.
+         berdiri di lantai   : 0.56  (bawaan)
+         digantung di dudukan: 0.56 + tinggi gantungan
+                               contoh gantungan 29,5 cm -> 0.855
+       Salah nilai di sini tidak bikin error, cuma membuat jarak yang dilaporkan
+       (dan karena itu pemicu tendangan) meleset sebanding. -->
+  <arg name="kick_camera_height" default="0.56"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
+    <param name="kick_camera_height" value="$(var kick_camera_height)"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>
