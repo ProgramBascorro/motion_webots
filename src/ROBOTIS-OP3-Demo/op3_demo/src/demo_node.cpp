@@ -28,6 +28,11 @@
 #include "robotis_math/robotis_linear_algebra.h"
 #include "robotis_controller_msgs/msg/sync_write_item.hpp"
 
+#include <execinfo.h>
+#include <fcntl.h>
+#include <csignal>
+#include <unistd.h>
+
 enum Demo_Status
 {
   Ready = 0,
@@ -45,6 +50,50 @@ bool checkManagerRunning(std::string& manager_name);
 void dxlTorqueChecker();
 void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg);
 void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
+
+// Jejak tumpukan saat node ini mati mendadak.
+//
+// op_demo_node beberapa kali mati dengan exit code -11 (SIGSEGV) beberapa ratus
+// milidetik sesudah demo soccer mulai. Dari luar gejalanya menyesatkan: tombol
+// START "berhasil" (robot memang mulai jalan), lalu tombol berikutnya tidak
+// berpengaruh apa-apa dan robot tidak pernah menendang -- padahal sebenarnya
+// node-nya sudah TIDAK ADA sejak detik pertama. launch.log cuma menulis
+// "process has died", tanpa satu baris pun tentang di mana.
+//
+// Handler ini mencetak jejak tumpukan ke stderr, jadi crash berikutnya langsung
+// menunjuk barisnya. Sengaja hanya memakai fungsi yang aman dipanggil dari
+// signal handler (write/backtrace_symbols_fd), lalu meneruskan sinyalnya ke
+// perilaku bawaan supaya exit code-nya tetap apa adanya.
+extern "C" void crashHandler(int sig)
+{
+  static const char msg[] = "\n=== op_demo_node MATI karena sinyal ";
+  ssize_t ignored = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+  // Dua digit: SIGSEGV itu 11, dan versi satu-digit dulu mencetaknya "1".
+  char digits[2] = {static_cast<char>('0' + (sig / 10) % 10),
+                    static_cast<char>('0' + sig % 10)};
+  ignored = write(STDERR_FILENO, digits, 2);
+  ignored = write(STDERR_FILENO, " ===\n", 6);
+  (void) ignored;
+
+  void *frames[32];
+  const int n = backtrace(frames, 32);
+  backtrace_symbols_fd(frames, n, STDERR_FILENO);
+
+  // Juga ke berkas: stderr node yang diluncurkan lewat `ros2 launch` cuma
+  // muncul di terminal peluncur dan tidak tersimpan di mana pun, jadi jejaknya
+  // hilang begitu terminal ditutup atau layarnya tergulung.
+  const int fd = open("/tmp/op_demo_crash.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd >= 0) {
+    ignored = write(fd, msg, sizeof(msg) - 1);
+    ignored = write(fd, digits, 2);
+    ignored = write(fd, " ===\n", 6);
+    backtrace_symbols_fd(frames, n, fd);
+    close(fd);
+  }
+
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
 
 const int SPIN_RATE = 30;
 const bool DEBUG_PRINT = false;
@@ -77,6 +126,11 @@ std::shared_ptr<robotis_op::OPDemo> current_demo;
 //node main
 int main(int argc, char **argv)
 {
+  signal(SIGSEGV, crashHandler);
+  signal(SIGABRT, crashHandler);
+  signal(SIGBUS, crashHandler);
+  signal(SIGFPE, crashHandler);
+
   //init ros
   rclcpp::init(argc, argv);
 

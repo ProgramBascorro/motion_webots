@@ -17,6 +17,7 @@
 /* Author: Kayman Jung */
 
 #include "op3_demo/ball_follower.h"
+#include <algorithm>
 
 namespace robotis_op
 {
@@ -43,6 +44,7 @@ BallFollower::BallFollower()
     // sqrt(0,54^2 - 0,50^2) = 0,20 m -- itu padanannya.
     kick_distance_(0.20),
     head_tilt_sign_(-1.0),   // ALPHONSE: head_tilt POSITIF = menunduk
+    log_clock_(rclcpp::Clock::make_shared()),
     kick_pan_right_min_deg_(156.0),
     kick_pan_right_max_deg_(158.0),
     kick_pan_left_min_deg_(182.0),
@@ -186,10 +188,15 @@ void BallFollower::stopFollowing()
 
 void BallFollower::currentJointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-  double pan, tilt;
+  double pan = 0.0, tilt = 0.0;
   int get_count = 0;
 
-  for (int ix = 0; ix < msg->name.size(); ix++)
+  // position boleh lebih pendek dari name (mis. pesan yang cuma membawa nama).
+  // Versi lama mengindeks position[] dengan panjang name[] -- baca di luar
+  // batas vector, dan itulah kelas bug yang berakhir SIGSEGV.
+  const size_t count = std::min(msg->name.size(), msg->position.size());
+
+  for (size_t ix = 0; ix < count; ix++)
   {
     if (msg->name[ix] == "head_pan")
     {
@@ -206,7 +213,14 @@ void BallFollower::currentJointStatesCallback(const sensor_msgs::msg::JointState
       break;
   }
 
-  // check variation
+  // Hanya pakai kalau KEDUANYA benar-benar ada di pesan ini. Versi lama
+  // menyalin pan/tilt yang BELUM DIINISIALISASI kalau sendi kepala tidak ada
+  // di pesan -- current_tilt_ jadi sampah, jarak bola ikut sampah (bisa NaN),
+  // dan pembandingan "jarak < ambang" tidak pernah benar lagi. Dari luar itu
+  // terlihat sebagai "robot tidak pernah menendang".
+  if (get_count != 2)
+    return;
+
   current_pan_ = pan;
   current_tilt_ = tilt;
 }
@@ -361,7 +375,7 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // dekatkan bola sampai jaraknya turun di bawah ambang, atau sampai servo
   // head_pan masuk salah satu jendela.
   RCLCPP_INFO_THROTTLE(rclcpp::get_logger("BallFollower"),
-                       *rclcpp::Clock::make_shared(), 1000,
+                       *log_clock_, 1000,
                        "jarak bola %.3f m (ambang %.3f) | servo head_pan %.1f deg "
                        "(kanan %.0f-%.0f, kiri %.0f-%.0f) | head_tilt %+.1f deg "
                        "| bola dlm gambar %+.1f deg | tunduk total %+.1f deg | bola x %+.1f deg | siap: %s",

@@ -142,7 +142,7 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
 {
   if (enable_ == false)
   {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 1, "Head module is not enable.");
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1, "Head module is not enable.");
     publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_ERROR, "Not Enable");
     return;
   }
@@ -154,7 +154,7 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
   // first one is harmless.
   if (has_goal_position_ == false)
   {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 2000,
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
                          "head_control_module: goal_position not initialized yet, dropping command");
     return;
   }
@@ -217,11 +217,11 @@ void HeadControlModule::setHeadScanCallback(const std_msgs::msg::String::SharedP
 {
   if (enable_ == false)
   {
-    RCLCPP_ERROR_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 1, "Head control module is not enabled, scan command is canceled.");
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1, "Head control module is not enabled, scan command is canceled.");
     return;
   }
   else
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *rclcpp::Clock::make_shared(), 1, "Scan command is accepted. [%d]", scan_state_);
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1, "Scan command is accepted. [%d]", scan_state_);
 
   if (msg->data == "scan" && scan_state_ == NoScan)
   {

@@ -88,6 +88,15 @@ class BallFollower // : public rclcpp::Node
   //   -1  head_tilt POSITIF berarti menunduk  (ALPHONSE)
   // Lihat penjelasan panjang di processFollowing() pada .cpp.
   double head_tilt_sign_;
+  // Klok untuk RCLCPP_*_THROTTLE. WAJIB hidup lebih lama dari pemanggilannya:
+  // makro THROTTLE menyimpan REFERENSI ke klok lalu memakainya lagi di
+  // pernyataan berikutnya di dalam blok makro. Menuliskan
+  // `*rclcpp::Clock::make_shared()` langsung di tempat pemanggilan membuat
+  // shared_ptr sementara yang mati di akhir pernyataan PERTAMA, sehingga
+  // pemakaian berikutnya membaca objek yang sudah dibebaskan -- SIGSEGV di
+  // rclcpp::Clock::now(). Itu yang membunuh op_demo_node ~0,5 detik sesudah
+  // demo soccer mulai.
+  rclcpp::Clock::SharedPtr log_clock_;
   // Pemicu tendangan berdasarkan sudut SERVO head_pan -- diukur langsung di
   // robot oleh operator, dalam satuan yang dibaca Dynamixel/Studio (0..360,
   // tengah 180). Bola di KANAN + kepala menoleh kanan sampai servo ~156-158
