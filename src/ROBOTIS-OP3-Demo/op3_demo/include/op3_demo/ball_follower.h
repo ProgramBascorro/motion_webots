@@ -76,7 +76,18 @@ class BallFollower // : public rclcpp::Node
 
  protected:
   const bool DEBUG_PRINT;
-  const double CAMERA_HEIGHT;
+  // Geometri pemicu tendangan. Dulu CAMERA_HEIGHT konstanta 0,56 m; sekarang
+  // bisa disetel lewat parameter ROS (kick_camera_height, kick_distance,
+  // kick_head_tilt_sign) supaya bisa ditera langsung di robot tanpa compile
+  // ulang. Urutan deklarasi sengaja menempati posisi CAMERA_HEIGHT yang lama
+  // supaya urutan init-list di konstruktor tetap cocok.
+  double camera_height_;
+  double kick_distance_;
+  // Tanda konvensi head_tilt:
+  //   +1  head_tilt NEGATIF berarti menunduk  (konvensi OP3 asli)
+  //   -1  head_tilt POSITIF berarti menunduk  (ALPHONSE)
+  // Lihat penjelasan panjang di processFollowing() pada .cpp.
+  double head_tilt_sign_;
   const int NOT_FOUND_THRESHOLD;
   const double FOV_WIDTH;
   const double FOV_HEIGHT;

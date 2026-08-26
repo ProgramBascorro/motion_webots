@@ -48,8 +48,22 @@ HeadControlModule::HeadControlModule()
 
   max_angle_[using_joint_name_["head_pan"]] = 85 * DEGREE2RADIAN;
   min_angle_[using_joint_name_["head_pan"]] = -85 * DEGREE2RADIAN;
-  max_angle_[using_joint_name_["head_tilt"]] = 30 * DEGREE2RADIAN;
-  min_angle_[using_joint_name_["head_tilt"]] = -75 * DEGREE2RADIAN;
+  // Nilai awal saja; initialize() menimpanya dari parameter ROS.
+  //
+  // Angka bawaan ROBOTIS adalah max +30 / min -75, dan itu dibuat untuk
+  // konvensi OP3 ASLI di mana head_tilt NEGATIF berarti menunduk -- jadi
+  // 75 derajat jatah MENUNDUK dan 30 derajat jatah MENDONGAK.
+  //
+  // ALPHONSE terbalik: POSITIF berarti menunduk. Dengan angka bawaan itu,
+  // robot ini cuma bisa menunduk 30 derajat dan bisa mendongak 75 derajat --
+  // kebalikan dari yang berguna untuk bola di lantai. Dua akibatnya nyata:
+  //   - sapuan lama scan_tilt_down_rad 0,55 rad (+31,5 deg) DIPOTONG jadi
+  //     +30 deg, dan di situlah kepala terlihat "nunduk banget";
+  //   - pemicu tendangan di BallFollower butuh head_tilt > +59,7 deg, jadi
+  //     TIDAK PERNAH tercapai dan robot tidak pernah menendang.
+  // Karena itu jatahnya ditukar: 75 derajat menunduk, 30 derajat mendongak.
+  max_angle_[using_joint_name_["head_tilt"]] = 75 * DEGREE2RADIAN;
+  min_angle_[using_joint_name_["head_tilt"]] = -30 * DEGREE2RADIAN;
 
   target_position_ = Eigen::MatrixXd::Zero(1, result_.size());
   current_position_ = Eigen::MatrixXd::Zero(1, result_.size());
@@ -70,7 +84,20 @@ void HeadControlModule::initialize(const int control_cycle_msec, robotis_framewo
   this->declare_parameter("angle_unit", 35.0);
   angle_unit_ = this->get_parameter("angle_unit").as_double();
 
-  RCLCPP_WARN(this->get_logger(), "Head control - angle unit : %f", angle_unit_);
+  // Batas sendi kepala, derajat. Bisa disetel supaya jangkauan menunduk bisa
+  // dinaikkan bertahap sambil diamati, tanpa compile ulang. Lihat catatan
+  // panjang di konstruktor soal kenapa tandanya ditukar untuk robot ini.
+  this->declare_parameter("head_tilt_max_deg", 75.0);
+  this->declare_parameter("head_tilt_min_deg", -30.0);
+  const double tilt_max_deg = this->get_parameter("head_tilt_max_deg").as_double();
+  const double tilt_min_deg = this->get_parameter("head_tilt_min_deg").as_double();
+  max_angle_[using_joint_name_["head_tilt"]] = tilt_max_deg * DEGREE2RADIAN;
+  min_angle_[using_joint_name_["head_tilt"]] = tilt_min_deg * DEGREE2RADIAN;
+
+  RCLCPP_WARN(this->get_logger(),
+              "Head control - angle unit : %f, head_tilt limit : %+.1f .. %+.1f deg "
+              "(positif = menunduk di robot ini)",
+              angle_unit_, tilt_min_deg, tilt_max_deg);
 
   queue_thread_ = std::thread(&HeadControlModule::queueThread, this);
 

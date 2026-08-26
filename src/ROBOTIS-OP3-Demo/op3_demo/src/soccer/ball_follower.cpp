@@ -30,7 +30,9 @@ BallFollower::BallFollower()
     on_tracking_(false),
     approach_ball_position_(NotFound),
     kick_motion_index_(40),
-    CAMERA_HEIGHT(0.56),
+    camera_height_(0.56),
+    kick_distance_(0.23),
+    head_tilt_sign_(-1.0),   // ALPHONSE: head_tilt POSITIF = menunduk
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
     MAX_RL_TURN(15.0 * M_PI / 180),
@@ -71,6 +73,24 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
   node_ = node;
   if (node_ != nullptr)
   {
+    // Geometri pemicu tendangan, bisa ditera di robot tanpa compile ulang.
+    // Dijaga has_parameter(): declare_parameter yang kedua kali pada nama yang
+    // sama melempar exception, dan node ini dipakai bersama demo lain.
+    auto read_param = [this](const std::string &name, double fallback) -> double
+    {
+      if (node_->has_parameter(name) == false)
+        return node_->declare_parameter(name, fallback);
+      double value = fallback;
+      node_->get_parameter(name, value);
+      return value;
+    };
+    camera_height_  = read_param("kick_camera_height", camera_height_);
+    kick_distance_  = read_param("kick_distance", kick_distance_);
+    head_tilt_sign_ = read_param("kick_head_tilt_sign", head_tilt_sign_);
+    RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                "Kick geometry: camera_height=%.3f m, kick_distance=%.3f m, head_tilt_sign=%+.0f",
+                camera_height_, kick_distance_, head_tilt_sign_);
+
     current_joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         "/robotis/goal_joint_states", 10, std::bind(&BallFollower::currentJointStatesCallback, this, std::placeholders::_1));
 
@@ -227,7 +247,27 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
 
   approach_ball_position_ = OutOfRange;
 
-  double distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + current_tilt_ - hip_pitch_offset_ - ball_size);
+  // Rumus aslinya menganggap head_tilt NEGATIF saat menunduk (konvensi OP3
+  // asli): dengan hip_pitch_offset 0 ia menjadi H*cot(sudut tunduk) = jarak
+  // bola yang sebenarnya, persis.
+  //
+  // ALPHONSE TERBALIK -- head_tilt POSITIF berarti menunduk. Tercatat di
+  // op3_ball_localization/config/head_tracking.yaml ("POSITIVE = look DOWN")
+  // dan dibuktikan lagi 2026-08-25: nilai scan_tilt_* diturunkan tiga kali
+  // (0,25 -> 0,12 -> 0,05 -> -0,12) dan kepala memang makin MENDONGAK.
+  //
+  // Tanpa koreksi tanda, syaratnya menjadi |head_tilt - 8,0| > 67,7 deg, yaitu
+  // head_tilt > +75,7 deg ATAU < -59,7 deg. Sapuan robot ini cuma bergerak di
+  // -6,9 .. +5,2 deg, jadi in_range TIDAK PERNAH benar dan handleKick() tidak
+  // pernah dipanggil -- persis gejala "didekatkan ke kaki tapi tidak menendang".
+  // Rumusnya juga melebih-lebihkan jarak: pada head_tilt +59,7 deg ia melaporkan
+  // 0,443 m padahal geometrinya 0,230 m -- hampir dua kali lipat.
+  //
+  // head_tilt_sign_ = -1 mengembalikan sudutnya ke konvensi yang diasumsikan
+  // rumus. Setel kick_head_tilt_sign := 1.0 untuk robot yang masih konvensi
+  // asli.
+  const double tilt_for_geometry = head_tilt_sign_ * current_tilt_;
+  double distance_to_ball = camera_height_ * tan(M_PI * 0.5 + tilt_for_geometry - hip_pitch_offset_ - ball_size);
 
   double ball_y_angle = (current_tilt_ + y_angle) * 180 / M_PI;
   double ball_x_angle = (current_pan_ + x_angle) * 180 / M_PI;
@@ -235,8 +275,15 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   if (distance_to_ball < 0)
     distance_to_ball *= (-1);
 
-  //double distance_to_kick = 0.25; Bagus :0.235
-  double distance_to_kick = 0.23;
+  double distance_to_kick = kick_distance_;
+
+  // Selalu dicetak (1x/detik) supaya ambangnya bisa ditera langsung di robot:
+  // dekatkan bola sampai angka ini turun di bawah kick_distance.
+  RCLCPP_INFO_THROTTLE(rclcpp::get_logger("BallFollower"),
+                       *rclcpp::Clock::make_shared(), 1000,
+                       "jarak bola %.3f m (ambang %.3f) | head_tilt %+.1f deg | bola x %+.1f deg",
+                       distance_to_ball, distance_to_kick,
+                       current_tilt_ * 180 / M_PI, ball_x_angle);
 
   // check whether ball is correct position.
   if ((distance_to_ball < distance_to_kick) && (fabs(ball_x_angle) < 25.0))
