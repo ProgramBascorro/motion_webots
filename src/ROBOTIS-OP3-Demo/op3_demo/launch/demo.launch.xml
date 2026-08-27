@@ -48,21 +48,34 @@
        external head_tracking_node above; SoccerDemo still owns the FSM,
        walking module switching, ball following, and kicking. -->
   <!-- Tinggi kamera dari LANTAI, meter. Bukan konstanta robot: dipakai untuk
-       menghitung jarak bola dari sudut tunduk kepala, jadi harus mengikuti di
-       mana robot berada.
-         berdiri di lantai   : 0.56  (bawaan)
+       menghitung jarak bola dari sudut tunduk kepala DAN untuk menghitung
+       ambang radius bola, jadi harus mengikuti di mana robot berada.
+         berdiri di lantai   : 0.56
          digantung di dudukan: 0.56 + tinggi gantungan
-                               contoh gantungan 29,5 cm -> 0.855
+                               gantungan 29,5 cm  ->  0.855  (BAWAAN SEKARANG)
+       Bawaannya sengaja 0.855, bukan 0.56, karena robot ini sehari-hari diuji
+       dalam keadaan DIGANTUNG dan angka itu yang terbukti benar di lapangan
+       (14 tendangan berhasil, log 2026-08-27). Begitu robot turun berdiri di
+       lantai, jalankan dengan kick_camera_height:=0.56; ambang radius ikut
+       menyesuaikan sendiri, tidak ada angka lain yang perlu disentuh.
        Salah nilai di sini tidak bikin error, cuma membuat jarak yang dilaporkan
        (dan karena itu pemicu tendangan) meleset sebanding. -->
-  <arg name="kick_camera_height" default="0.56"/>
+  <arg name="kick_camera_height" default="0.855"/>
 
   <!-- Ambang tendangan, meter, dalam JARAK TANAH (bukan jarak lurus ke kamera).
        kick_distance juga jadi jarak BERHENTI robot saat mendekati bola.
        Dibuka di sini supaya bisa ditera langsung di robot tanpa build ulang;
        bandingkan dengan angka "jarak bola" yang dicetak BallFollower 1x/detik. -->
   <arg name="kick_distance" default="0.30"/>
-  <arg name="kick_pan_max_distance" default="0.40"/>
+  <!-- Batas jarak untuk jalur pemicu JENDELA PAN: bola harus lebih dekat dari
+       ini sebelum sudut servo kepala boleh memicu tendangan. Gunanya cuma
+       mencegah robot menendang angin saat bolanya masih jauh di seberang
+       lapangan tapi kebetulan lurus di depan kaki.
+       Bawaannya 1.00 dan bukan 0.40 karena saat robot digantung, jarak hasil
+       hitungan sudut kepala memang membesar (kamera lebih tinggi), sehingga
+       dengan 0.40 jalur jendela pan praktis tidak pernah kebuka. Angka longgar
+       di sini aman: yang menentukan tetap jendela sudut pan itu sendiri. -->
+  <arg name="kick_pan_max_distance" default="1.00"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
        sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
@@ -85,8 +98,11 @@
        (157 kanan, 183 kiri), dilebarkan +-4 derajat karena kepala bergerak
        dalam lompatan, bukan sapuan mulus.
        Terukur 2026-08-26: saat bola benar-benar di sisi KIRI, servo justru
-       duduk di 193..208 (paling sering 200), bukan 179..187. Kalau kaki kiri
-       tidak pernah terpicu, itu tempat pertama yang harus disetel. -->
+       duduk di 193..208 (paling sering 200), bukan 179..187. Jendela kiri di
+       bawah karena itu dipasang di angka TERUKUR, bukan angka nominal; sisi
+       kanan masih di angka nominal 153..161. Kalau salah satu kaki tidak
+       pernah terpicu lewat jalur jendela pan, di sinilah tempat menyetelnya:
+       baca "servo head_pan NNN deg" di baris TENDANG pada log. -->
   <!-- type="float" pada tiap param di bawah BUKAN hiasan: tanpa itu, mengetik
        kick_pan_left_min_deg:=193 (tanpa titik desimal) membuat ROS menyimpulkan
        tipe integer, tidak cocok dengan deklarasi double di kode, dan
@@ -96,8 +112,8 @@
        "double" dengan ValueError: Got invalid type identifier. -->
   <arg name="kick_pan_right_min_deg" default="153.0"/>
   <arg name="kick_pan_right_max_deg" default="161.0"/>
-  <arg name="kick_pan_left_min_deg" default="179.0"/>
-  <arg name="kick_pan_left_max_deg" default="187.0"/>
+  <arg name="kick_pan_left_min_deg" default="193.0"/>
+  <arg name="kick_pan_left_max_deg" default="208.0"/>
 
   <!-- Bahan hitungan ambang radius otomatis. Rumusnya:
          fokus  = (lebar_gambar / 2) / tan(setengah_FOV)
