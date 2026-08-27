@@ -97,12 +97,22 @@
        di depan kaki ini". Nilai bawaan berpusat pada angka yang diukur operator
        (157 kanan, 183 kiri), dilebarkan +-4 derajat karena kepala bergerak
        dalam lompatan, bukan sapuan mulus.
-       Terukur 2026-08-26: saat bola benar-benar di sisi KIRI, servo justru
-       duduk di 193..208 (paling sering 200), bukan 179..187. Jendela kiri di
-       bawah karena itu dipasang di angka TERUKUR, bukan angka nominal; sisi
-       kanan masih di angka nominal 153..161. Kalau salah satu kaki tidak
-       pernah terpicu lewat jalur jendela pan, di sinilah tempat menyetelnya:
-       baca "servo head_pan NNN deg" di baris TENDANG pada log. -->
+       Angka nominal itu ternyata meleset. Yang dipasang di bawah adalah angka
+       dari robot, bukan dari perkiraan:
+
+         KIRI  193..208, terukur 2026-08-26 dengan bola benar-benar di sisi
+               kiri; servo paling sering duduk di 200, tidak pernah 179..187.
+         KANAN 152..167, cerminan jendela kiri terhadap tengah 180 (kiri itu
+               +13..+28, jadi kanan -28..-13). Dicocokkan dengan log
+               2026-08-27: tendangan kaki kanan terjadi pada servo 156,7 /
+               160,0 / 162,3 / 163,5 / 165,2 / 166,1; semuanya masuk 152..167,
+               sedangkan jendela lama 153..161 cuma menampung satu.
+
+       Jendela ini SUDUT MENDATAR, jadi tidak berubah saat robot diturunkan dari
+       gantungan: yang menentukan letak bola ke samping, bukan tinggi kamera.
+       Kalau salah satu kaki tidak pernah terpicu lewat jalur jendela pan, di
+       sinilah tempat menyetelnya: baca "servo head_pan NNN deg" di baris
+       TENDANG pada log. -->
   <!-- type="float" pada tiap param di bawah BUKAN hiasan: tanpa itu, mengetik
        kick_pan_left_min_deg:=193 (tanpa titik desimal) membuat ROS menyimpulkan
        tipe integer, tidak cocok dengan deklarasi double di kode, dan
@@ -110,8 +120,8 @@
        seketika (exit -6). Dengan type="float", "193" ikut dikonversi.
        Pengenal tipenya "float", BUKAN "double": launch XML ROS 2 menolak
        "double" dengan ValueError: Got invalid type identifier. -->
-  <arg name="kick_pan_right_min_deg" default="153.0"/>
-  <arg name="kick_pan_right_max_deg" default="161.0"/>
+  <arg name="kick_pan_right_min_deg" default="152.0"/>
+  <arg name="kick_pan_right_max_deg" default="167.0"/>
   <arg name="kick_pan_left_min_deg" default="193.0"/>
   <arg name="kick_pan_left_max_deg" default="208.0"/>
 
