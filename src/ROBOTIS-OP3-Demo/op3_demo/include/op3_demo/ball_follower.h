@@ -142,6 +142,11 @@ class BallFollower // : public rclcpp::Node
   // memicu di titik kontak berarti memicu saat bola sudah tidak terlihat.
   // Ayunan kaki yang menutup sisanya. Setel 0 untuk mematikan jalur ini.
   double kick_ball_radius_px_;
+  // Bahan untuk menghitung kick_ball_radius_px_ sendiri kalau tidak dipasang
+  // manual. Semuanya besaran fisik yang bisa diukur, bukan angka ajaib.
+  double kick_ball_real_radius_m_;   // jari-jari bola sungguhan (ukuran 5 = 0,11 m)
+  double kick_fov_width_deg_;        // setengah-FOV mendatar kamera
+  double kick_image_width_px_;       // lebar gambar
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang
   // angka besar bikin pemicunya tidak pernah penuh -- turunkan kalau begitu.

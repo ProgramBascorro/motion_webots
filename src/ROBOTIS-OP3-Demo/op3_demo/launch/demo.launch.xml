@@ -65,16 +65,20 @@
   <arg name="kick_pan_max_distance" default="0.40"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
-       sedikit asumsinya: tidak bergantung tinggi kamera, hip_pitch, tanda
-       head_tilt, ataupun apakah kepala menunjuk ke bola. Bola dekat selalu
-       besar di gambar.
-       Kalibrasinya satu angka: taruh bola di tempat yang diinginkan, baca
-       "radius=NN.Npx" di log detektor YOLO, pasang angka itu di sini.
-       Terukur di robot ini: 13 px = 3,8 m ... 92 px = 0,30 m (saat berdiri).
-       Bawaan 85 px sengaja sedikit LEBIH JAUH dari titik kontak ideal, karena
-       badan robot menutupi bola di bawah ~0,32 m; ayunan kaki yang menutup
-       sisanya. Setel 0 untuk mematikan jalur ini. -->
-  <arg name="kick_ball_radius_px" default="85.0"/>
+       sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
+       apakah kepala menunjuk ke bola. Bola dekat selalu besar di gambar.
+
+       Bawaan 0 berarti DIHITUNG SENDIRI dari kick_distance + kick_camera_height.
+       Pakai itu. Ambang radius memang berbeda antara robot berdiri dan robot
+       digantung, karena besar bola ditentukan jarak LURUS kamera-ke-bola dan
+       itu ikut berubah saat kamera naik. Terukur: bola di lantai tepat di
+       posisi kaki = 64,7 px saat digantung 29,5 cm, tapi 101,3 px saat berdiri.
+       Angka tetap akan salah di salah satu keadaan.
+
+       Isi angka di sini hanya kalau mau menimpa hasil hitungan; baca
+       "radius=NN.Npx" di log detektor YOLO saat bola ada di tempat yang
+       diinginkan. Setel angka negatif untuk mematikan jalur ini. -->
+  <arg name="kick_ball_radius_px" default="0.0"/>
 
   <!-- Jendela sudut SERVO head_pan (0..360, tengah 180) yang dianggap "bola ada
        di depan kaki ini". Nilai bawaan berpusat pada angka yang diukur operator
@@ -95,6 +99,19 @@
   <arg name="kick_pan_left_min_deg" default="179.0"/>
   <arg name="kick_pan_left_max_deg" default="187.0"/>
 
+  <!-- Bahan hitungan ambang radius otomatis. Rumusnya:
+         fokus  = (lebar_gambar / 2) / tan(setengah_FOV)
+         miring = akar(kick_distance^2 + (tinggi_kamera - jari_jari_bola)^2)
+         ambang = fokus * jari_jari_bola / miring
+       Jadi ketiga angka ini cuma perlu disentuh kalau bolanya bukan ukuran 5,
+       atau kameranya diganti dengan resolusi / lensa lain. kick_fov_width_deg
+       adalah SETENGAH bukaan mendatar, sama persis dengan BallTracker::FOV_WIDTH,
+       dan kick_image_width_px harus sama dengan lebar gambar di
+       camera_param.yaml, bukan lebar gambar hasil resize di detektor. -->
+  <arg name="kick_ball_real_radius_m" default="0.11"/>
+  <arg name="kick_fov_width_deg" default="35.2"/>
+  <arg name="kick_image_width_px" default="640.0"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
     <param name="kick_camera_height" value="$(var kick_camera_height)" type="float"/>
     <param name="kick_distance" value="$(var kick_distance)" type="float"/>
@@ -104,6 +121,9 @@
     <param name="kick_pan_right_max_deg" value="$(var kick_pan_right_max_deg)" type="float"/>
     <param name="kick_pan_left_min_deg" value="$(var kick_pan_left_min_deg)" type="float"/>
     <param name="kick_pan_left_max_deg" value="$(var kick_pan_left_max_deg)" type="float"/>
+    <param name="kick_ball_real_radius_m" value="$(var kick_ball_real_radius_m)" type="float"/>
+    <param name="kick_fov_width_deg" value="$(var kick_fov_width_deg)" type="float"/>
+    <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>

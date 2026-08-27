@@ -60,7 +60,10 @@ BallFollower::BallFollower()
     head_pan_servo_center_deg_(180.0),
     head_pan_servo_dir_(1.0),
     kick_pan_max_distance_(0.40),
-    kick_ball_radius_px_(85.0),
+    kick_ball_radius_px_(0.0),          // 0 = hitung sendiri, lihat setNode()
+    kick_ball_real_radius_m_(0.11),     // bola ukuran 5
+    kick_fov_width_deg_(35.2),          // sama dengan BallTracker::FOV_WIDTH
+    kick_image_width_px_(640.0),        // sama dengan camera_param.yaml
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
@@ -164,6 +167,38 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     head_pan_servo_dir_        = read_param("head_pan_servo_dir", head_pan_servo_dir_);
     kick_pan_max_distance_     = read_param("kick_pan_max_distance", kick_pan_max_distance_);
     kick_ball_radius_px_       = read_param("kick_ball_radius_px", kick_ball_radius_px_);
+    kick_ball_real_radius_m_   = read_param("kick_ball_real_radius_m", kick_ball_real_radius_m_);
+    kick_fov_width_deg_        = read_param("kick_fov_width_deg", kick_fov_width_deg_);
+    kick_image_width_px_       = read_param("kick_image_width_px", kick_image_width_px_);
+
+    // Ambang radius dihitung sendiri kalau tidak dipasang manual.
+    //
+    // Alasannya konkret: ambang radius TIDAK sama untuk robot berdiri dan robot
+    // digantung, karena yang menentukan besar bola di gambar adalah jarak LURUS
+    // kamera-ke-bola, dan itu ikut berubah saat kamera naik. Terukur di robot:
+    // bola di lantai tepat di posisi kaki memberi 64,7 px saat digantung 29,5 cm,
+    // tapi 101,3 px saat berdiri. Angka tetap 85 px terlalu menuntut saat
+    // digantung -- bolanya harus diangkat dulu supaya cukup besar, dan itu
+    // persis yang terjadi waktu diuji.
+    //
+    // Dengan dihitung dari kick_distance + kick_camera_height, cukup mengubah
+    // kick_camera_height saat robot turun ke lantai dan ambang radiusnya ikut
+    // benar sendiri.
+    if (kick_ball_radius_px_ <= 0.0)
+    {
+      const double focal_px = (kick_image_width_px_ * 0.5)
+                            / tan(kick_fov_width_deg_ * M_PI / 180.0);
+      // Kamera melihat PUSAT bola, jadi beda tingginya dikurangi jari-jari bola.
+      const double drop = camera_height_ - kick_ball_real_radius_m_;
+      const double slant = sqrt(kick_distance_ * kick_distance_ + drop * drop);
+      kick_ball_radius_px_ = (slant > 0.0) ? (focal_px * kick_ball_real_radius_m_ / slant) : 0.0;
+
+      RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                  "Kick radius bola dihitung sendiri: %.1f px "
+                  "(dari kick_distance %.2f m + tinggi kamera %.3f m, fokus %.0f px). "
+                  "Pasang kick_ball_radius_px untuk menimpanya.",
+                  kick_ball_radius_px_, kick_distance_, camera_height_, focal_px);
+    }
     kick_ready_count_ = (int) read_param("kick_ready_count", (double) kick_ready_count_);
 
     RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
