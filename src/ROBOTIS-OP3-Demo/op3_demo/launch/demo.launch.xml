@@ -102,11 +102,18 @@
 
          KIRI  193..208, terukur 2026-08-26 dengan bola benar-benar di sisi
                kiri; servo paling sering duduk di 200, tidak pernah 179..187.
-         KANAN 152..167, cerminan jendela kiri terhadap tengah 180 (kiri itu
-               +13..+28, jadi kanan -28..-13). Dicocokkan dengan log
-               2026-08-27: tendangan kaki kanan terjadi pada servo 156,7 /
-               160,0 / 162,3 / 163,5 / 165,2 / 166,1; semuanya masuk 152..167,
-               sedangkan jendela lama 153..161 cuma menampung satu.
+         KANAN 152..178, dari sebaran TERUKUR juga, bukan cerminan. 21 sampel
+               (2 run) memberi kanan 156,7..175,4 dan kiri 175,4..202,6.
+               Cerminan sebaran kanan terhadap 180 = 184,6..203,3; ujung atasnya
+               cocok dengan ujung atas kiri (202,6), jadi pusat 180 memang benar
+               dan dugaan "pusatnya bergeser" tidak terbukti. Yang meleset cuma
+               batas ATAS jendela kanan: versi 152..167 memotong 169,2 / 170,4 /
+               173,4 / 174,0 / 175,4. Batasnya 178 dan bukan pas 175,4 supaya
+               ada margin, tapi tetap berhenti sebelum 180 (lurus ke depan).
+
+       Ada zona mati 178..193 yang tidak masuk jendela mana pun. Itu disengaja:
+       di situ bola ada di depan TENGAH badan, bukan di depan salah satu kaki.
+       Jalur radius bola yang menanganinya.
 
        Jendela ini SUDUT MENDATAR, jadi tidak berubah saat robot diturunkan dari
        gantungan: yang menentukan letak bola ke samping, bukan tinggi kamera.
@@ -121,7 +128,7 @@
        Pengenal tipenya "float", BUKAN "double": launch XML ROS 2 menolak
        "double" dengan ValueError: Got invalid type identifier. -->
   <arg name="kick_pan_right_min_deg" default="152.0"/>
-  <arg name="kick_pan_right_max_deg" default="167.0"/>
+  <arg name="kick_pan_right_max_deg" default="178.0"/>
   <arg name="kick_pan_left_min_deg" default="193.0"/>
   <arg name="kick_pan_left_max_deg" default="208.0"/>
 
