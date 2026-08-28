@@ -165,7 +165,8 @@ BallFollower::BallFollower()
     gyro_check_sec_(1.2),
     gyro_dir_settled_(false),
     last_ball_distance_(0.30),
-    yaw_strafe_gain_(0.30 * 0.001),   // 0,30 mm per derajat simpangan
+    orbit_ff_scale_(0.5),
+    yaw_strafe_gain_(1.5 * 0.001),    // 1,5 mm per derajat simpangan
     yaw_runaway_deg_(45.0),
     yaw_runaway_ref_error_(0.0),
     yaw_recheck_max_(3),
@@ -361,6 +362,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
     gyro_sign_           = read_param("kick_yaw_gyro_sign", gyro_sign_);
     gyro_scale_          = read_param("kick_yaw_gyro_scale", gyro_scale_);
+    orbit_ff_scale_      = read_param("kick_yaw_orbit_ff_scale", orbit_ff_scale_);
     gyro_check_sec_      = read_param("kick_yaw_gyro_check_sec", gyro_check_sec_);
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
     yaw_brake_max_sec_   = read_param("kick_yaw_brake_max_sec", yaw_brake_max_sec_);
@@ -1662,8 +1664,20 @@ bool BallFollower::processYawAlign(bool ball_visible)
   {
     const double d = (last_ball_distance_ > 0.05) ? last_ball_distance_ : 0.30;
 
-    y_move = -d * turn_rad;
+    // Umpan-maju DIKALI pecahan yang benar-benar terlaksana.
+    //
+    // Terukur di run op_demo_node_1667: robot diperintahkan berputar 61,5
+    // derajat total tapi benar-benar berputar 32,4 derajat (magnetometer, dua
+    // bacaan saat diam), yaitu 53 persen. Geserannya dihitung dari PERINTAH,
+    // jadi robot menggeser penuh sambil berputar setengahnya, dan bola
+    // terdorong keluar dari tengah: terbaca +1,9 lalu +29,2 derajat.
+    y_move = -d * turn_rad * orbit_ff_scale_;
 
+    // Umpan balik simpangan dinaikkan 0,30 ke 1,5 mm per derajat. Yang lama
+    // memberi 8,7 mm pada simpangan 29 derajat, terlalu kecil untuk melawan
+    // umpan-maju 35 mm yang mendorong ke arah sebaliknya. Umpan balik inilah
+    // yang menutup sisa selisih apa pun pecahan di atas, karena ia mengukur
+    // langsung apakah bola masih di depan.
     if (ball_visible == true)
       y_move += ball_bearing_deg * yaw_strafe_gain_;
 

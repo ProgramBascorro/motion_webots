@@ -414,6 +414,10 @@ class BallFollower // : public rclcpp::Node
   // Jarak bola terakhir yang sahih (dari radius bola). Dipakai fase memutar
   // untuk menghitung geseran menyamping yang benar secara geometri.
   double last_ball_distance_;
+  // Pecahan putaran yang BENAR-BENAR terlaksana dibanding yang diperintahkan.
+  // Geseran menyamping dihitung dari perintah, jadi tanpa pecahan ini robot
+  // menggeser penuh sambil berputar sebagian, dan bola terdorong keluar.
+  double orbit_ff_scale_;
   double yaw_strafe_gain_;      // meter per derajat simpangan arah bola
   double yaw_runaway_deg_;
   double yaw_runaway_ref_error_;

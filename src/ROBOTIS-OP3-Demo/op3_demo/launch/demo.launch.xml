@@ -251,7 +251,7 @@
        cepat supaya keduanya terlihat berangkat bersama.
 
        Turunkan kalau robot jadi kurang mantap saat mulai berjalan. -->
-  <arg name="walk_x_ramp_step_mm" default="1.5"/>
+  <arg name="walk_x_ramp_step_mm" default="0.3"/>
 
   <arg name="walk_orbit_enable" default="1.0"/>
   <arg name="walk_orbit_max_strafe_mm" default="35.0"/>
@@ -397,6 +397,23 @@
        terukur"). Kalau angkanya berulang konsisten di beberapa tendangan,
        pasang di sini. -->
   <arg name="kick_yaw_gyro_scale" default="1.0"/>
+
+  <!-- Pecahan putaran yang BENAR-BENAR terlaksana dibanding yang
+       diperintahkan.
+
+       Geseran menyamping saat mengitari dihitung dari sudut yang DIPERINTAHKAN
+       (geser = jarak x sudut). Tapi robot tidak melaksanakan seluruhnya:
+       terukur di run op_demo_node_1667 ia diperintahkan berputar 61,5 derajat
+       total dan benar-benar berputar 32,4 derajat, yaitu 53 persen.
+
+       Tanpa pecahan ini robot menggeser PENUH sambil berputar setengahnya,
+       sehingga bola justru terdorong keluar dari tengah: terbaca +1,9 lalu
+       +29,2 derajat sepanjang satu putaran.
+
+       Naikkan mendekati 1.0 kalau robot ternyata melaksanakan putaran lebih
+       penuh; turunkan kalau bola masih terdorong ke sisi yang sama dengan arah
+       geseran. -->
+  <arg name="kick_yaw_orbit_ff_scale" default="0.5"/>
   <arg name="kick_yaw_gyro_check_sec" default="1.2"/>
 
   <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
@@ -411,7 +428,7 @@
        itu, dengan batas atas supaya tidak pernah jadi langkah samping besar.
 
        Setel gain 0 untuk mematikan (kembali berputar di poros sendiri). -->
-  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="0.30"/>
+  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="1.5"/>
 
   <!-- Lama MENGEREM sebelum memutar, detik.
 
@@ -582,6 +599,7 @@
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
     <param name="kick_yaw_gyro_sign" value="$(var kick_yaw_gyro_sign)" type="float"/>
     <param name="kick_yaw_gyro_scale" value="$(var kick_yaw_gyro_scale)" type="float"/>
+    <param name="kick_yaw_orbit_ff_scale" value="$(var kick_yaw_orbit_ff_scale)" type="float"/>
     <param name="kick_yaw_gyro_check_sec" value="$(var kick_yaw_gyro_check_sec)" type="float"/>
     <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
     <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>
