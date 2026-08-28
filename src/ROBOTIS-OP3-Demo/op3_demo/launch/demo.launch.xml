@@ -74,12 +74,18 @@
        ini sebelum sudut servo kepala boleh memicu tendangan. Gunanya cuma
        mencegah robot menendang angin saat bolanya masih jauh di seberang
        lapangan tapi kebetulan lurus di depan kaki.
-       Dikembalikan ke 0.40 pada 2026-08-28, seiring kick_camera_height balik
-       ke 0.56. Angka 1.00 dulu dipakai karena saat robot DIGANTUNG jarak hasil
-       hitungan sudut kepala ikut membesar, sehingga 0.40 menutup jalur jendela
-       pan sama sekali. Begitu robot berdiri di lantai jaraknya jujur lagi, dan
-       1.00 berarti robot boleh menendang saat bola masih semeter jauhnya. -->
-  <arg name="kick_pan_max_distance" default="0.40"/>
+       Ini PAGAR KEWARASAN, bukan penentu. Yang menentukan tetap jendela sudut
+       pan itu sendiri; angka ini cuma mencegah robot menendang angin saat bola
+       masih di seberang lapangan tapi kebetulan lurus di depan kaki.
+
+       Sempat diperketat ke 0.40 pada 2026-08-28 dan itu SALAH: jarak hasil
+       hitungan sudut kepala memang sistematis lebih besar dari jarak
+       sebenarnya, jadi 0.40 menutup jalur jendela pan sama sekali. Terukur
+       pada run yang sama, 65 dari 261 sampel berbunyi "jendela pan cocok tapi
+       bola masih jauh" padahal operator melaporkan bola sudah di depan kaki,
+       dan robot tidak menendang satu kali pun. 0.70 memberi ruang untuk
+       kelebihan-baca itu tanpa kembali selonggar 1.00. -->
+  <arg name="kick_pan_max_distance" default="0.70"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
        sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
@@ -148,6 +154,35 @@
   <arg name="kick_ball_real_radius_m" default="0.11"/>
   <arg name="kick_fov_width_deg" default="35.2"/>
   <arg name="kick_image_width_px" default="640.0"/>
+
+  <!-- Potongan pada ambang radius hasil hitungan, pecahan 0..1.
+
+       Perlu karena radius TERUKUR sistematis lebih kecil daripada hitungan
+       geometri justru saat bola sudah dekat kaki: di posisi itu badan robot
+       sendiri menutupi sebagian bola, kotak deteksi YOLO ikut mengecil, dan
+       radiusnya membaca rendah.
+
+       Terukur 2026-08-28, 261 sampel, robot berdiri, operator melaporkan bola
+       berkali-kali sudah tepat di depan kaki:
+         radius >= 92,3 px (ambang ideal 0,30 m)  2 sampel   (1 %)
+         radius >= 82 px                          7 sampel   (3 %)
+         radius >= 75 px                          28 sampel  (11 %)
+       Dengan ambang ideal tanpa potongan, robot TIDAK menendang sama sekali.
+
+       0.10 memberi ambang 83 px. Kalau masih jarang menendang, naikkan ke
+       0.15 (78 px) atau 0.20 (74 px). Kalau justru menendang terlalu jauh,
+       turunkan ke 0.05 atau 0. -->
+  <arg name="kick_ball_radius_margin" default="0.10"/>
+
+  <!-- Berapa TICK BERTURUT-TURUT syaratnya harus benar sebelum menendang.
+       Loop demo 30 Hz, jadi 4 tick kira-kira 0,13 detik.
+
+       Dulu 10 dan itu terlalu menuntut: deteksi bola justru paling terputus
+       tepat di saat bola dekat kaki (badan robot menutupinya), padahal di situ
+       juga syaratnya baru terpenuhi. Menuntut 10 tick tanpa putus berarti
+       menuntut sepertiga detik pelacakan mulus pada momen yang paling sulit.
+       Hitungannya juga dinolkan setiap ada satu tick yang gagal. -->
+  <arg name="kick_ready_count" default="4.0"/>
 
   <!-- ===== Menghadap ke yaw acuan dulu, baru menendang =====================
 
@@ -290,6 +325,8 @@
     <param name="kick_ball_real_radius_m" value="$(var kick_ball_real_radius_m)" type="float"/>
     <param name="kick_fov_width_deg" value="$(var kick_fov_width_deg)" type="float"/>
     <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
+    <param name="kick_ball_radius_margin" value="$(var kick_ball_radius_margin)" type="float"/>
+    <param name="kick_ready_count" value="$(var kick_ready_count)" type="float"/>
     <param name="kick_yaw_align_enable" value="$(var kick_yaw_align_enable)" type="float"/>
     <param name="kick_yaw_target_deg" value="$(var kick_yaw_target_deg)" type="float"/>
     <param name="kick_yaw_tolerance_deg" value="$(var kick_yaw_tolerance_deg)" type="float"/>

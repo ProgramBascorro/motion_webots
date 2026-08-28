@@ -91,6 +91,7 @@ BallFollower::BallFollower()
     kick_ball_real_radius_m_(0.11),     // bola ukuran 5
     kick_fov_width_deg_(35.2),          // sama dengan BallTracker::FOV_WIDTH
     kick_image_width_px_(640.0),        // sama dengan camera_param.yaml
+    kick_ball_radius_margin_(0.10),     // ambang dipotong 10%, lihat setNode()
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
@@ -240,6 +241,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     kick_ball_real_radius_m_   = read_param("kick_ball_real_radius_m", kick_ball_real_radius_m_);
     kick_fov_width_deg_        = read_param("kick_fov_width_deg", kick_fov_width_deg_);
     kick_image_width_px_       = read_param("kick_image_width_px", kick_image_width_px_);
+    kick_ball_radius_margin_   = read_param("kick_ball_radius_margin", kick_ball_radius_margin_);
 
     // Ambang radius dihitung sendiri kalau tidak dipasang manual.
     //
@@ -261,13 +263,32 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
       // Kamera melihat PUSAT bola, jadi beda tingginya dikurangi jari-jari bola.
       const double drop = camera_height_ - kick_ball_real_radius_m_;
       const double slant = sqrt(kick_distance_ * kick_distance_ + drop * drop);
-      kick_ball_radius_px_ = (slant > 0.0) ? (focal_px * kick_ball_real_radius_m_ / slant) : 0.0;
+      const double ideal_px = (slant > 0.0) ? (focal_px * kick_ball_real_radius_m_ / slant) : 0.0;
+
+      // Ambang ideal dipotong margin, karena radius TERUKUR sistematis lebih
+      // kecil daripada hitungan geometri justru saat bola sudah dekat kaki:
+      // di posisi itu badan robot sendiri menutupi sebagian bola, kotak
+      // deteksi YOLO ikut mengecil, dan radiusnya membaca rendah.
+      //
+      // Terukur 2026-08-28 (261 sampel, robot berdiri, kamera 0,56 m, operator
+      // melaporkan bola berkali-kali sudah tepat di depan kaki):
+      //   radius >= 92,3 px (ambang ideal 0,30 m) : 2 sampel  (1 %)
+      //   radius >= 82   px                       : 7 sampel  (3 %)
+      //   radius >= 75   px                       : 28 sampel (11 %)
+      // Dengan ambang ideal robot TIDAK PERNAH menendang sama sekali.
+      double margin = kick_ball_radius_margin_;
+      if (margin < 0.0)  margin = 0.0;
+      if (margin > 0.9)  margin = 0.9;
+
+      kick_ball_radius_px_ = ideal_px * (1.0 - margin);
 
       RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
                   "Kick radius bola dihitung sendiri: %.1f px "
-                  "(dari kick_distance %.2f m + tinggi kamera %.3f m, fokus %.0f px). "
+                  "(ideal %.1f px dipotong margin %.0f%%; dari kick_distance %.2f m "
+                  "+ tinggi kamera %.3f m, fokus %.0f px). "
                   "Pasang kick_ball_radius_px untuk menimpanya.",
-                  kick_ball_radius_px_, kick_distance_, camera_height_, focal_px);
+                  kick_ball_radius_px_, ideal_px, margin * 100.0,
+                  kick_distance_, camera_height_, focal_px);
     }
     kick_ready_count_ = (int) read_param("kick_ready_count", (double) kick_ready_count_);
 

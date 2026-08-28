@@ -210,6 +210,11 @@ class BallFollower // : public rclcpp::Node
   double kick_ball_real_radius_m_;   // jari-jari bola sungguhan (ukuran 5 = 0,11 m)
   double kick_fov_width_deg_;        // setengah-FOV mendatar kamera
   double kick_image_width_px_;       // lebar gambar
+  // Potongan pada ambang radius hasil hitungan, pecahan 0..1. Ada karena
+  // radius TERUKUR sistematis lebih kecil daripada hitungan ideal saat bola
+  // dekat kaki: di situ badan robot sendiri menutupi sebagian bola, kotak
+  // deteksi jadi mengecil. Lihat setNode().
+  double kick_ball_radius_margin_;
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang
   // angka besar bikin pemicunya tidak pernah penuh -- turunkan kalau begitu.
