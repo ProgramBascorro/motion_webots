@@ -611,6 +611,45 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   if (distance_to_ball < 0)
     distance_to_ball *= (-1);
 
+  // Jarak dari JARI-JARI BOLA, dipakai untuk mengendalikan langkah maju.
+  //
+  // Jarak hasil sudut kepala di atas tidak bisa dipakai untuk berhenti: ia
+  // sistematis over-baca. Terukur di run lantai 2026-08-28, angka terkecil
+  // yang pernah dilaporkan cuma 0,610 m padahal robot secara fisik sudah
+  // menyentuh bola. Karena ambang berhentinya 0,30 m, syarat berhenti TIDAK
+  // PERNAH tercapai dan robot terus melangkah maju sampai menabrak bola.
+  //
+  // Jari-jari bola tidak punya masalah itu: ia tidak bergantung sudut leher,
+  // hip_pitch, ataupun tanda head_tilt. Rumusnya kebalikan dari yang dipakai
+  // menghitung ambang radius di setNode():
+  //     miring = fokus * jari_jari_bola / radius_piksel
+  //     tanah  = akar(miring^2 - (tinggi_kamera - jari_jari_bola)^2)
+  double distance_for_walk = distance_to_ball;
+  bool walk_distance_from_radius = false;
+
+  if (ball_radius_px > 1.0 && kick_fov_width_deg_ > 0.0)
+  {
+    const double focal_px = (kick_image_width_px_ * 0.5)
+                          / tan(kick_fov_width_deg_ * M_PI / 180.0);
+    const double slant = focal_px * kick_ball_real_radius_m_ / ball_radius_px;
+    const double drop = camera_height_ - kick_ball_real_radius_m_;
+    const double ground_sq = slant * slant - drop * drop;
+
+    // Akar negatif berarti bola terbaca lebih besar daripada yang mungkin ada
+    // di lantai -- bola terangkat, atau kotak deteksinya melar. Di situ angka
+    // ini tidak sahih dan jarak sudut kepala tetap dipakai.
+    if (ground_sq > 0.0)
+    {
+      distance_for_walk = sqrt(ground_sq);
+      walk_distance_from_radius = true;
+    }
+    else
+    {
+      distance_for_walk = 0.0;
+      walk_distance_from_radius = true;
+    }
+  }
+
   double distance_to_kick = kick_distance_;
 
   // DUA pemicu, berdiri sendiri-sendiri:
@@ -646,11 +685,13 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   // head_pan masuk salah satu jendela.
   RCLCPP_INFO_THROTTLE(rclcpp::get_logger("BallFollower"),
                        *log_clock_, 1000,
-                       "jarak bola %.3f m (ambang %.3f) | servo head_pan %.1f deg "
+                       "jarak bola %.3f m | JALAN pakai %.3f m (%s, ambang %.3f) | servo head_pan %.1f deg "
                        "(kanan %.0f-%.0f, kiri %.0f-%.0f) | head_tilt %+.1f deg "
                        "| bola dlm gambar %+.1f deg | radius %.1f px (ambang %.0f) "
                        "| bola x %+.1f deg | siap: %s",
-                       distance_to_ball, distance_to_kick, head_pan_servo_deg,
+                       distance_to_ball, distance_for_walk,
+                       walk_distance_from_radius ? "dari radius bola" : "cadangan sudut kepala",
+                       distance_to_kick, head_pan_servo_deg,
                        kick_pan_right_min_deg_, kick_pan_right_max_deg_,
                        kick_pan_left_min_deg_, kick_pan_left_max_deg_,
                        current_tilt_ * 180 / M_PI, y_angle * 180 / M_PI,
@@ -725,7 +766,10 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   }
 
   double fb_move = 0.0, rl_angle = 0.0;
-  double distance_to_walk = distance_to_ball - distance_to_kick;
+  // Jarak dari jari-jari yang dipakai berjalan, BUKAN jarak sudut kepala.
+  // Ini yang membuat robot benar-benar berhenti di kick_distance_ alih-alih
+  // terus maju sampai menabrak bola.
+  double distance_to_walk = distance_for_walk - distance_to_kick;
 
   calcFootstep(distance_to_walk, current_pan_, delta_time, fb_move, rl_angle);
 
