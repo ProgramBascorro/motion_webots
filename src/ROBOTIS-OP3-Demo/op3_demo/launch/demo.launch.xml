@@ -85,7 +85,17 @@
        bola masih jauh" padahal operator melaporkan bola sudah di depan kaki,
        dan robot tidak menendang satu kali pun. 0.70 memberi ruang untuk
        kelebihan-baca itu tanpa kembali selonggar 1.00. -->
-  <arg name="kick_pan_max_distance" default="0.70"/>
+  <!-- Sejak 2026-08-29 pagar ini dibandingkan terhadap jarak dari RADIUS
+       bola, bukan lagi jarak dari sudut kepala, jadi angkanya kini berarti
+       jarak yang sebenarnya. Karena itu turun dari 0,70 ke 0,50: 0,70 dulu
+       melawan angka yang over-baca, sedangkan 0,50 di sini benar-benar
+       setengah meter.
+
+       Terukur pada tendangan yang berhasil di run op_demo_node_4568: radius
+       77,3 px, yaitu 0,46 m sebenarnya, sementara sudut kepala melaporkan
+       0,668 m. Nilai 0,50 memberi ruang untuk kejadian seperti itu tanpa
+       membuka pintu untuk bola yang benar-benar masih 0,79 m jauhnya. -->
+  <arg name="kick_pan_max_distance" default="0.50"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
        sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun

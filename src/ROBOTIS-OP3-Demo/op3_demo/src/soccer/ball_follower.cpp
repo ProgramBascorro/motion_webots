@@ -733,8 +733,18 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
   const int foot_from_pan = kickFootFromHeadPan();
   const bool pan_side_ok = (foot_from_pan == OnRight && ball_x_angle < 0.0)
                         || (foot_from_pan == OnLeft && ball_x_angle > 0.0);
-  const bool pan_ready = pan_side_ok && (distance_to_ball < kick_pan_max_distance_);
-  const bool near_enough = (distance_to_ball < distance_to_kick) && (fabs(ball_x_angle) < 25.0);
+  // KEDUA pagar jarak ini memakai jarak dari RADIUS bola, bukan dari sudut
+  // kepala. Sudut kepala sudah terbukti tidak bisa dipakai: terukur di run
+  // op_demo_node_4568, dalam beberapa detik yang sama ia melaporkan 2,3 / 3,5 /
+  // 4,7 / 11,5 / 4,9 / 5,6 m untuk bola yang jaraknya sebenarnya turun mulus
+  // dari 1,43 ke 0,89 m.
+  //
+  // Akibatnya pemicu jendela pan jadi undian: satu tendangan lolos karena
+  // angkanya kebetulan terbaca 0,668 m, sementara bola yang benar-benar lebih
+  // dekat ditolak karena angkanya terbaca 4,9 m. Dengan jarak radius, pagarnya
+  // membandingkan sesuatu yang memang jaraknya.
+  const bool pan_ready = pan_side_ok && (distance_for_walk < kick_pan_max_distance_);
+  const bool near_enough = (distance_for_walk < distance_to_kick) && (fabs(ball_x_angle) < 25.0);
 
   //  (3) Jari-jari bola di gambar. Pengukur jarak yang berdiri sendiri, dan
   //      paling sedikit asumsinya: tidak peduli tinggi kamera, hip_pitch,
