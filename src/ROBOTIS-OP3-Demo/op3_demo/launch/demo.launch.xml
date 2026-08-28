@@ -85,17 +85,19 @@
        bola masih jauh" padahal operator melaporkan bola sudah di depan kaki,
        dan robot tidak menendang satu kali pun. 0.70 memberi ruang untuk
        kelebihan-baca itu tanpa kembali selonggar 1.00. -->
-  <!-- Sejak 2026-08-29 pagar ini dibandingkan terhadap jarak dari RADIUS
-       bola, bukan lagi jarak dari sudut kepala, jadi angkanya kini berarti
-       jarak yang sebenarnya. Karena itu turun dari 0,70 ke 0,50: 0,70 dulu
-       melawan angka yang over-baca, sedangkan 0,50 di sini benar-benar
-       setengah meter.
+  <!-- Pagar jarak untuk jalur pemicu JENDELA PAN, dibandingkan terhadap jarak
+       dari RADIUS bola (jarak yang sebenarnya, bukan sudut kepala).
 
-       Terukur pada tendangan yang berhasil di run op_demo_node_4568: radius
-       77,3 px, yaitu 0,46 m sebenarnya, sementara sudut kepala melaporkan
-       0,668 m. Nilai 0,50 memberi ruang untuk kejadian seperti itu tanpa
-       membuka pintu untuk bola yang benar-benar masih 0,79 m jauhnya. -->
-  <arg name="kick_pan_max_distance" default="0.50"/>
+       Diperketat 0,50 ke 0,40 pada 2026-08-29. Dengan 0,50 robot memicu urutan
+       tendang saat bola masih 0,45 sampai 0,50 m dan langsung masuk fase
+       mengerem lalu memutar, jadi ia TIDAK PERNAH sempat berjalan mendekat dan
+       berhenti rapi di depan bola. Terukur di run op_demo_node_2333: jarak
+       terdekat yang pernah dicapai cuma 0,445 m, padahal ambang berhentinya
+       0,30 m.
+
+       0,40 memberi ruang 0,10 m di atas kick_distance: cukup longgar untuk
+       menampung derau radius, tapi menuntut robot benar-benar mendekat dulu. -->
+  <arg name="kick_pan_max_distance" default="0.40"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
        sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
@@ -199,18 +201,19 @@
 
        0.5 berarti berkisar antara setengah foot_height sampai penuh. Setel
        1.0 untuk mengembalikan perilaku lama (selalu penuh). -->
-  <!-- 1.0 = tinggi angkat kaki SELALU penuh (foot_height param.yaml), yaitu
-       perilaku asli sebelum penskalaan ini ada. Dikembalikan atas permintaan
-       operator 2026-08-29: penskalaan bertahap dicoba tiga kali (0,5 lalu
-       dihitung sendiri 0,276) dan tetap terasa seperti kaki mendahului badan,
-       jadi lebih baik kembali ke yang sudah dikenal.
+  <!-- -1.0 = DIHITUNG SENDIRI sebagai MIN_FB_STEP/MAX_FB_STEP (0,276), yaitu
+       tinggi angkat kaki naik BERTAHAP mengikuti kemajuan langkah maju, dengan
+       persentase yang sama persis:
 
-       Yang dipercepat sebagai gantinya adalah ramp langkah maju di bawah,
-       supaya badan menyusul lebih cepat alih-alih kaki ditahan.
+         x  5,0 mm  27,6 %  ->  z 10,2 mm  27,6 %
+         x 11,0 mm  60,8 %  ->  z 22,5 mm  60,8 %
+         x 18,1 mm 100,0 %  ->  z 37,0 mm 100,0 %
 
-       Isi angka di bawah 1.0 untuk menghidupkan lagi penskalaan (0.276
-       menyamakan persentasenya dengan x). -->
-  <arg name="walk_z_move_min_ratio" default="1.0"/>
+       Ramp langkah majunya sendiri TIDAK dipercepat (walk_x_ramp_step_mm tetap
+       0,3 mm, nilai asli ROBOTIS), sesuai permintaan operator.
+
+       Setel 1.0 untuk tinggi angkat selalu penuh seperti perilaku asli. -->
+  <arg name="walk_z_move_min_ratio" default="-1.0"/>
 
   <!-- MENGITARI bola: jadikan bola porosnya saat robot meluruskan badan ke
        arahnya, bukan kaki robot sendiri.
