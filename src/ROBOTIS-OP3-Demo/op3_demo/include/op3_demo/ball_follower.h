@@ -216,6 +216,12 @@ class BallFollower // : public rclcpp::Node
   // dekat kaki: di situ badan robot sendiri menutupi sebagian bola, kotak
   // deteksi jadi mengecil. Lihat setNode().
   double kick_ball_radius_margin_;
+  // Tinggi angkat kaki (z_move_amplitude) dibuat naik bertahap bersama
+  // x_move_amplitude. z_move_max_ = nilai foot_height dari param.yaml, dipakai
+  // sebagai BATAS ATAS; z_move_min_ratio_ = pecahan batas atas saat robot nyaris
+  // diam. Lihat setWalkingParam().
+  double z_move_max_;
+  double z_move_min_ratio_;
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang
   // angka besar bikin pemicunya tidak pernah penuh -- turunkan kalau begitu.
@@ -352,8 +358,13 @@ class BallFollower // : public rclcpp::Node
   // Lama mengerem sebelum memutar. Robot harus benar-benar BERHENTI di depan
   // bola dulu; kalau langsung memutar sambil masih melangkah maju, kakinya
   // menabrak bola.
-  double yaw_brake_sec_;
+  double yaw_brake_sec_;        // lama MINIMUM mengerem
+  double yaw_brake_max_sec_;    // batas atas; sesudah ini menyerah dan lanjut
+  double yaw_brake_still_deg_;  // yaw dianggap diam kalau bergesernya di bawah ini
   std::chrono::steady_clock::time_point yaw_brake_until_;
+  std::chrono::steady_clock::time_point yaw_brake_deadline_;
+  std::chrono::steady_clock::time_point yaw_brake_sample_at_;
+  double yaw_brake_last_yaw_;
   double yaw_runaway_deg_;
   double yaw_runaway_ref_error_;
   int yaw_recheck_max_;

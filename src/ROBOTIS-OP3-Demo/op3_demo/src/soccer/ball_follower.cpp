@@ -92,6 +92,8 @@ BallFollower::BallFollower()
     kick_fov_width_deg_(35.2),          // sama dengan BallTracker::FOV_WIDTH
     kick_image_width_px_(640.0),        // sama dengan camera_param.yaml
     kick_ball_radius_margin_(0.10),     // ambang dipotong 10%, lihat setNode()
+    z_move_max_(0.037),                 // foot_height param.yaml; ditimpa getWalkingParam()
+    z_move_min_ratio_(0.5),
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
@@ -145,6 +147,9 @@ BallFollower::BallFollower()
     yaw_settle_sec_(0.7),
     yaw_ready_count_(3),
     yaw_brake_sec_(0.8),
+    yaw_brake_max_sec_(2.5),
+    yaw_brake_still_deg_(1.5),
+    yaw_brake_last_yaw_(0.0),
     yaw_runaway_deg_(45.0),
     yaw_runaway_ref_error_(0.0),
     yaw_recheck_max_(3),
@@ -246,6 +251,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     kick_fov_width_deg_        = read_param("kick_fov_width_deg", kick_fov_width_deg_);
     kick_image_width_px_       = read_param("kick_image_width_px", kick_image_width_px_);
     kick_ball_radius_margin_   = read_param("kick_ball_radius_margin", kick_ball_radius_margin_);
+    z_move_min_ratio_          = read_param("walk_z_move_min_ratio", z_move_min_ratio_);
 
     // Ambang radius dihitung sendiri kalau tidak dipasang manual.
     //
@@ -313,6 +319,8 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
     yaw_runaway_deg_     = read_param("kick_yaw_runaway_deg", yaw_runaway_deg_);
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
+    yaw_brake_max_sec_   = read_param("kick_yaw_brake_max_sec", yaw_brake_max_sec_);
+    yaw_brake_still_deg_ = read_param("kick_yaw_brake_still_deg", yaw_brake_still_deg_);
     yaw_turn_sign_param_ = read_param("kick_yaw_turn_sign", yaw_turn_sign_param_);
     yaw_auto_sign_       = read_param("kick_yaw_auto_sign", yaw_auto_sign_ ? 1.0 : 0.0) > 0.5;
     yaw_sign_check_sec_  = read_param("kick_yaw_sign_check_sec", yaw_sign_check_sec_);
@@ -806,6 +814,34 @@ void BallFollower::setWalkingParam(double x_move, double y_move, double rotation
   current_walking_param_.y_move_amplitude = y_move + SPOT_RL_OFFSET;
   current_walking_param_.angle_move_amplitude = rotation_angle + SPOT_ANGLE_OFFSET;
 
+  // Tinggi angkat kaki naik BERTAHAP bersama besar gerakan, dengan foot_height
+  // di param.yaml sebagai BATAS ATAS -- bukan lagi nilai tetap yang dipakai
+  // sejak langkah pertama.
+  //
+  // Serasi dengan x_move_amplitude: x sendiri sudah dinaikkan bertahap oleh
+  // calcFootstep() dalam kelipatan UNIT_FB_STEP sampai MAX_FB_STEP, jadi
+  // langkah kecil sekarang juga berarti angkat kaki rendah, dan kaki baru
+  // terangkat penuh saat langkahnya memang penuh.
+  //
+  // Sudut putar ikut diperhitungkan, BUKAN cuma x. Kalau tidak, fase memutar
+  // di tempat (x = 0, hanya angle) akan turun ke tinggi angkat minimum dan
+  // kaki tidak cukup terangkat untuk memutar -- penyelarasan yaw akan macet
+  // justru karena perbaikan ini.
+  double motion = 0.0;
+  if (MAX_FB_STEP > 0.0)
+    motion = fabs(x_move) / MAX_FB_STEP;
+  if (MAX_RL_TURN > 0.0)
+    motion = fmax(motion, fabs(rotation_angle) / MAX_RL_TURN);
+  if (motion > 1.0)
+    motion = 1.0;
+
+  double ratio = z_move_min_ratio_;
+  if (ratio < 0.0)  ratio = 0.0;
+  if (ratio > 1.0)  ratio = 1.0;
+
+  current_walking_param_.z_move_amplitude =
+      z_move_max_ * (ratio + (1.0 - ratio) * motion);
+
   if (node_ == nullptr)
   {
     RCLCPP_ERROR(rclcpp::get_logger("BallFollower"), "Node is not set, cannot set walking parameters");
@@ -953,6 +989,9 @@ bool BallFollower::startYawAlign()
   // ikut termakan tenggat.
   yaw_align_state_ = YawAlignBraking;
   yaw_brake_until_ = now + secondsToSteady(yaw_brake_sec_);
+  yaw_brake_deadline_ = now + secondsToSteady(fmax(yaw_brake_max_sec_, yaw_brake_sec_));
+  yaw_brake_sample_at_ = yaw_brake_until_;
+  yaw_brake_last_yaw_ = body_yaw_deg_;
   yaw_recheck_left_ = yaw_recheck_max_;
   yaw_runaway_ref_error_ = fabs(error);
   yaw_align_ref_error_ = fabs(error);
@@ -1015,6 +1054,33 @@ bool BallFollower::processYawAlign()
 
     if (now < yaw_brake_until_)
       return false;
+
+    // Sesudah lama minimum terlewat, robot belum tentu benar-benar diam.
+    // Terukur 2026-08-28: selama mengerem 0,8 detik yaw masih bergeser
+    // -20,6 -> -16,2 (4,4 derajat). Kalau putaran dimulai dari angka yang
+    // masih bergerak, galat awalnya salah sejak detik pertama.
+    //
+    // Jadi tunggu sampai yaw benar-benar tenang: dua sampel berturut yang
+    // bedanya di bawah yaw_brake_still_deg_. Ada batas atas waktu supaya
+    // robot tidak menunggu selamanya kalau lantainya bergetar.
+    if (now < yaw_brake_deadline_)
+    {
+      if (now < yaw_brake_sample_at_)
+        return false;
+
+      const double moved = fabs(normalizeAngleDeg(body_yaw_deg_ - yaw_brake_last_yaw_));
+      yaw_brake_last_yaw_ = body_yaw_deg_;
+      yaw_brake_sample_at_ = now + secondsToSteady(0.25);
+
+      if (moved > yaw_brake_still_deg_)
+      {
+        RCLCPP_INFO_THROTTLE(rclcpp::get_logger("BallFollower"), *log_clock_, 500,
+                             "mengerem: yaw masih bergeser %.1f deg (batas diam %.1f), "
+                             "menunggu robot benar-benar berhenti",
+                             moved, yaw_brake_still_deg_);
+        return false;
+      }
+    }
 
     // Baru DI SINI putaran dimulai, dan baru di sini semua penghitung waktu
     // putaran dinyalakan -- supaya waktu mengerem tidak ikut termakan tenggat.
@@ -1286,7 +1352,20 @@ bool BallFollower::processYawAlign()
   // saat mengejar bola.
   double turn_deg = fabs(error) * yaw_turn_gain_;
   turn_deg = fmin(turn_deg, yaw_max_turn_deg_);
-  turn_deg = fmax(turn_deg, yaw_turn_floor_deg_);
+
+  // Batas bawah TIDAK BOLEH melebihi sisa galat. Kalau sisa galatnya 2 derajat
+  // tapi batas bawahnya 5, robot dipaksa memutar 5 derajat dan pasti
+  // melewati target -- overshoot yang dijamin oleh rumusnya sendiri.
+  //
+  // Terlihat di run lantai 2026-08-28 sebagai ayunan pada cek-ulang:
+  //   LURUS -3,2 -> cek ulang -7,1 -> LURUS -3,4 -> cek ulang -5,8
+  //   LURUS -3,7 -> cek ulang +14,3 -> LURUS -2,5 -> TERVERIFIKASI +2,6
+  // Robot bolak-balik melewati nol, bukan mendekatinya.
+  //
+  // Batas bawah tetap ada gunanya (ada ambang torsi minimum di bawahnya kaki
+  // tidak bergerak sama sekali), tapi dipotong oleh sisa galat.
+  const double floor_deg = fmin(yaw_turn_floor_deg_, fabs(error));
+  turn_deg = fmax(turn_deg, floor_deg);
 
   const double turn_rad =
       yaw_turn_sign_ * ((error >= 0.0) ? turn_deg : -turn_deg) * M_PI / 180.0;
@@ -1356,6 +1435,14 @@ bool BallFollower::getWalkingParam()
     if (result)
     {
       current_walking_param_ = result->parameters;
+
+      // BATAS ATAS tinggi angkat kaki diambil dari sini, yaitu foot_height di
+      // param.yaml. Harus disimpan terpisah: setWalkingParam() menulisi
+      // current_walking_param_.z_move_amplitude tiap tick dengan nilai hasil
+      // penskalaan, jadi membacanya lagi dari situ akan memberi nilai yang
+      // sudah dikecilkan, bukan batas atasnya.
+      if (current_walking_param_.z_move_amplitude > 0.0)
+        z_move_max_ = current_walking_param_.z_move_amplitude;
 
       if (DEBUG_PRINT)
         RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Get walking parameters");
