@@ -238,6 +238,10 @@ class BallFollower // : public rclcpp::Node
   const double MIN_FB_STEP;
   const double MIN_RL_TURN;
   const double UNIT_FB_STEP;
+  // Langkah ramp maju yang BENAR-BENAR dipakai. Menimpa UNIT_FB_STEP supaya
+  // laju naiknya bisa disetel tanpa compile ulang; UNIT_FB_STEP tetap ada
+  // sebagai nilai asli ROBOTIS.
+  double unit_fb_step_;
   const double UNIT_RL_TURN;
 
   const double SPOT_FB_OFFSET;

@@ -235,6 +235,19 @@
        0,60 m dengan batas geser 20 mm cuma memberi 1,9 deg/langkah.
 
        Setel walk_orbit_enable:=0.0 untuk kembali memutar di poros sendiri. -->
+  <!-- Besar kenaikan langkah maju tiap seperempat periode gait, milimeter.
+
+       Ini yang menentukan seberapa cepat x_move_amplitude merambat dari
+       langkah terkecil (5,0 mm) ke penuh (18,1 mm). Nilai asli ROBOTIS 0,3 mm
+       membuat perjalanan itu makan 8,7 detik: robot mengangkat kaki tapi maju
+       hanya 5 mm per langkah, dan sepanjang detik-detik awal itu terlihat
+       seperti kaki sudah terangkat sementara badan belum bergerak.
+
+       0,8 mm memangkasnya jadi sekitar 3,3 detik, jadi majunya terlihat naik
+       BERSAMAAN dengan tinggi angkat kaki. Naikkan lagi kalau masih terasa
+       lambat; turunkan kalau robot jadi kurang mantap saat mulai jalan. -->
+  <arg name="walk_x_ramp_step_mm" default="0.8"/>
+
   <arg name="walk_orbit_enable" default="1.0"/>
   <arg name="walk_orbit_max_strafe_mm" default="20.0"/>
 
@@ -526,6 +539,7 @@
     <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
     <param name="kick_ball_radius_margin" value="$(var kick_ball_radius_margin)" type="float"/>
     <param name="walk_z_move_min_ratio" value="$(var walk_z_move_min_ratio)" type="float"/>
+    <param name="walk_x_ramp_step_mm" value="$(var walk_x_ramp_step_mm)" type="float"/>
     <param name="walk_orbit_enable" value="$(var walk_orbit_enable)" type="float"/>
     <param name="walk_orbit_max_strafe_mm" value="$(var walk_orbit_max_strafe_mm)" type="float"/>
     <param name="kick_ready_count" value="$(var kick_ready_count)" type="float"/>

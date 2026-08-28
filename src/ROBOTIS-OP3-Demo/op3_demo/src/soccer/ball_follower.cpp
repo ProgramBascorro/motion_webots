@@ -103,6 +103,7 @@ BallFollower::BallFollower()
     MIN_FB_STEP(5.0 * 0.001),
     MIN_RL_TURN(5.0 * M_PI / 180),
     UNIT_FB_STEP(0.3 * 0.001),
+    unit_fb_step_(0.8 * 0.001),
     UNIT_RL_TURN(0.5 * M_PI / 180),
     SPOT_FB_OFFSET(0.0 * 0.001),
     SPOT_RL_OFFSET(0.0 * 0.001),
@@ -344,6 +345,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_ready_count_     = (int) read_param("kick_yaw_ready_count", (double) yaw_ready_count_);
     yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
     yaw_runaway_deg_     = read_param("kick_yaw_runaway_deg", yaw_runaway_deg_);
+    unit_fb_step_        = read_param("walk_x_ramp_step_mm", unit_fb_step_ * 1000.0) * 0.001;
     orbit_enable_        = read_param("walk_orbit_enable", orbit_enable_ ? 1.0 : 0.0) > 0.5;
     orbit_max_strafe_    = read_param("walk_orbit_max_strafe_mm", orbit_max_strafe_ * 1000.0) * 0.001;
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
@@ -538,9 +540,9 @@ void BallFollower::calcFootstep(double target_distance, double target_angle, dou
   {
     accum_period_time_ = 0.0;
     if ((target_distance * 0.1 / 2) < current_x_move_)
-      next_movement -= UNIT_FB_STEP;
+      next_movement -= unit_fb_step_;
     else
-      next_movement += UNIT_FB_STEP;
+      next_movement += unit_fb_step_;
   }
   fb_goal = fmin(next_movement, fb_goal);
 
@@ -764,7 +766,7 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
                        "jarak bola %.3f m | JALAN pakai %.3f m (%s, ambang %.3f) | servo head_pan %.1f deg "
                        "(kanan %.0f-%.0f, kiri %.0f-%.0f) | head_tilt %+.1f deg "
                        "| bola dlm gambar %+.1f deg | radius %.1f px (ambang %.0f) "
-                       "| bola x %+.1f deg | siap: %s",
+                       "| bola x %+.1f deg | LANGKAH x %.1f mm (%.0f%%) z %.1f mm (%.0f%%) | siap: %s",
                        distance_to_ball, distance_for_walk,
                        walk_distance_from_radius ? "dari radius bola" : "cadangan sudut kepala",
                        distance_to_kick, head_pan_servo_deg,
@@ -772,6 +774,12 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
                        kick_pan_left_min_deg_, kick_pan_left_max_deg_,
                        current_tilt_ * 180 / M_PI, y_angle * 180 / M_PI,
                        ball_radius_px, kick_ball_radius_px_, ball_x_angle,
+                       current_walking_param_.x_move_amplitude * 1000.0,
+                       (MAX_FB_STEP > 0.0)
+                           ? (current_walking_param_.x_move_amplitude / MAX_FB_STEP * 100.0) : 0.0,
+                       current_walking_param_.z_move_amplitude * 1000.0,
+                       (z_move_max_ > 0.0)
+                           ? (current_walking_param_.z_move_amplitude / z_move_max_ * 100.0) : 0.0,
                        radius_ready ? "radius"
                                     : (pan_ready ? "jendela pan"
                                                  : (near_enough ? "jarak"
