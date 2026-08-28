@@ -189,7 +189,44 @@
 
        0.5 berarti berkisar antara setengah foot_height sampai penuh. Setel
        1.0 untuk mengembalikan perilaku lama (selalu penuh). -->
-  <arg name="walk_z_move_min_ratio" default="0.5"/>
+  <!-- Bawaan -1.0 berarti DIHITUNG SENDIRI sebagai MIN_FB_STEP/MAX_FB_STEP
+       (5,0 / 18,1 = 0,276). Pakai itu.
+
+       Angka bulat 0,5 yang dipakai sebelumnya membuat z MENDAHULUI x: pada
+       langkah pertama x baru di 27,6 % dari maksimumnya (karena langkah
+       terkecilnya MIN_FB_STEP), sementara z sudah di 50 %. Di lapangan
+       terlihat seperti kaki sudah terangkat penuh padahal robot belum
+       melangkah. Dengan pecahan yang dihitung, keduanya berangkat dari
+       persentase yang sama persis. -->
+  <arg name="walk_z_move_min_ratio" default="-1.0"/>
+
+  <!-- MENGITARI bola: jadikan bola porosnya saat robot meluruskan badan ke
+       arahnya, bukan kaki robot sendiri.
+
+       Tanpa ini robot memutar di poros sendiri, jadi bola bergeser keluar dari
+       depan kaki sebesar sudut putarnya; badan memang jadi lurus tapi bolanya
+       pindah ke samping. Dengan ini robot bergeser menyamping seiring
+       berputar, jadi bola tetap di tempatnya relatif kaki.
+
+       Acuannya sudut leher, BUKAN magnetometer: sumbernya encoder servo dan
+       bisa dipercaya, sedangkan magnetometer sudah terbukti tidak sahih saat
+       gait berjalan.
+
+       walk_orbit_max_strafe_mm membatasi geseran menyamping per langkah. Kalau
+       geseran yang dibutuhkan melebihi batas, sudut putarnya ikut dikecilkan
+       dengan pecahan yang sama, supaya robot tetap mengitari bola, hanya lebih
+       pelan. Memotong geserannya saja akan membuat robot berputar lebih cepat
+       daripada yang bisa diimbangi, dan bola lepas dari poros lagi.
+
+       Hanya berlaku saat robot SUDAH SAMPAI di bola dan tinggal meluruskan
+       diri. Selama masih mendekat, memutar di poros sendiri justru benar:
+       langkah maju itu sendiri yang membawa bola ke tengah. Mengitari dari
+       jarak jauh malah menghambat, dan angkanya jelas: mengitari bola sejauh
+       0,60 m dengan batas geser 20 mm cuma memberi 1,9 deg/langkah.
+
+       Setel walk_orbit_enable:=0.0 untuk kembali memutar di poros sendiri. -->
+  <arg name="walk_orbit_enable" default="1.0"/>
+  <arg name="walk_orbit_max_strafe_mm" default="20.0"/>
 
   <!-- Berapa TICK BERTURUT-TURUT syaratnya harus benar sebelum menendang.
        Loop demo 30 Hz, jadi 4 tick kira-kira 0,13 detik.
@@ -479,6 +516,8 @@
     <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
     <param name="kick_ball_radius_margin" value="$(var kick_ball_radius_margin)" type="float"/>
     <param name="walk_z_move_min_ratio" value="$(var walk_z_move_min_ratio)" type="float"/>
+    <param name="walk_orbit_enable" value="$(var walk_orbit_enable)" type="float"/>
+    <param name="walk_orbit_max_strafe_mm" value="$(var walk_orbit_max_strafe_mm)" type="float"/>
     <param name="kick_ready_count" value="$(var kick_ready_count)" type="float"/>
     <param name="kick_yaw_align_enable" value="$(var kick_yaw_align_enable)" type="float"/>
     <param name="kick_yaw_target_deg" value="$(var kick_yaw_target_deg)" type="float"/>

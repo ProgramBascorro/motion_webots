@@ -372,6 +372,12 @@ class BallFollower // : public rclcpp::Node
   // porosnya sendiri pasti melempar bola keluar dari tengah pandangan; supaya
   // tetap di tengah ia harus MENGITARI bola, yaitu bergeser menyamping sambil
   // berputar. Lihat processYawAlign().
+  // Mengitari BOLA saat meluruskan badan ke arahnya, dengan bola sebagai
+  // poros. Dipakai di jalur mengejar bola biasa, jadi TIDAK bergantung
+  // magnetometer sama sekali; acuannya sudut leher, yang sumbernya encoder
+  // servo. Lihat processFollowing().
+  bool orbit_enable_;
+  double orbit_max_strafe_;     // batas geseran menyamping per langkah, meter
   double yaw_strafe_gain_;      // meter per derajat simpangan arah bola
   double yaw_strafe_max_;       // batas atas geseran menyamping, meter
   double yaw_runaway_deg_;

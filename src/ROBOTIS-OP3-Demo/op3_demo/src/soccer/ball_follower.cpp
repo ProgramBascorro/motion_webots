@@ -94,7 +94,7 @@ BallFollower::BallFollower()
     kick_ball_radius_margin_(0.10),     // ambang dipotong 10%, lihat setNode()
     z_move_max_(0.037),                 // foot_height param.yaml; ditimpa getWalkingParam()
     z_move_max_captured_(false),
-    z_move_min_ratio_(0.5),
+    z_move_min_ratio_(-1.0),   // negatif = hitung sendiri, lihat setNode()
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
     MAX_FB_STEP(12.0 * 0.001),
@@ -151,6 +151,8 @@ BallFollower::BallFollower()
     yaw_brake_max_sec_(2.5),
     yaw_brake_still_deg_(1.5),
     yaw_brake_last_yaw_(0.0),
+    orbit_enable_(true),
+    orbit_max_strafe_(20.0 * 0.001),
     yaw_strafe_gain_(0.30 * 0.001),   // 0,30 mm per derajat simpangan
     yaw_strafe_max_(12.0 * 0.001),
     yaw_runaway_deg_(45.0),
@@ -256,6 +258,27 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     kick_ball_radius_margin_   = read_param("kick_ball_radius_margin", kick_ball_radius_margin_);
     z_move_min_ratio_          = read_param("walk_z_move_min_ratio", z_move_min_ratio_);
 
+    // Pecahan terkecil tinggi angkat kaki DIHITUNG SENDIRI supaya benar-benar
+    // sejajar dengan x, bukan diisi angka bulat yang kelihatan masuk akal.
+    //
+    // x tidak pernah mulai dari nol: langkah terkecilnya MIN_FB_STEP, jadi pada
+    // langkah pertama x sudah berada di MIN_FB_STEP/MAX_FB_STEP = 27,6 % dari
+    // maksimumnya. Kalau pecahan z diisi 0,5 seperti sebelumnya, z mulai di
+    // 50 % sementara x baru 27,6 %: z MENDAHULUI, dan di lapangan terlihat
+    // seperti kaki sudah terangkat penuh padahal robot belum melangkah.
+    //
+    // Dengan pecahan yang sama persis, keduanya berangkat dari persentase yang
+    // sama dan sampai di puncak bersama.
+    if (z_move_min_ratio_ < 0.0)
+    {
+      z_move_min_ratio_ = (MAX_FB_STEP > 0.0) ? (MIN_FB_STEP / MAX_FB_STEP) : 0.3;
+      RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                  "Pecahan terkecil tinggi angkat kaki dihitung sendiri: %.3f "
+                  "(= MIN_FB_STEP %.1f mm / MAX_FB_STEP %.1f mm), supaya z dan x "
+                  "berangkat dari persentase yang sama.",
+                  z_move_min_ratio_, MIN_FB_STEP * 1000.0, MAX_FB_STEP * 1000.0);
+    }
+
     // Ambang radius dihitung sendiri kalau tidak dipasang manual.
     //
     // Alasannya konkret: ambang radius TIDAK sama untuk robot berdiri dan robot
@@ -321,6 +344,8 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_ready_count_     = (int) read_param("kick_yaw_ready_count", (double) yaw_ready_count_);
     yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
     yaw_runaway_deg_     = read_param("kick_yaw_runaway_deg", yaw_runaway_deg_);
+    orbit_enable_        = read_param("walk_orbit_enable", orbit_enable_ ? 1.0 : 0.0) > 0.5;
+    orbit_max_strafe_    = read_param("walk_orbit_max_strafe_mm", orbit_max_strafe_ * 1000.0) * 0.001;
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
     yaw_strafe_max_      = read_param("kick_yaw_strafe_max_mm", yaw_strafe_max_ * 1000.0) * 0.001;
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
@@ -814,8 +839,56 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
 
   calcFootstep(distance_to_walk, current_pan_, delta_time, fb_move, rl_angle);
 
+  // MENGITARI bola: jadikan bola porosnya, bukan kaki robot sendiri.
+  //
+  // calcFootstep() cuma memutar badan ke arah bola. Memutar di poros sendiri
+  // membuat bola bergeser keluar dari depan kaki sebesar sudut putarnya, jadi
+  // robot memang meluruskan badan tapi bolanya ikut berpindah ke samping.
+  //
+  // Supaya bola yang jadi poros, robot harus bergeser menyamping seiring
+  // berputar. Geometrinya sederhana: memutar sudut kecil (theta) sementara
+  // bola ada sejauh d di depan menuntut geseran menyamping sebesar d*theta ke
+  // sisi BERLAWANAN arah putar.
+  //
+  // Acuannya sudut leher, BUKAN magnetometer: sumbernya encoder servo, dan
+  // magnetometer sudah terbukti tidak sahih saat gait berjalan (lihat
+  // kick_yaw_align_enable di demo.launch.xml).
+  //
+  // Kalau geseran yang dibutuhkan melebihi batas aman, sudut putarnya ikut
+  // DIKECILKAN dengan pecahan yang sama. Ini penting: memotong geserannya saja
+  // akan membuat robot berputar lebih cepat daripada yang bisa diimbangi
+  // geseran, dan bola lepas dari poros lagi. Dengan keduanya dikecilkan
+  // bersama, robot tetap mengitari bola, cuma lebih pelan.
+  double y_move = 0.0;
+
+  // HANYA saat robot sudah sampai di bola dan tinggal meluruskan diri.
+  //
+  // Selama masih MENDEKAT, memutar di poros sendiri justru benar: langkah maju
+  // itu sendiri yang membawa bola ke tengah, dan mengitari bola dari jarak
+  // jauh malah menghambat. Angkanya jelas: mengitari bola sejauh 0,60 m dengan
+  // batas geser 20 mm cuma memberi 1,9 deg/langkah, jadi robot nyaris tidak
+  // bisa berbelok sambil mendekat.
+  //
+  // Begitu sampai (fb_move sudah jadi IN_PLACE_FB_STEP), tidak ada lagi
+  // langkah maju yang membantu, dan di situlah bola harus jadi poros supaya
+  // tidak bergeser keluar dari depan kaki.
+  const bool arrived = (distance_to_walk <= 0.0);
+
+  if (orbit_enable_ == true && arrived == true &&
+      fabs(rl_angle) > 1e-6 && distance_for_walk > 0.0)
+  {
+    y_move = -distance_for_walk * rl_angle;
+
+    if (fabs(y_move) > orbit_max_strafe_)
+    {
+      const double scale = orbit_max_strafe_ / fabs(y_move);
+      y_move *= scale;
+      rl_angle *= scale;
+    }
+  }
+
   // send message
-  setWalkingParam(fb_move, 0, rl_angle);
+  setWalkingParam(fb_move, y_move, rl_angle);
 
   // for debug
   //RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "distance to ball : %6.4f, fb : %6.4f, delta : %6.6f", distance_to_ball, fb_move, delta_time);
