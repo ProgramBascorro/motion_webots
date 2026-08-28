@@ -338,9 +338,35 @@
        soft_start walking_module. Kalau koreksi yang dibutuhkan besar DAN gait
        robot kurang efektif memutar, batas waktu 12 detik bisa tercapai; robot
        tetap menendang, dengan WARN. -->
-  <arg name="kick_yaw_turn_sign" default="-1.0"/>
-  <arg name="kick_yaw_auto_sign" default="1.0"/>
-  <arg name="kick_yaw_sign_check_sec" default="3.0"/>
+  <!-- ARAH PUTARAN, sudah DIUKUR di robot 2026-08-29 (run op_demo_node_2840).
+
+       +1.0 ini hasil ukur, bukan bawaan yang tidak pernah dicek. Tiga
+       penyelarasan berturut dalam satu run, semuanya dengan perintah 15
+       deg/langkah ke arah negatif (tanda 1 negatif waktu itu), dan yaw justru
+       makin menjauh dari target:
+
+         -54,6 jadi -95,4     -112,5 jadi -158,5     -138,9 jadi -150,6
+
+       Perintah negatif membuat yaw makin NEGATIF, padahal target 0 menuntut
+       yaw NAIK. Jadi tandanya harus positif. Cocok juga dengan konvensi umum:
+       angle_move_amplitude positif memutar ke kiri, dan yaw naik saat memutar
+       ke kiri.
+
+       kick_yaw_auto_sign dimatikan (0.0) karena koreksi otomatis sudah DUA
+       KALI salah menilai di robot ini: sekali membalik tanda positif yang
+       benar, sekali menyatakan tanda negatif yang salah sebagai "terbukti
+       benar". Sebabnya soft_start_time walking_module 2000 ms; selama 2 detik
+       pertama amplitudo masih merambat naik, jadi jendela penilaian 3 detik
+       cuma menyisakan 1 detik putaran sungguhan dan galatnya nyaris tidak
+       bergerak. Jendelanya kini 5 detik, tapi otomatisnya tetap mati karena
+       angkanya memang sudah terukur di sini.
+
+       ROBOT LAIN (mis. CHRONUS) harus mengukur sendiri: jalankan dengan
+       kick_yaw_auto_sign:=1.0, baca angka yang tercetak, pasang di sini, lalu
+       matikan lagi otomatisnya. -->
+  <arg name="kick_yaw_turn_sign" default="1.0"/>
+  <arg name="kick_yaw_auto_sign" default="0.0"/>
+  <arg name="kick_yaw_sign_check_sec" default="5.0"/>
   <arg name="kick_yaw_sign_margin_deg" default="6.0"/>
 
   <!-- Galat awal MINIMUM sebelum koreksi tanda otomatis boleh menilai, derajat.
