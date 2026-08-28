@@ -245,6 +245,18 @@
        Setel 0 untuk kembali ke perilaku lama (percaya bacaan sambil jalan). -->
   <arg name="kick_yaw_recheck_max" default="3.0"/>
 
+  <!-- Pengaman putaran LIAR, derajat. Kalau galat membesar lebih dari angka
+       ini dari titik acuan, putaran dihentikan paksa dan robot tetap
+       menendang.
+
+       Terpasang karena terukur 2026-08-28: robot berputar dari galat 18 deg
+       sampai 130 deg dan terus menjauh, BAIK saat tanda putaran +1 MAUPUN
+       sesudah koreksi otomatis membaliknya jadi -1. Jadi koreksi tanda saja
+       tidak cukup jadi pengaman; harus ada batas keras.
+
+       Setel 0 untuk mematikan pengaman ini (tidak disarankan). -->
+  <arg name="kick_yaw_runaway_deg" default="45.0"/>
+
   <!-- Jeda diam sebelum halaman aksi tendangan dimainkan, detik.
 
        Gerakan aksi itu lingkar-terbuka: ia memutar sendi menurut jadwal tetap
@@ -279,7 +291,7 @@
        soft_start walking_module. Kalau koreksi yang dibutuhkan besar DAN gait
        robot kurang efektif memutar, batas waktu 12 detik bisa tercapai; robot
        tetap menendang, dengan WARN. -->
-  <arg name="kick_yaw_turn_sign" default="1.0"/>
+  <arg name="kick_yaw_turn_sign" default="-1.0"/>
   <arg name="kick_yaw_auto_sign" default="1.0"/>
   <arg name="kick_yaw_sign_check_sec" default="3.0"/>
   <arg name="kick_yaw_sign_margin_deg" default="6.0"/>
@@ -337,6 +349,7 @@
     <param name="kick_yaw_settle_sec" value="$(var kick_yaw_settle_sec)" type="float"/>
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
+    <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
     <param name="kick_pre_delay_sec" value="$(var kick_pre_delay_sec)" type="float"/>
     <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
     <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>

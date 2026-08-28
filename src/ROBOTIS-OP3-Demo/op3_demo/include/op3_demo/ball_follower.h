@@ -344,6 +344,11 @@ class BallFollower // : public rclcpp::Node
   // Berapa kali putaran boleh diulang kalau cek sesudah gait reda ternyata
   // masih di luar toleransi. Yaw saat gait jalan berayun belasan derajat, jadi
   // "lurus" versi sambil berjalan tidak bisa dipercaya.
+  // Pengaman putaran LIAR. Kalau galat membesar lebih dari yaw_runaway_deg_
+  // dari titik acuan, putaran dihentikan paksa: apa pun sebabnya, robot yang
+  // berputar makin jauh dari target tidak boleh dibiarkan terus.
+  double yaw_runaway_deg_;
+  double yaw_runaway_ref_error_;
   int yaw_recheck_max_;
   int yaw_recheck_left_;
   double yaw_turn_sign_param_;

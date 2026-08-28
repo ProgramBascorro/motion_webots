@@ -144,6 +144,8 @@ BallFollower::BallFollower()
     yaw_timeout_sec_(0.0),
     yaw_settle_sec_(0.7),
     yaw_ready_count_(3),
+    yaw_runaway_deg_(45.0),
+    yaw_runaway_ref_error_(0.0),
     yaw_recheck_max_(3),
     yaw_recheck_left_(0),
     yaw_turn_sign_param_(1.0),
@@ -307,6 +309,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_settle_sec_      = read_param("kick_yaw_settle_sec", yaw_settle_sec_);
     yaw_ready_count_     = (int) read_param("kick_yaw_ready_count", (double) yaw_ready_count_);
     yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
+    yaw_runaway_deg_     = read_param("kick_yaw_runaway_deg", yaw_runaway_deg_);
     yaw_turn_sign_param_ = read_param("kick_yaw_turn_sign", yaw_turn_sign_param_);
     yaw_auto_sign_       = read_param("kick_yaw_auto_sign", yaw_auto_sign_ ? 1.0 : 0.0) > 0.5;
     yaw_sign_check_sec_  = read_param("kick_yaw_sign_check_sec", yaw_sign_check_sec_);
@@ -927,6 +930,7 @@ bool BallFollower::startYawAlign()
 
   yaw_align_state_ = YawAlignTurning;
   yaw_recheck_left_ = yaw_recheck_max_;
+  yaw_runaway_ref_error_ = fabs(error);
   yaw_align_ref_error_ = fabs(error);
   yaw_align_started_at_ = now;
   yaw_align_deadline_ = now + secondsToSteady(yaw_timeout_sec_);
@@ -1023,6 +1027,14 @@ bool BallFollower::processYawAlign()
         yaw_best_error_ = fabs(settled_error);
         yaw_turn_floor_deg_ = yaw_min_turn_deg_;
         yaw_stall_check_at_ = now + secondsToSteady(yaw_stall_sec_);
+        // Tenggat dan titik acuan runaway WAJIB ikut disetel ulang. Tanpa ini,
+        // tenggat 12 detik dari putaran pertama sudah lewat, jadi tick
+        // berikutnya langsung menyerah lagi: terukur 2026-08-28, ketiga jatah
+        // putar ulang habis dalam 2 detik total (498,280 -> 499,047 ->
+        // 499,813 -> 500,580) tanpa robot sempat memutar sama sekali.
+        yaw_align_started_at_ = now;
+        yaw_align_deadline_ = now + secondsToSteady(yaw_timeout_sec_);
+        yaw_runaway_ref_error_ = fabs(settled_error);
         startInPlaceTurn();
         return false;
       }
@@ -1080,6 +1092,27 @@ bool BallFollower::processYawAlign()
   else
   {
     yaw_in_window_count_ = 0;
+  }
+
+  // Pengaman putaran LIAR, diperiksa SEBELUM apa pun yang lain.
+  //
+  // Terukur 2026-08-28: robot berputar dari galat 18 deg sampai 130 deg dan
+  // terus menjauh, baik saat tanda putaran +1 MAUPUN sesudah dibalik jadi -1.
+  // Artinya penyebabnya bukan sekadar tanda yang keliru, dan koreksi tanda
+  // otomatis TIDAK cukup jadi pengaman. Apa pun sebabnya, robot yang berputar
+  // makin jauh dari target harus dihentikan, bukan dibiarkan menghabiskan
+  // batas waktu sambil terus berputar.
+  if (yaw_runaway_deg_ > 0.0 &&
+      fabs(error) > yaw_runaway_ref_error_ + yaw_runaway_deg_)
+  {
+    RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
+                 "PUTARAN LIAR: galat membesar %.1f -> %.1f deg (lewat batas %.1f). "
+                 "Putaran DIHENTIKAN supaya robot tidak berputar terus. "
+                 "Periksa kick_yaw_turn_sign; setel kick_yaw_align_enable:=0.0 "
+                 "untuk mematikan penyelarasan yaw sementara.",
+                 yaw_runaway_ref_error_, fabs(error), yaw_runaway_deg_);
+    yaw_recheck_left_ = 0;
+    return finishYawTurn("putaran liar, dihentikan paksa");
   }
 
   // Batas waktu hanya berlaku kalau operator memang memasangnya. Bawaannya 0 =
