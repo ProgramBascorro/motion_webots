@@ -139,6 +139,7 @@ class BallFollower // : public rclcpp::Node
   enum YawAlignState
   {
     YawAlignOff = 0,       // tidak sedang menyelaraskan
+    YawAlignBraking = 3,   // MENGEREM: berhenti di depan bola sebelum memutar
     YawAlignTurning = 1,   // sedang memutar di tempat
     YawAlignSettling = 2,  // sudah lurus, menunggu gait benar-benar berhenti
   };
@@ -293,6 +294,7 @@ class BallFollower // : public rclcpp::Node
 
   // ---- Penyelarasan yaw --------------------------------------------------
   // Mulai memutar di tempat (walking "start" dengan amplitudo maju/samping nol).
+  void brakeBeforeTurn();
   void startInPlaceTurn();
   // Nolkan amplitudo, kirim "stop", lalu masuk fase menunggu gait reda.
   // Selalu mengembalikan false: selesainya diputuskan tick berikutnya.
@@ -347,6 +349,11 @@ class BallFollower // : public rclcpp::Node
   // Pengaman putaran LIAR. Kalau galat membesar lebih dari yaw_runaway_deg_
   // dari titik acuan, putaran dihentikan paksa: apa pun sebabnya, robot yang
   // berputar makin jauh dari target tidak boleh dibiarkan terus.
+  // Lama mengerem sebelum memutar. Robot harus benar-benar BERHENTI di depan
+  // bola dulu; kalau langsung memutar sambil masih melangkah maju, kakinya
+  // menabrak bola.
+  double yaw_brake_sec_;
+  std::chrono::steady_clock::time_point yaw_brake_until_;
   double yaw_runaway_deg_;
   double yaw_runaway_ref_error_;
   int yaw_recheck_max_;

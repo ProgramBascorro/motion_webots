@@ -144,6 +144,7 @@ BallFollower::BallFollower()
     yaw_timeout_sec_(0.0),
     yaw_settle_sec_(0.7),
     yaw_ready_count_(3),
+    yaw_brake_sec_(0.8),
     yaw_runaway_deg_(45.0),
     yaw_runaway_ref_error_(0.0),
     yaw_recheck_max_(3),
@@ -310,6 +311,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_ready_count_     = (int) read_param("kick_yaw_ready_count", (double) yaw_ready_count_);
     yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
     yaw_runaway_deg_     = read_param("kick_yaw_runaway_deg", yaw_runaway_deg_);
+    yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
     yaw_turn_sign_param_ = read_param("kick_yaw_turn_sign", yaw_turn_sign_param_);
     yaw_auto_sign_       = read_param("kick_yaw_auto_sign", yaw_auto_sign_ ? 1.0 : 0.0) > 0.5;
     yaw_sign_check_sec_  = read_param("kick_yaw_sign_check_sec", yaw_sign_check_sec_);
@@ -883,6 +885,21 @@ void BallFollower::pauseFollowingForTurn()
   count_to_kick_ = 0;
 }
 
+void BallFollower::brakeBeforeTurn()
+{
+  // Hentikan gait DULU, lalu tunggu. Robot yang masih melangkah maju saat
+  // mulai memutar akan menabrak bola yang tepat ada di depannya -- terlihat
+  // langsung di lapangan 2026-08-28.
+  //
+  // "stop" dikirim di sini dan "start" baru dikirim yaw_brake_sec_ kemudian
+  // oleh startInPlaceTurn(). Jarak WAKTU itu yang penting: sebelumnya
+  // keduanya dikirim berselang 39 mikrodetik, tiba di walking_module dalam
+  // satu siklus kontrol 8 ms yang sama, dan siapa yang menang jadi undian --
+  // itulah yang dulu membuat gait mati diam-diam saat memutar.
+  setWalkingParam(0.0, 0.0, 0.0);
+  setWalkingCommand("stop");
+}
+
 void BallFollower::startInPlaceTurn()
 {
   // x dan y NOL. IN_PLACE_FB_STEP (-3 mm) yang dipakai
@@ -928,32 +945,31 @@ bool BallFollower::startYawAlign()
 
   const auto now = std::chrono::steady_clock::now();
 
-  yaw_align_state_ = YawAlignTurning;
+  // Masuk fase MENGEREM dulu, bukan langsung memutar. Semua penghitung waktu
+  // putaran (tenggat, macet, cek tanda) sengaja BELUM disetel di sini; mereka
+  // baru mulai saat putaran benar-benar dimulai, supaya waktu mengerem tidak
+  // ikut termakan tenggat.
+  yaw_align_state_ = YawAlignBraking;
+  yaw_brake_until_ = now + secondsToSteady(yaw_brake_sec_);
   yaw_recheck_left_ = yaw_recheck_max_;
   yaw_runaway_ref_error_ = fabs(error);
   yaw_align_ref_error_ = fabs(error);
-  yaw_align_started_at_ = now;
-  yaw_align_deadline_ = now + secondsToSteady(yaw_timeout_sec_);
-  yaw_sign_check_at_ = now + secondsToSteady(yaw_sign_check_sec_);
   // Batas bawah putaran mulai dari nilai parameter tiap kali menyelaraskan,
   // BUKAN dari hasil eskalasi tendangan sebelumnya: torsi yang dibutuhkan
   // tergantung keadaan saat itu (digantung, lantai licin, baterai lemah),
   // jadi memulai lagi dari yang paling halus adalah pilihan yang lebih aman.
   yaw_turn_floor_deg_ = yaw_min_turn_deg_;
-  yaw_stall_ref_error_ = fabs(error);
-  yaw_best_error_ = fabs(error);
-  yaw_stall_check_at_ = now + secondsToSteady(yaw_stall_sec_);
   // yaw_turn_sign_ dan yaw_sign_settled_ SENGAJA tidak disetel ulang di sini:
   // arah putaran itu sifat robot, bukan sifat satu tendangan. Sekali terukur,
   // dipakai seterusnya.
 
   pauseFollowingForTurn();
-  startInPlaceTurn();
+  brakeBeforeTurn();
 
   RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
-              "MEMUTAR dulu sebelum menendang: yaw %+.1f -> target %+.1f deg "
-              "(galat %+.1f, toleransi %.1f). %s",
-              body_yaw_deg_, yaw_target_deg_, error, yaw_tolerance_deg_,
+              "BERHENTI dulu (%.1f s) lalu MEMUTAR sebelum menendang: "
+              "yaw %+.1f -> target %+.1f deg (galat %+.1f, toleransi %.1f). %s",
+              yaw_brake_sec_, body_yaw_deg_, yaw_target_deg_, error, yaw_tolerance_deg_,
               (yaw_timeout_sec_ > 0.0)
                   ? "Ada batas waktu; sesudahnya tetap menendang."
                   : "TIDAK menendang sampai yaw benar-benar masuk toleransi.");
@@ -987,6 +1003,41 @@ bool BallFollower::processYawAlign()
     return true;
 
   const auto now = std::chrono::steady_clock::now();
+
+  if (yaw_align_state_ == YawAlignBraking)
+  {
+    // Tahan amplitudo di nol sampai robot benar-benar berhenti. Tanpa fase
+    // ini robot masih melangkah maju saat mulai memutar dan kakinya menabrak
+    // bola yang tepat ada di depannya.
+    setWalkingParam(0.0, 0.0, 0.0);
+
+    if (now < yaw_brake_until_)
+      return false;
+
+    // Baru DI SINI putaran dimulai, dan baru di sini semua penghitung waktu
+    // putaran dinyalakan -- supaya waktu mengerem tidak ikut termakan tenggat.
+    const double start_error = normalizeAngleDeg(yaw_target_deg_ - body_yaw_deg_);
+
+    yaw_align_state_ = YawAlignTurning;
+    yaw_in_window_count_ = 0;
+    yaw_align_started_at_ = now;
+    yaw_align_deadline_ = now + secondsToSteady(yaw_timeout_sec_);
+    yaw_sign_check_at_ = now + secondsToSteady(yaw_sign_check_sec_);
+    yaw_align_ref_error_ = fabs(start_error);
+    yaw_runaway_ref_error_ = fabs(start_error);
+    yaw_stall_ref_error_ = fabs(start_error);
+    yaw_best_error_ = fabs(start_error);
+    yaw_turn_floor_deg_ = yaw_min_turn_deg_;
+    yaw_stall_check_at_ = now + secondsToSteady(yaw_stall_sec_);
+
+    RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                "Sudah berhenti di depan bola (yaw %+.1f deg, galat %+.1f). "
+                "Mulai memutar.",
+                body_yaw_deg_, start_error);
+
+    startInPlaceTurn();
+    return false;
+  }
 
   if (yaw_align_state_ == YawAlignSettling)
   {

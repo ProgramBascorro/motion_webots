@@ -257,6 +257,22 @@
        Setel 0 untuk mematikan pengaman ini (tidak disarankan). -->
   <arg name="kick_yaw_runaway_deg" default="45.0"/>
 
+  <!-- Lama MENGEREM sebelum memutar, detik.
+
+       Robot harus benar-benar berhenti di depan bola dulu. Kalau langsung
+       memutar sambil masih melangkah maju, kakinya menabrak bola yang tepat
+       ada di depannya; terlihat langsung di lapangan 2026-08-28.
+
+       Urutannya sekarang: bola masuk jangkauan, BERHENTI, memutar ke yaw
+       target, baru menendang.
+
+       Jeda ini juga yang memisahkan perintah "stop" dan "start" ke
+       walking_module. Dulu keduanya dikirim berselang 39 mikrodetik, tiba
+       dalam satu siklus kontrol 8 ms yang sama, dan siapa yang menang jadi
+       undian; itulah yang membuat gait mati diam-diam saat memutar. Jangan
+       setel 0 tanpa alasan kuat. -->
+  <arg name="kick_yaw_brake_sec" default="0.8"/>
+
   <!-- Jeda diam sebelum halaman aksi tendangan dimainkan, detik.
 
        Gerakan aksi itu lingkar-terbuka: ia memutar sendi menurut jadwal tetap
@@ -350,6 +366,7 @@
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
+    <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>
     <param name="kick_pre_delay_sec" value="$(var kick_pre_delay_sec)" type="float"/>
     <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
     <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
