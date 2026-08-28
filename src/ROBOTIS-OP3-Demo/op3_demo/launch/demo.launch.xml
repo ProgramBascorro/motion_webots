@@ -210,6 +210,23 @@
        Setel 0 untuk kembali ke perilaku lama (percaya bacaan sambil jalan). -->
   <arg name="kick_yaw_recheck_max" default="3.0"/>
 
+  <!-- Jeda diam sebelum halaman aksi tendangan dimainkan, detik.
+
+       Gerakan aksi itu lingkar-terbuka: ia memutar sendi menurut jadwal tetap
+       tanpa peduli keadaan badan. Kalau badan masih bergoyang sisa gait, robot
+       bisa jatuh saat mengangkat satu kaki. Karena itu ada jeda diam dulu.
+
+       2,0 detik adalah angka yang sudah lama dipakai dan terbukti tidak
+       menjatuhkan robot, jadi itu yang jadi bawaan. Ini knob untuk mempercepat
+       keputusan menendang: turunkan bertahap (1,5 lalu 1,2) sambil memperhatikan
+       apakah robot masih mantap saat kaki terangkat. Jangan langsung ke 0.
+
+       Jalur MEMUTAR sudah menjalani fase reda sendiri sesudah menghentikan
+       gait (kick_yaw_settle_sec), dan waktu itu DIKURANGKAN dari jeda ini
+       supaya tidak dihitung dua kali. Sebelum diperbaiki, jalur memutar makan
+       2,7 detik sementara jalur biasa 2,0 detik. -->
+  <arg name="kick_pre_delay_sec" default="2.0"/>
+
   <!-- Arah putaran. +1 berarti angle_move_amplitude POSITIF memperbesar yaw.
        Hubungan itu BELUM pernah diukur di robot ini, dan menebak tanda sudah
        dua kali memakan waktu berjam-jam di paket ini (lihat catatan head_tilt
@@ -283,6 +300,7 @@
     <param name="kick_yaw_settle_sec" value="$(var kick_yaw_settle_sec)" type="float"/>
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
+    <param name="kick_pre_delay_sec" value="$(var kick_pre_delay_sec)" type="float"/>
     <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
     <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
     <param name="kick_yaw_sign_check_sec" value="$(var kick_yaw_sign_check_sec)" type="float"/>

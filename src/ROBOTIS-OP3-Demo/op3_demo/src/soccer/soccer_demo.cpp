@@ -60,6 +60,9 @@ SoccerDemo::SoccerDemo()
     robot_status_(Waited),
     stand_state_(Stand),
     tracking_status_(BallTracker::Waiting),
+    // 2,0 detik = nilai yang sudah dipakai sejak lama di jalur tanpa memutar.
+    // Dijadikan parameter supaya bisa dipercepat tanpa compile ulang.
+    kick_pre_delay_sec_(2.0),
     present_pitch_(0)
 {
   //init ros
@@ -108,6 +111,35 @@ void SoccerDemo::setNode(rclcpp::Node::SharedPtr node)
   node_ = node;
   if (node_ != nullptr)
   {
+    // try/catch WAJIB, bukan hiasan: mengetik kick_pre_delay_sec:=2 (tanpa
+    // titik desimal) membuat ROS menyimpulkan tipe integer, tidak cocok dengan
+    // deklarasi double, dan exception yang tidak tertangkap membunuh
+    // op_demo_node seketika (exit -6). Pernah terjadi, lihat commit 146956f.
+    try
+    {
+      kick_pre_delay_sec_ = node_->has_parameter("kick_pre_delay_sec")
+                              ? node_->get_parameter("kick_pre_delay_sec").as_double()
+                              : node_->declare_parameter("kick_pre_delay_sec", kick_pre_delay_sec_);
+    }
+    catch (const rclcpp::exceptions::InvalidParameterTypeException &)
+    {
+      try
+      {
+        kick_pre_delay_sec_ =
+            (double) node_->get_parameter("kick_pre_delay_sec").as_int();
+      }
+      catch (const std::exception &e)
+      {
+        RCLCPP_ERROR(rclcpp::get_logger("SoccerDemo"),
+                     "kick_pre_delay_sec tidak terbaca (%s); memakai %.2f s.",
+                     e.what(), kick_pre_delay_sec_);
+      }
+    }
+    RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+                "Jeda sebelum halaman aksi tendangan: %.2f s "
+                "(dikurangi waktu reda yang sudah dijalani jalur memutar).",
+                kick_pre_delay_sec_);
+
     imu_data_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>("/robotis/open_cr/imu", 10,
                                                                       std::bind(&SoccerDemo::imuDataCallback, this, std::placeholders::_1));
     mag_status_sub_ = node_->create_subscription<std_msgs::msg::UInt8>("/robotis/open_cr/mag_status", 10,
@@ -837,9 +869,24 @@ void SoccerDemo::handleKick(int ball_position)
   //playMotion(Ceremony);
 }
 
-void SoccerDemo::handleKick()
+void SoccerDemo::handleKick(double already_settled_sec)
 {
-  rclcpp::sleep_for(std::chrono::milliseconds(2000));
+  // Jeda supaya badan benar-benar diam sebelum halaman aksi tendangan
+  // dimainkan: gerakan aksi itu lingkar-terbuka, kalau badan masih bergoyang
+  // sisa gait robot bisa jatuh.
+  //
+  // already_settled_sec dikurangkan karena jalur MEMUTAR sudah menjalani fase
+  // reda sendiri sesudah menghentikan gait. Sebelum ini keduanya dijalankan
+  // penuh: terukur 2026-08-28 jarak dari "putaran dihentikan" ke "mainkan
+  // halaman aksi" konsisten 2,7 detik (0,63->3,39 / 8,20->10,91 / 7,13->9,88),
+  // padahal jalur tanpa memutar cuma 2,0 detik. Selisih 0,7 detik itu murni
+  // menunggu hal yang sama dua kali.
+  double delay_sec = kick_pre_delay_sec_ - already_settled_sec;
+  if (delay_sec < 0.0)
+    delay_sec = 0.0;
+
+  if (delay_sec > 0.0)
+    rclcpp::sleep_for(std::chrono::milliseconds((int) (delay_sec * 1000.0)));
 
   // change to motion module
   setModuleToDemo("action_module");
@@ -925,7 +972,7 @@ void SoccerDemo::kickAfterYawAlign()
                 (after == before) ? "tetap" : "BERUBAH", footName(before), footName(after));
   }
 
-  handleKick();
+  handleKick(ball_follower_.yawSettleSec());
 }
 
 bool SoccerDemo::handleFallen(int fallen_status)

@@ -117,6 +117,12 @@ class BallFollower // : public rclcpp::Node
   // Satu langkah penyelarasan. true = selesai, boleh menendang.
   bool processYawAlign();
   void cancelYawAlign();
+  // Berapa lama fase reda sesudah putaran berhenti. Dibaca soccer_demo supaya
+  // jeda pra-tendang tidak menghitung ulang waktu diam yang SUDAH dijalani.
+  double yawSettleSec() const
+  {
+    return yaw_settle_sec_;
+  }
   bool isYawAligning() const
   {
     return yaw_align_state_ != YawAlignOff;

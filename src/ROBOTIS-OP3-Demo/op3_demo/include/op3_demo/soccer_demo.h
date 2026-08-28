@@ -100,7 +100,10 @@ class SoccerDemo : public OPDemo
   void stopSoccerMode();
 
   void handleKick(int ball_position);
-  void handleKick();
+  // already_settled_sec = waktu robot SUDAH berdiri diam sebelum ini dipanggil
+  // (fase reda sesudah memutar). Jeda pra-tendang dikurangi sebanyak itu supaya
+  // waktu diam tidak dihitung dua kali.
+  void handleKick(double already_settled_sec = 0.0);
   // Menendang SESUDAH badan selesai diputar ke yaw target: keputusan kaki
   // penendang disegarkan dulu, karena keputusan lama dibuat sebelum berputar.
   void kickAfterYawAlign();
@@ -165,6 +168,7 @@ class SoccerDemo : public OPDemo
   int robot_status_;
   int tracking_status_;
   int stand_state_;
+  double kick_pre_delay_sec_;
   double present_pitch_;
 
   // std::unique_ptr<std::thread> spin_thread_;
