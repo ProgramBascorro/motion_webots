@@ -21,6 +21,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <boost/thread.hpp>
 #include <chrono>
@@ -93,12 +94,16 @@ class SoccerDemo : public OPDemo
   bool isHeadJoint(const int &id);
 
   void imuDataCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
+  void magStatusCallback(const std_msgs::msg::UInt8::SharedPtr msg);
 
   void startSoccerMode();
   void stopSoccerMode();
 
   void handleKick(int ball_position);
   void handleKick();
+  // Menendang SESUDAH badan selesai diputar ke yaw target: keputusan kaki
+  // penendang disegarkan dulu, karena keputusan lama dibuat sebelum berputar.
+  void kickAfterYawAlign();
   bool handleFallen(int fallen_status);
 
   void playMotion(int motion_index);
@@ -110,6 +115,11 @@ class SoccerDemo : public OPDemo
   BallTracker ball_tracker_;
   BallFollower ball_follower_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_data_sub_;
+  // Kesiapan magnetometer OpenCR. Tanpa ini, mag_status 0/1 (yaw DIPAKSA 0 oleh
+  // open_cr_module) tidak bisa dibedakan dari robot yang memang sudah lurus,
+  // dan penyelarasan yaw akan selalu bilang "sudah lurus" pada papan yang tidak
+  // punya magnetometer sama sekali.
+  rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr mag_status_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_tracker_cmd_pub_;
   // Publisher ANGGOTA, dibuat sekali di setNode(). Bukan gaya penulisan:
   // publisher sekali-pakai yang dibuat lalu langsung publish di dalam satu

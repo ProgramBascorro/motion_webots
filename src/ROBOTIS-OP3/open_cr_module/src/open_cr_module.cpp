@@ -93,6 +93,7 @@ void OpenCRModule::queueThread()
   status_msg_pub_ = this->create_publisher<robotis_controller_msgs::msg::StatusMsg>("/robotis/status", 1);
   imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/robotis/open_cr/imu", 1);
   button_pub_ = this->create_publisher<std_msgs::msg::String>("/robotis/open_cr/button", 1);
+  mag_status_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/robotis/open_cr/mag_status", 1);
   dxl_power_msg_pub_ =
     this->create_publisher<robotis_controller_msgs::msg::SyncWriteItem>("/robotis/sync_write_item", 1);
 
@@ -121,6 +122,12 @@ void OpenCRModule::process(std::map<std::string, robotis_framework::Dynamixel *>
 
   uint16_t present_volt = sensors["open-cr"]->sensor_state_->bulk_read_table_["present_voltage"];
 
+  // Yaw magnetometer, firmware OpenCR versi 3 ke atas.
+  // bulk_read_table_ bertipe uint32_t dan framework tidak melakukan sign-extension,
+  // jadi cast ke int16_t wajib -- sama seperti gyro/acc di atas.
+  int16_t yaw_raw = sensors["open-cr"]->sensor_state_->bulk_read_table_["yaw"];
+  uint8_t mag_status = sensors["open-cr"]->sensor_state_->bulk_read_table_["mag_status"];
+
   result_["gyro_x"] = lowPassFilter(0.4, -getGyroValue(gyro_x), previous_result_["gyro_x"]);
   result_["gyro_y"] = lowPassFilter(0.4, -getGyroValue(gyro_y), previous_result_["gyro_y"]);
   result_["gyro_z"] = lowPassFilter(0.4, getGyroValue(gyro_z), previous_result_["gyro_z"]);
@@ -139,6 +146,37 @@ void OpenCRModule::process(std::map<std::string, robotis_framework::Dynamixel *>
   RCLCPP_INFO_EXPRESSION(this->get_logger(), DEBUG_PRINT, "Filtered : %f, %f, %f",
                          result_["acc_x"], result_["acc_y"], result_["acc_z"]);
 
+  // mag_status : 0 = tidak ada magnetometer, 1 = settling, 2 = OK, 3 = kalibrasi hard-iron.
+  // Yaw hanya dipakai kalau sensornya memang melapor siap; kalau tidak, tetap 0 seperti
+  // perilaku lama supaya orientasi tidak diisi angka karangan.
+  result_["mag_status"] = mag_status;
+  if (mag_status == 2 || mag_status == 3) {
+    double yaw_rad = (static_cast<double>(yaw_raw) / 10.0) * DEGREE2RADIAN;
+    result_["yaw"] = lowPassFilterAngle(0.4, yaw_rad, previous_result_["yaw"]);
+  } else {
+    // Sensor belum siap: kembalikan ke perilaku lama sekaligus reset state filter,
+    // supaya saat sensor siap lagi filter tidak merayap dari nilai basi.
+    result_["yaw"] = 0.0;
+    previous_result_["yaw"] = 0.0;
+  }
+
+  if (mag_status == 0) {
+    static bool no_mag_reported = false;
+    if (!no_mag_reported) {
+      no_mag_reported = true;
+      publishStatusMsg(robotis_controller_msgs::msg::StatusMsg::STATUS_WARN,
+                       "OpenCR mag_status=0 : board tidak punya magnetometer, yaw dipaksa 0");
+    }
+  }
+
+  std_msgs::msg::UInt8 mag_status_msg;
+  mag_status_msg.data = mag_status;
+  mag_status_pub_->publish(mag_status_msg);
+
+  RCLCPP_INFO_EXPRESSION(this->get_logger(), DEBUG_PRINT, " ======================= Yaw ======================== ");
+  RCLCPP_INFO_EXPRESSION(this->get_logger(), DEBUG_PRINT, "Raw : %d (%.1f deg), mag_status : %d",
+                         yaw_raw, yaw_raw / 10.0, mag_status);
+
   const auto& update_stamp = sensors["open-cr"]->sensor_state_->update_time_stamp_;
   rclcpp::Time update_time(
     update_stamp.sec_,
@@ -149,10 +187,29 @@ void OpenCRModule::process(std::map<std::string, robotis_framework::Dynamixel *>
     publishDXLPowerMsg(1);
   }
 
+  // Peta tombol fisik -> nama yang diterbitkan ke /robotis/open_cr/button.
+  //
+  // Firmware OpenCR (dxl_node_op3.cpp:551-554) mengemas keempat tombol jadi satu
+  // byte: S1 di bit 0, S2 bit 1, S3 bit 2, S4 bit 3. Keempatnya ada di header
+  // GPIO OpenCR, bukan tombol bawaan papan:
+  //   S1 = pin 56 = BDPIN_GPIO_7    S3 = pin 58 = BDPIN_GPIO_9
+  //   S2 = pin 57 = BDPIN_GPIO_8    S4 = pin 59 = BDPIN_GPIO_10
+  //
+  // 2026-08-22: START dipindah ke D56 (bit 0). Bawaannya "mode" yang di situ,
+  // jadi keduanya ditukar -- bukan dipindah sepihak, supaya tidak ada nama yang
+  // kehilangan tombol. "user" tetap di tempat aslinya (bit 2 / D58), karena
+  // "user_long" adalah pemulihan torque-on + init pose di op3_manager
+  // (buttonHandlerCallback), satu-satunya jalan balik kalau torque terlanjur mati.
+  //
+  // Tidak ada nama "stop": "start" memang toggle -- tekan untuk jalan, tekan lagi
+  // untuk berhenti (SoccerDemo::buttonHandlerCallback). Sengaja dibiarkan begitu.
+  //
+  // Bit 3 (D59) sengaja tidak diterbitkan: firmware memakainya sendiri untuk
+  // mematikan power DXL (tahan >100 ms), jadi jangan dipetakan ke nama apa pun.
   uint8_t button_flag = sensors["open-cr"]->sensor_state_->bulk_read_table_["button"];
-  result_["button_mode"] = button_flag & 0x01;
-  result_["button_start"] = (button_flag & 0x02) >> 1;
-  result_["button_user"] = (button_flag & 0x04) >> 2;
+  result_["button_start"] = button_flag & 0x01;        // bit 0 = PIN_BUTTON_S1 = D56
+  result_["button_mode"] = (button_flag & 0x02) >> 1;  // bit 1 = PIN_BUTTON_S2 = D57
+  result_["button_user"] = (button_flag & 0x04) >> 2;  // bit 2 = PIN_BUTTON_S3 = D58
 
   handleButton("mode");
   handleButton("start");
@@ -196,10 +253,19 @@ void OpenCRModule::publishIMU()
   double roll = std::atan2(
     -result_["acc_x"],
     sign * std::sqrt(result_["acc_z"] * result_["acc_z"] + mui * result_["acc_y"] * result_["acc_y"]));
+  // Papan OpenCR di ALPHONSE terpasang diputar 90 derajat terhadap sumbu z, jadi
+  // acc_x menunjuk ke kanan dan acc_y ke depan -- bukan seperti OP3 asli. Roll di atas
+  // sudah menyesuaikan itu, tapi komponen depan masih perlu dinegasikan supaya tanda
+  // pitch mengikuti REP-103: condong ke depan = positif. Diverifikasi di robot dengan
+  // memiringkan badan ~30 derajat ke depan; tanpa minus ini hasilnya negatif, dan
+  // soccer_demo membaca jatuh telungkup sebagai Fallen_Behind (motion bangkit terbalik).
   double pitch = std::atan2(
-    result_["acc_y"],
+    -result_["acc_y"],
     std::sqrt(result_["acc_x"] * result_["acc_x"] + result_["acc_z"] * result_["acc_z"]));
-  double yaw = 0.0;
+  // Yaw sudah difilter di process() dengan lowPassFilterAngle (varian sirkular).
+  // Roll & pitch di atas dihitung dari akselerometer, bukan dari register roll/pitch
+  // OpenCR -- jadi yaw ini memang jalur baru, bukan salinan pola lama.
+  double yaw = result_["yaw"];
 
   Eigen::Quaterniond orientation = robotis_framework::convertRPYToQuaternion(roll, pitch, yaw);
 
@@ -355,6 +421,29 @@ void OpenCRModule::publishDXLPowerMsg(unsigned int value)
 double OpenCRModule::lowPassFilter(double alpha, double x_new, double &x_old)
 {
   double filtered_value = alpha * x_new + (1.0 - alpha) * x_old;
+  x_old = filtered_value;
+  return filtered_value;
+}
+
+// Low-pass untuk sudut yang wrap di +-pi. Rata-rata biasa tidak boleh dipakai di sini:
+// begitu yaw melompat dari +179 ke -179, alpha*x_new + (1-alpha)*x_old akan menyeret
+// hasilnya melewati seluruh lingkaran (mendekati 0) padahal robot cuma bergerak 2 derajat.
+// Jadi yang difilter adalah SELISIH terpendeknya, lalu hasilnya di-wrap ulang.
+double OpenCRModule::lowPassFilterAngle(double alpha, double x_new, double &x_old)
+{
+  // selisih terpendek x_new - x_old, dinormalkan ke [-pi, pi)
+  double diff = std::fmod(x_new - x_old + M_PI, 2.0 * M_PI);
+  if (diff < 0.0) {
+    diff += 2.0 * M_PI;
+  }
+  diff -= M_PI;
+
+  double filtered_value = std::fmod(x_old + alpha * diff + M_PI, 2.0 * M_PI);
+  if (filtered_value < 0.0) {
+    filtered_value += 2.0 * M_PI;
+  }
+  filtered_value -= M_PI;
+
   x_old = filtered_value;
   return filtered_value;
 }

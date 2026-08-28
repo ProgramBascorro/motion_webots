@@ -22,6 +22,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8.hpp>
 
 #include <Eigen/Eigen>
 
@@ -65,6 +66,8 @@ private:
   void publishStatusMsg(unsigned int type, std::string msg);
   void publishDXLPowerMsg(unsigned int value);
   double lowPassFilter(double alpha, double x_new, double &x_old);
+  // Varian sirkular untuk sudut yang wrap di +-pi (yaw magnetometer).
+  double lowPassFilterAngle(double alpha, double x_new, double &x_old);
 
   int control_cycle_msec_;
   std::thread queue_thread_;
@@ -84,6 +87,9 @@ private:
 
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr button_pub_;
+  // Status magnetometer (0=tak ada, 1=settling, 2=OK, 3=kalibrasi) -- dipakai Bascorro
+  // Studio untuk menandai apakah yaw layak dipercaya.
+  rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr mag_status_pub_;
   rclcpp::Publisher<robotis_controller_msgs::msg::StatusMsg>::SharedPtr status_msg_pub_;
   rclcpp::Publisher<robotis_controller_msgs::msg::SyncWriteItem>::SharedPtr dxl_power_msg_pub_;
 };

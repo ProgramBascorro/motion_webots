@@ -21,6 +21,7 @@
 
 #include <math.h>
 #include <numeric>
+#include <chrono>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/int32.hpp>
@@ -76,10 +77,63 @@ class BallFollower // : public rclcpp::Node
     return (approach_ball_position_ == OnRight || approach_ball_position_ == OnLeft);
   }
 
+  // ===== Penyelarasan yaw sebelum menendang =================================
+  //
+  // Urutan yang diminta: deteksi bola -> dekati bola -> begitu bola masuk
+  // jangkauan tendang, JANGAN langsung menendang. Putar badan di tempat dulu
+  // sampai yaw kembali ke arah acuan (bawaan 0 derajat, toleransi +-5), baru
+  // menendang.
+  //
+  // "Yaw 0" itu arah yang DIHADAPI ROBOT SAAT OPENCR MENYALA: papan itu
+  // menolkan acuan headingnya sendiri waktu start, jadi nol-nya ikut ke mana
+  // pun robot diarahkan saat dinyalakan. Konsekuensi praktisnya: hadapkan robot
+  // ke gawang waktu menyalakannya, dan penyelarasan ini berarti "hadap gawang
+  // dulu, baru tendang".
+  //
+  // Mekanismenya duduk di kelas ini, bukan di SoccerDemo, karena SELURUH
+  // perintah ke walking_module (dan seluruh parameter kick_*) memang milik
+  // kelas ini. SoccerDemo hanya menyuapkan yaw dari callback IMU yang sudah
+  // dimilikinya, lalu memanggil processYawAlign() sekali per tick process().
+  //
+  // Semua langkahnya TIDAK MEMBLOKIR, satu langkah per tick. Itu bukan selera
+  // gaya: demo_node berjalan satu utas -- process() lalu spin_some() -- jadi
+  // loop tunggu di dalam process() ikut membekukan callback IMU yang justru
+  // menjadi syarat berhentinya loop itu sendiri.
+
+  // Yaw badan dalam DERAJAT, dari /robotis/open_cr/imu.
+  void setBodyYaw(double yaw_deg);
+  // mag_status OpenCR: 0 = papan tanpa magnetometer, 1 = belum settle, 2 = OK,
+  // 3 = sedang kalibrasi hard-iron. Pada 0 dan 1, open_cr_module MEMAKSA
+  // yaw = 0, jadi angkanya bukan pengukuran dan tidak boleh dipercaya.
+  void setMagStatus(int mag_status);
+
+  // true  = penyelarasan dimulai, robot memang perlu memutar.
+  // false = tidak perlu (sudah lurus) atau tidak bisa (yaw tak terpakai);
+  //         pemanggil boleh langsung menendang seperti perilaku lama.
+  bool startYawAlign();
+  // Satu langkah penyelarasan. true = selesai, boleh menendang.
+  bool processYawAlign();
+  void cancelYawAlign();
+  bool isYawAligning() const
+  {
+    return yaw_align_state_ != YawAlignOff;
+  }
+  bool refreshFootAfterAlign() const
+  {
+    return refresh_foot_after_align_;
+  }
+
   rclcpp::Node::SharedPtr node_;
   void setNode(rclcpp::Node::SharedPtr node);
 
  protected:
+  enum YawAlignState
+  {
+    YawAlignOff = 0,       // tidak sedang menyelaraskan
+    YawAlignTurning = 1,   // sedang memutar di tempat
+    YawAlignSettling = 2,  // sudah lurus, menunggu gait benar-benar berhenti
+  };
+
   const bool DEBUG_PRINT;
   // Geometri pemicu tendangan. Dulu CAMERA_HEIGHT konstanta 0,56 m; sekarang
   // bisa disetel lewat parameter ROS (kick_camera_height, kick_distance,
@@ -173,6 +227,11 @@ class BallFollower // : public rclcpp::Node
   int kickFootFromHeadPan() const;
 
   void currentJointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+  // Menerbitkan perintah apa adanya, tanpa efek samping. Dipisah dari
+  // setWalkingCommand() karena versi itu memanggil getWalkingParam() untuk
+  // "start", dan panggilan service itu MEMBLOKIR loop demo -- termasuk callback
+  // IMU yang dibutuhkan penyelarasan yaw. Lihat startInPlaceTurn().
+  void publishWalkingCommand(const std::string &command);
   void setWalkingCommand(const std::string &command);
   void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance = true);
   bool getWalkingParam();
@@ -218,6 +277,65 @@ class BallFollower // : public rclcpp::Node
   double curr_period_time_;
   double accum_period_time_;
 
+  // ---- Penyelarasan yaw --------------------------------------------------
+  // Mulai memutar di tempat (walking "start" dengan amplitudo maju/samping nol).
+  void startInPlaceTurn();
+  // Nolkan amplitudo, kirim "stop", lalu masuk fase menunggu gait reda.
+  // Selalu mengembalikan false: selesainya diputuskan tick berikutnya.
+  bool finishYawTurn(const char *reason);
+  // Yaw boleh dipakai kalau pernah terbaca, magnetometernya melapor siap, dan
+  // pesan terakhirnya belum basi.
+  bool isBodyYawUsable() const;
+
+  int yaw_align_state_;
+  // Yaw terakhir dari IMU + kapan ia tiba. steady_clock, BUKAN jam ROS:
+  // membandingkan dua rclcpp::Time dengan clock type berbeda melempar
+  // exception, dan di berkas ini ada dua sumber waktu ROS yang berbeda
+  // (rclcpp::Clock() sistem pada prev_time_ vs jam node).
+  double body_yaw_deg_;
+  bool body_yaw_seen_;
+  std::chrono::steady_clock::time_point body_yaw_stamp_;
+  int mag_status_;                 // -1 = belum pernah terdengar
+
+  std::chrono::steady_clock::time_point yaw_align_started_at_;
+  std::chrono::steady_clock::time_point yaw_align_deadline_;
+  std::chrono::steady_clock::time_point yaw_settle_until_;
+  std::chrono::steady_clock::time_point yaw_sign_check_at_;
+  int yaw_in_window_count_;
+  double yaw_turn_sign_;           // salinan kerja, bisa dibalik sendiri
+  double yaw_align_ref_error_;     // |galat| saat mulai, bahan cek tanda
+  bool yaw_sign_settled_;          // cek tanda otomatis sudah selesai
+
+  // Batas bawah putaran yang MENINGKAT sendiri saat robot tidak kunjung
+  // berputar. Terukur di robot 2026-08-28: perintah 13,7 deg/langkah membuat
+  // yaw bergerak -39 -> -4 dalam 3,7 detik, tapi perintah 5,0 deg/langkah
+  // (batas bawah) sama sekali tidak menggerakkannya -- yaw cuma melayang
+  // -12 ... -17. Jadi ada ambang torsi minimum, dan galat kecil justru
+  // menghasilkan perintah di bawah ambang itu. Tanpa eskalasi, "berputar sampai
+  // benar-benar lurus" berubah jadi "berputar selamanya".
+  double yaw_turn_floor_deg_;
+  std::chrono::steady_clock::time_point yaw_stall_check_at_;
+  double yaw_stall_ref_error_;     // |galat| di awal jendela pengamatan
+  double yaw_best_error_;          // |galat| terkecil di dalam jendela ini
+
+  bool yaw_align_enable_;
+  double yaw_target_deg_;
+  double yaw_tolerance_deg_;
+  double yaw_max_turn_deg_;
+  double yaw_min_turn_deg_;
+  double yaw_turn_gain_;
+  double yaw_timeout_sec_;
+  double yaw_settle_sec_;
+  int yaw_ready_count_;
+  double yaw_turn_sign_param_;
+  bool yaw_auto_sign_;
+  double yaw_sign_check_sec_;
+  double yaw_sign_margin_deg_;
+  double yaw_max_age_sec_;
+  double yaw_stall_sec_;
+  double yaw_stall_margin_deg_;
+  double yaw_turn_step_deg_;
+  bool refresh_foot_after_align_;
 };
 }
 

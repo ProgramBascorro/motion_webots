@@ -67,6 +67,7 @@
        Dibuka di sini supaya bisa ditera langsung di robot tanpa build ulang;
        bandingkan dengan angka "jarak bola" yang dicetak BallFollower 1x/detik. -->
   <arg name="kick_distance" default="0.30"/>
+
   <!-- Batas jarak untuk jalur pemicu JENDELA PAN: bola harus lebih dekat dari
        ini sebelum sudut servo kepala boleh memicu tendangan. Gunanya cuma
        mencegah robot menendang angin saat bolanya masih jauh di seberang
@@ -145,6 +146,86 @@
   <arg name="kick_fov_width_deg" default="35.2"/>
   <arg name="kick_image_width_px" default="640.0"/>
 
+  <!-- ===== Menghadap ke yaw acuan dulu, baru menendang =====================
+
+       Begitu bola masuk posisi tendang, robot TIDAK langsung menendang: ia
+       memutar badan di tempat sampai yaw-nya kembali ke kick_yaw_target_deg
+       (bawaan 0) dalam toleransi kick_yaw_tolerance_deg (bawaan +-5), baru
+       menendang.
+
+       "Yaw 0" itu ARAH YANG DIHADAPI ROBOT SAAT OPENCR MENYALA — papan itu
+       menolkan acuan headingnya sendiri waktu start, jadi nol-nya ikut ke mana
+       pun robot menghadap saat dinyalakan. Praktisnya: hadapkan robot ke gawang
+       waktu menyalakannya, lalu fitur ini berarti "hadap gawang dulu, baru
+       tendang". Angkanya bisa dibaca di kartu IMU Orientation pada Bascorro
+       Studio (badge OK di sebelah Yaw = mag_status 2/3).
+
+       Fitur ini MATI SENDIRI dan robot menendang seperti dulu kalau
+       magnetometer tidak siap: mag_status 0 (papan tanpa magnetometer) atau 1
+       (belum settle) membuat open_cr_module memaksa yaw = 0, dan angka paksaan
+       itu tidak dipercaya. Cek dengan
+         ros2 topic echo /robotis/open_cr/mag_status
+       Yang dicari 2 atau 3. -->
+  <arg name="kick_yaw_align_enable" default="1.0"/>
+  <arg name="kick_yaw_target_deg" default="0.0"/>
+  <arg name="kick_yaw_tolerance_deg" default="5.0"/>
+
+  <!-- Besar putaran per langkah, derajat: sebanding galat (gain), lalu dijepit
+       antara min dan max. Angka bawaannya sama dengan MIN_RL_TURN/MAX_RL_TURN
+       yang sudah dipakai saat mengejar bola, jadi memutar di tempat tidak lebih
+       ganas daripada berbelok sambil berjalan.
+       Kalau robot bolak-balik melewati toleransi (oleng kiri-kanan tanpa pernah
+       berhenti), turunkan kick_yaw_min_turn_deg atau lebarkan toleransinya —
+       satu langkah gait memang tidak bisa lebih halus dari batas bawah ini. -->
+  <arg name="kick_yaw_max_turn_deg" default="15.0"/>
+  <arg name="kick_yaw_min_turn_deg" default="5.0"/>
+  <arg name="kick_yaw_turn_gain" default="0.35"/>
+
+  <!-- Batas waktu memutar. Kalau habis, robot TETAP menendang (dengan WARN di
+       log) alih-alih membeku. Bawaannya longgar karena walking_module memakai
+       soft_start_time 2000 ms: dua detik pertama amplitudo putar masih naik
+       pelan, jadi putaran nyata baru mulai sesudah itu.
+       kick_yaw_settle_sec = jeda sesudah putaran berhenti, supaya gait benar-
+       benar reda sebelum kaki diserahkan ke action_module.
+       kick_yaw_ready_count = berapa tick berturut-turut yaw harus di dalam
+       toleransi sebelum dianggap lurus (30 tick = 1 detik). -->
+  <arg name="kick_yaw_timeout_sec" default="12.0"/>
+  <arg name="kick_yaw_settle_sec" default="0.7"/>
+  <arg name="kick_yaw_ready_count" default="3.0"/>
+
+  <!-- Arah putaran. +1 berarti angle_move_amplitude POSITIF memperbesar yaw.
+       Hubungan itu BELUM pernah diukur di robot ini, dan menebak tanda sudah
+       dua kali memakan waktu berjam-jam di paket ini (lihat catatan head_tilt
+       di ball_follower.cpp). Karena itu ada kick_yaw_auto_sign: kalau sesudah
+       kick_yaw_sign_check_sec galatnya justru MEMBESAR lebih dari
+       kick_yaw_sign_margin_deg, tandanya dibalik SEKALI dan dicatat dengan
+       ERROR di log. Tandanya diukur SEKALI per run: hasil koreksi itu dipakai
+       untuk semua tendangan berikutnya, jadi cuma tendangan pertama yang
+       kehilangan waktu. Pasang angka yang tercetak di kick_yaw_turn_sign supaya
+       tendangan pertama pun langsung benar, lalu boleh matikan koreksi
+       otomatisnya dengan kick_yaw_auto_sign:=0.0.
+
+       Lama putaran (hasil simulasi loop ini): galat 20 derajat selesai ~3 detik,
+       45 derajat ~5 detik, 90 derajat ~8 detik. Dua detik pertama habis untuk
+       soft_start walking_module. Kalau koreksi yang dibutuhkan besar DAN gait
+       robot kurang efektif memutar, batas waktu 12 detik bisa tercapai; robot
+       tetap menendang, dengan WARN. -->
+  <arg name="kick_yaw_turn_sign" default="1.0"/>
+  <arg name="kick_yaw_auto_sign" default="1.0"/>
+  <arg name="kick_yaw_sign_check_sec" default="3.0"/>
+  <arg name="kick_yaw_sign_margin_deg" default="6.0"/>
+
+  <!-- Umur maksimum pesan IMU yang masih boleh dipakai, detik. Yaw yang basi
+       berarti memutar buta. -->
+  <arg name="kick_yaw_max_age_sec" default="1.0"/>
+
+  <!-- Sesudah badan berputar, kaki penendang dihitung ULANG dari sudut leher
+       yang sedang mengunci bola: keputusan lama dibuat sebelum berputar, jadi
+       bola yang tadi di depan kaki kanan bisa pindah ke depan kaki kiri.
+       Hanya berlaku kalau pelacak memang sedang melihat bola. Setel 0.0 untuk
+       memakai keputusan lama apa adanya. -->
+  <arg name="kick_refresh_foot_after_align" default="1.0"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
     <param name="kick_camera_height" value="$(var kick_camera_height)" type="float"/>
     <param name="kick_distance" value="$(var kick_distance)" type="float"/>
@@ -157,6 +238,21 @@
     <param name="kick_ball_real_radius_m" value="$(var kick_ball_real_radius_m)" type="float"/>
     <param name="kick_fov_width_deg" value="$(var kick_fov_width_deg)" type="float"/>
     <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
+    <param name="kick_yaw_align_enable" value="$(var kick_yaw_align_enable)" type="float"/>
+    <param name="kick_yaw_target_deg" value="$(var kick_yaw_target_deg)" type="float"/>
+    <param name="kick_yaw_tolerance_deg" value="$(var kick_yaw_tolerance_deg)" type="float"/>
+    <param name="kick_yaw_max_turn_deg" value="$(var kick_yaw_max_turn_deg)" type="float"/>
+    <param name="kick_yaw_min_turn_deg" value="$(var kick_yaw_min_turn_deg)" type="float"/>
+    <param name="kick_yaw_turn_gain" value="$(var kick_yaw_turn_gain)" type="float"/>
+    <param name="kick_yaw_timeout_sec" value="$(var kick_yaw_timeout_sec)" type="float"/>
+    <param name="kick_yaw_settle_sec" value="$(var kick_yaw_settle_sec)" type="float"/>
+    <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
+    <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
+    <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
+    <param name="kick_yaw_sign_check_sec" value="$(var kick_yaw_sign_check_sec)" type="float"/>
+    <param name="kick_yaw_sign_margin_deg" value="$(var kick_yaw_sign_margin_deg)" type="float"/>
+    <param name="kick_yaw_max_age_sec" value="$(var kick_yaw_max_age_sec)" type="float"/>
+    <param name="kick_refresh_foot_after_align" value="$(var kick_refresh_foot_after_align)" type="float"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>
