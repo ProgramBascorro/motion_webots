@@ -110,6 +110,9 @@ class BallFollower // : public rclcpp::Node
   // true  = penyelarasan dimulai, robot memang perlu memutar.
   // false = tidak perlu (sudah lurus) atau tidak bisa (yaw tak terpakai);
   //         pemanggil boleh langsung menendang seperti perilaku lama.
+  // Menghentikan pelacakan bola TANPA menghentikan gait. Dipakai sebelum
+  // memutar: kalau gait ikut dimatikan, perintah putar tidak punya efek.
+  void pauseFollowingForTurn();
   bool startYawAlign();
   // Satu langkah penyelarasan. true = selesai, boleh menendang.
   bool processYawAlign();
@@ -327,6 +330,11 @@ class BallFollower // : public rclcpp::Node
   double yaw_timeout_sec_;
   double yaw_settle_sec_;
   int yaw_ready_count_;
+  // Berapa kali putaran boleh diulang kalau cek sesudah gait reda ternyata
+  // masih di luar toleransi. Yaw saat gait jalan berayun belasan derajat, jadi
+  // "lurus" versi sambil berjalan tidak bisa dipercaya.
+  int yaw_recheck_max_;
+  int yaw_recheck_left_;
   double yaw_turn_sign_param_;
   bool yaw_auto_sign_;
   double yaw_sign_check_sec_;

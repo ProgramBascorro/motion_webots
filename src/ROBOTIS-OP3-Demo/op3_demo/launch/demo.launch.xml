@@ -50,17 +50,19 @@
   <!-- Tinggi kamera dari LANTAI, meter. Bukan konstanta robot: dipakai untuk
        menghitung jarak bola dari sudut tunduk kepala DAN untuk menghitung
        ambang radius bola, jadi harus mengikuti di mana robot berada.
-         berdiri di lantai   : 0.56
+         berdiri di lantai   : 0.56   (BAWAAN SEKARANG)
          digantung di dudukan: 0.56 + tinggi gantungan
-                               gantungan 29,5 cm  ->  0.855  (BAWAAN SEKARANG)
-       Bawaannya sengaja 0.855, bukan 0.56, karena robot ini sehari-hari diuji
-       dalam keadaan DIGANTUNG dan angka itu yang terbukti benar di lapangan
-       (14 tendangan berhasil, log 2026-08-27). Begitu robot turun berdiri di
-       lantai, jalankan dengan kick_camera_height:=0.56; ambang radius ikut
-       menyesuaikan sendiri, tidak ada angka lain yang perlu disentuh.
+                               gantungan 29,5 cm  jadi  0.855
+       Bawaannya dikembalikan ke 0.56 pada 2026-08-28: demo yang sebenarnya
+       dijalankan di LANTAI, dan memakai 0.855 di sana membuat robot menendang
+       JAUH terlalu cepat. Sebabnya bisa dihitung: 0.855 menghasilkan ambang
+       radius 62,1 px, dan 62,1 px saat kamera ada di 0,56 m berarti bola masih
+       0,67 m di depan robot, bukan 0,30 m. Di lapangan itu terlihat sebagai
+       "menendang padahal bola belum dekat kaki".
+       Kalau robot digantung lagi, jalankan dengan kick_camera_height:=0.855.
        Salah nilai di sini tidak bikin error, cuma membuat jarak yang dilaporkan
        (dan karena itu pemicu tendangan) meleset sebanding. -->
-  <arg name="kick_camera_height" default="0.855"/>
+  <arg name="kick_camera_height" default="0.56"/>
 
   <!-- Ambang tendangan, meter, dalam JARAK TANAH (bukan jarak lurus ke kamera).
        kick_distance juga jadi jarak BERHENTI robot saat mendekati bola.
@@ -72,11 +74,12 @@
        ini sebelum sudut servo kepala boleh memicu tendangan. Gunanya cuma
        mencegah robot menendang angin saat bolanya masih jauh di seberang
        lapangan tapi kebetulan lurus di depan kaki.
-       Bawaannya 1.00 dan bukan 0.40 karena saat robot digantung, jarak hasil
-       hitungan sudut kepala memang membesar (kamera lebih tinggi), sehingga
-       dengan 0.40 jalur jendela pan praktis tidak pernah kebuka. Angka longgar
-       di sini aman: yang menentukan tetap jendela sudut pan itu sendiri. -->
-  <arg name="kick_pan_max_distance" default="1.00"/>
+       Dikembalikan ke 0.40 pada 2026-08-28, seiring kick_camera_height balik
+       ke 0.56. Angka 1.00 dulu dipakai karena saat robot DIGANTUNG jarak hasil
+       hitungan sudut kepala ikut membesar, sehingga 0.40 menutup jalur jendela
+       pan sama sekali. Begitu robot berdiri di lantai jaraknya jujur lagi, dan
+       1.00 berarti robot boleh menendang saat bola masih semeter jauhnya. -->
+  <arg name="kick_pan_max_distance" default="0.40"/>
 
   <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
        sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
@@ -193,6 +196,20 @@
   <arg name="kick_yaw_settle_sec" default="0.7"/>
   <arg name="kick_yaw_ready_count" default="3.0"/>
 
+  <!-- Berapa kali putaran boleh diulang kalau cek SESUDAH gait reda ternyata
+       masih di luar toleransi.
+
+       Perlu karena yaw yang dibaca sambil berjalan tidak bisa dipercaya:
+       terukur 2026-08-28, dalam satu penyelarasan nilainya melompat -26,5 /
+       -30,3 / -31,5 / -27,5 / -33,4 / -44,3 / -28,2 / -18,1 hanya dalam selang
+       setengah detik. Badan bergoyang saat gait jalan dan magnetometer ikut
+       terbawa, jadi "tiga tick berturut di dalam jendela +-5 deg" bisa
+       terpenuhi oleh derau semata. Sesudah robot berhenti angkanya baru
+       berarti, dan di situlah pemeriksaan sungguhan dilakukan.
+
+       Setel 0 untuk kembali ke perilaku lama (percaya bacaan sambil jalan). -->
+  <arg name="kick_yaw_recheck_max" default="3.0"/>
+
   <!-- Arah putaran. +1 berarti angle_move_amplitude POSITIF memperbesar yaw.
        Hubungan itu BELUM pernah diukur di robot ini, dan menebak tanda sudah
        dua kali memakan waktu berjam-jam di paket ini (lihat catatan head_tilt
@@ -265,6 +282,7 @@
     <param name="kick_yaw_timeout_sec" value="$(var kick_yaw_timeout_sec)" type="float"/>
     <param name="kick_yaw_settle_sec" value="$(var kick_yaw_settle_sec)" type="float"/>
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
+    <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
     <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
     <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
     <param name="kick_yaw_sign_check_sec" value="$(var kick_yaw_sign_check_sec)" type="float"/>

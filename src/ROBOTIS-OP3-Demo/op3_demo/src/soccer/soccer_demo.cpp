@@ -308,18 +308,25 @@ void SoccerDemo::process()
 
       if(in_range == true)
       {
-        ball_follower_.stopFollowing();
-
         // JANGAN langsung menendang. Hadapkan badan ke yaw target dulu.
         // startYawAlign() mengembalikan false kalau tidak perlu memutar (yaw
         // sudah di dalam toleransi) atau tidak bisa (magnetometer belum siap) --
         // di situ perilakunya persis seperti sebelum fitur ini ada.
+        //
+        // stopFollowing() TIDAK boleh dipanggil sebelum ini. Ia mengirim "stop"
+        // ke walking_module, dan startInPlaceTurn() mengirim "start" beberapa
+        // puluh mikrodetik kemudian -- keduanya tiba dalam satu siklus kontrol
+        // 8 ms yang sama dan hasilnya undian. Waktu "stop" yang menang, gait
+        // mati dan perintah putar tidak berpengaruh sama sekali: terukur yaw
+        // beku di pita +-1,1 deg selama 12 detik penuh. startYawAlign() kini
+        // memakai pauseFollowingForTurn() yang membiarkan gait tetap jalan.
         if (ball_follower_.startYawAlign() == true)
         {
           sendDebugTopic("Aligning yaw before kick");
           break;
         }
 
+        ball_follower_.stopFollowing();
         handleKick();
       }
       break;

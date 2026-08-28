@@ -143,6 +143,8 @@ BallFollower::BallFollower()
     yaw_timeout_sec_(0.0),
     yaw_settle_sec_(0.7),
     yaw_ready_count_(3),
+    yaw_recheck_max_(3),
+    yaw_recheck_left_(0),
     yaw_turn_sign_param_(1.0),
     yaw_auto_sign_(true),
     yaw_sign_check_sec_(3.0),
@@ -283,6 +285,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_timeout_sec_     = read_param("kick_yaw_timeout_sec", yaw_timeout_sec_);
     yaw_settle_sec_      = read_param("kick_yaw_settle_sec", yaw_settle_sec_);
     yaw_ready_count_     = (int) read_param("kick_yaw_ready_count", (double) yaw_ready_count_);
+    yaw_recheck_max_     = (int) read_param("kick_yaw_recheck_max", (double) yaw_recheck_max_);
     yaw_turn_sign_param_ = read_param("kick_yaw_turn_sign", yaw_turn_sign_param_);
     yaw_auto_sign_       = read_param("kick_yaw_auto_sign", yaw_auto_sign_ ? 1.0 : 0.0) > 0.5;
     yaw_sign_check_sec_  = read_param("kick_yaw_sign_check_sec", yaw_sign_check_sec_);
@@ -837,6 +840,25 @@ bool BallFollower::isBodyYawUsable() const
   return age <= secondsToSteady(yaw_max_age_sec_);
 }
 
+void BallFollower::pauseFollowingForTurn()
+{
+  // SENGAJA tidak memanggil setWalkingCommand("stop"). Dulu soccer_demo
+  // memanggil stopFollowing() (yang mengirim "stop") lalu 39 mikrodetik
+  // kemudian startInPlaceTurn() mengirim "start". Dua pesan itu tiba di
+  // walking_module dalam satu siklus kontrol 8 ms yang sama, dan siapa yang
+  // menang jadi undian.
+  //
+  // Terukur di robot 2026-08-28, dua penyelarasan di run yang sama:
+  //   yaw -26,5 -> -14,9  : yaw berayun belasan derajat, gait JALAN
+  //   yaw -28,9 -> -28,0  : yaw beku di pita +-1,1 deg selama 12 detik penuh
+  // Yang kedua bukan kurang torsi -- gait-nya memang tidak jalan sama sekali.
+  //
+  // Sekarang gait dibiarkan terus berjalan dari fase mengejar bola; yang
+  // dihentikan hanya pelacakannya.
+  on_tracking_ = false;
+  count_to_kick_ = 0;
+}
+
 void BallFollower::startInPlaceTurn()
 {
   // x dan y NOL. IN_PLACE_FB_STEP (-3 mm) yang dipakai
@@ -883,6 +905,7 @@ bool BallFollower::startYawAlign()
   const auto now = std::chrono::steady_clock::now();
 
   yaw_align_state_ = YawAlignTurning;
+  yaw_recheck_left_ = yaw_recheck_max_;
   yaw_align_ref_error_ = fabs(error);
   yaw_align_started_at_ = now;
   yaw_align_deadline_ = now + secondsToSteady(yaw_timeout_sec_);
@@ -899,6 +922,7 @@ bool BallFollower::startYawAlign()
   // arah putaran itu sifat robot, bukan sifat satu tendangan. Sekali terukur,
   // dipakai seterusnya.
 
+  pauseFollowingForTurn();
   startInPlaceTurn();
 
   RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
@@ -943,6 +967,60 @@ bool BallFollower::processYawAlign()
   {
     if (now < yaw_settle_until_)
       return false;
+
+    // Periksa ULANG sesudah gait benar-benar reda.
+    //
+    // Yaw yang dibaca SAMBIL berjalan tidak bisa dipercaya: terukur di robot
+    // 2026-08-28, dalam satu penyelarasan yang sama nilainya melompat
+    // -26,5 / -30,3 / -31,5 / -27,5 / -33,4 / -44,3 / -28,2 / -18,1 dalam
+    // selang setengah detik. Badan memang bergoyang saat gait jalan, dan
+    // magnetometer ikut terbawa. Dengan toleransi +-5 deg, "tiga tick berturut
+    // di dalam jendela" bisa terpenuhi oleh derau semata -- robot mengaku lurus
+    // padahal tidak.
+    //
+    // Di sini robot sudah berhenti, jadi angkanya baru berarti. Kalau ternyata
+    // masih meleset, putar lagi. Kalau jatah ulangnya habis, tetap menendang
+    // supaya demo tidak macet selamanya -- tapi dicatat dengan keras.
+    if (isBodyYawUsable() == true)
+    {
+      const double settled_error = normalizeAngleDeg(yaw_target_deg_ - body_yaw_deg_);
+
+      if (fabs(settled_error) > yaw_tolerance_deg_ && yaw_recheck_left_ > 0)
+      {
+        yaw_recheck_left_ -= 1;
+
+        RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                    "Sesudah gait reda yaw ternyata masih %+.1f deg (galat %+.1f, "
+                    "toleransi %.1f). Yang tadi terbaca 'lurus' itu derau saat "
+                    "berjalan. Memutar lagi, sisa jatah %d.",
+                    body_yaw_deg_, settled_error, yaw_tolerance_deg_, yaw_recheck_left_);
+
+        yaw_align_state_ = YawAlignTurning;
+        yaw_in_window_count_ = 0;
+        yaw_align_ref_error_ = fabs(settled_error);
+        yaw_stall_ref_error_ = fabs(settled_error);
+        yaw_best_error_ = fabs(settled_error);
+        yaw_turn_floor_deg_ = yaw_min_turn_deg_;
+        yaw_stall_check_at_ = now + secondsToSteady(yaw_stall_sec_);
+        startInPlaceTurn();
+        return false;
+      }
+
+      if (fabs(settled_error) > yaw_tolerance_deg_)
+      {
+        RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
+                     "Jatah putar ulang habis, yaw masih %+.1f deg (galat %+.1f). "
+                     "Tetap menendang. Kalau ini sering terjadi, lebarkan "
+                     "kick_yaw_tolerance_deg atau naikkan kick_yaw_recheck_max.",
+                     body_yaw_deg_, settled_error);
+      }
+      else
+      {
+        RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                    "Yaw TERVERIFIKASI sesudah gait reda: %+.1f deg (galat %+.1f). Menendang.",
+                    body_yaw_deg_, settled_error);
+      }
+    }
 
     yaw_align_state_ = YawAlignOff;
     return true;
