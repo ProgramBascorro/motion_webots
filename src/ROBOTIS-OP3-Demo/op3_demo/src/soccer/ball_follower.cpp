@@ -827,13 +827,32 @@ void BallFollower::setWalkingParam(double x_move, double y_move, double rotation
   // di tempat (x = 0, hanya angle) akan turun ke tinggi angkat minimum dan
   // kaki tidak cukup terangkat untuk memutar -- penyelarasan yaw akan macet
   // justru karena perbaikan ini.
-  double motion = 0.0;
-  if (MAX_FB_STEP > 0.0)
-    motion = fabs(x_move) / MAX_FB_STEP;
-  if (MAX_RL_TURN > 0.0)
-    motion = fmax(motion, fabs(rotation_angle) / MAX_RL_TURN);
-  if (motion > 1.0)
-    motion = 1.0;
+  // Yang dipakai KEMAJUAN RAMP-nya, bukan nilai mutlaknya.
+  //
+  // x tidak pernah mulai dari nol: calcFootstep() menjepitnya di MIN_FB_STEP
+  // (5,0 mm) dan menaikkannya bertahap sampai MAX_FB_STEP (18,1 mm). Kalau z
+  // dipetakan dari x = 0, maka saat x baru mulai bergerak (kemajuan 0 %) z
+  // sudah berada di 28 % perjalanannya -- keduanya naik, tapi tidak
+  // berbarengan.
+  //
+  // Dengan memetakan rentang yang SAMA (MIN..MAX untuk x, ratio..1 untuk z),
+  // keduanya berangkat bersama dan sampai di puncak bersama.
+  auto ramp_progress = [](double value, double lo, double hi) -> double
+  {
+    if (hi <= lo)
+      return 0.0;
+    const double p = (fabs(value) - lo) / (hi - lo);
+    if (p < 0.0) return 0.0;
+    if (p > 1.0) return 1.0;
+    return p;
+  };
+
+  double motion = ramp_progress(x_move, MIN_FB_STEP, MAX_FB_STEP);
+
+  // Putaran dihitung dengan rentangnya sendiri lalu diambil yang terbesar.
+  // Tanpa ini, fase memutar di tempat (x = 0, hanya angle) jatuh ke kemajuan
+  // nol dan kaki tidak cukup terangkat untuk memutar.
+  motion = fmax(motion, ramp_progress(rotation_angle, MIN_RL_TURN, MAX_RL_TURN));
 
   double ratio = z_move_min_ratio_;
   if (ratio < 0.0)  ratio = 0.0;
