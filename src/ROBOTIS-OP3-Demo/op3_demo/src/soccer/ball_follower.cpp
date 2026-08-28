@@ -154,6 +154,14 @@ BallFollower::BallFollower()
     yaw_brake_last_yaw_(0.0),
     orbit_enable_(true),
     orbit_max_strafe_(20.0 * 0.001),
+    body_gyro_z_(0.0),
+    gyro_seen_(false),
+    gyro_integrating_(false),
+    turned_deg_(0.0),
+    turn_target_deg_(0.0),
+    gyro_sign_(1.0),
+    gyro_check_sec_(1.2),
+    gyro_dir_settled_(false),
     yaw_strafe_gain_(0.30 * 0.001),   // 0,30 mm per derajat simpangan
     yaw_strafe_max_(12.0 * 0.001),
     yaw_runaway_deg_(45.0),
@@ -350,6 +358,8 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     orbit_max_strafe_    = read_param("walk_orbit_max_strafe_mm", orbit_max_strafe_ * 1000.0) * 0.001;
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
     yaw_strafe_max_      = read_param("kick_yaw_strafe_max_mm", yaw_strafe_max_ * 1000.0) * 0.001;
+    gyro_sign_           = read_param("kick_yaw_gyro_sign", gyro_sign_);
+    gyro_check_sec_      = read_param("kick_yaw_gyro_check_sec", gyro_check_sec_);
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
     yaw_brake_max_sec_   = read_param("kick_yaw_brake_max_sec", yaw_brake_max_sec_);
     yaw_brake_still_deg_ = read_param("kick_yaw_brake_still_deg", yaw_brake_still_deg_);
@@ -1075,6 +1085,28 @@ void BallFollower::setBodyYaw(double yaw_deg)
   body_yaw_seen_ = true;
 }
 
+void BallFollower::setBodyGyroZ(double gyro_z_rad_per_sec)
+{
+  const auto now = std::chrono::steady_clock::now();
+
+  // Integrasi dilakukan DI SINI, bukan di tick demo, supaya tiap sampel gyro
+  // terpakai. Tick demo jalan 30 Hz dan tidak selaras dengan laju IMU; kalau
+  // integrasinya di sana, sebagian putaran hilang tak terhitung.
+  if (gyro_integrating_ == true && gyro_seen_ == true)
+  {
+    const double dt = std::chrono::duration<double>(now - gyro_stamp_).count();
+
+    // Lompatan waktu yang tidak masuk akal (mis. pesan tertahan) dibuang
+    // daripada menyuntikkan putaran palsu ke hasil integrasi.
+    if (dt > 0.0 && dt < 0.5)
+      turned_deg_ += gyro_sign_ * gyro_z_rad_per_sec * 180.0 / M_PI * dt;
+  }
+
+  body_gyro_z_ = gyro_z_rad_per_sec;
+  gyro_stamp_ = now;
+  gyro_seen_ = true;
+}
+
 void BallFollower::setMagStatus(int mag_status)
 {
   mag_status_ = mag_status;
@@ -1215,6 +1247,8 @@ bool BallFollower::startYawAlign()
 
 bool BallFollower::finishYawTurn(const char *reason)
 {
+  gyro_integrating_ = false;
+
   // Amplitudo dinolkan SEBELUM "stop", urutan yang sama dengan stopFollowing():
   // walking_module mengecil dari amplitudo ke nol pada siklus berikutnya alih-
   // alih menyelesaikan langkah putar terakhirnya.
@@ -1279,7 +1313,17 @@ bool BallFollower::processYawAlign(bool ball_visible)
 
     // Baru DI SINI putaran dimulai, dan baru di sini semua penghitung waktu
     // putaran dinyalakan -- supaya waktu mengerem tidak ikut termakan tenggat.
+    // Magnetometer dibaca DI SINI, satu kali, saat robot sudah benar-benar
+    // diam. Inilah satu-satunya tempat ia bisa dipercaya. Angkanya jadi
+    // "berapa derajat harus diputar", dan sesudah ini magnetometer TIDAK
+    // dilihat lagi sampai putaran selesai; yang mengendalikan gyro.
     const double start_error = normalizeAngleDeg(yaw_target_deg_ - body_yaw_deg_);
+
+    turn_target_deg_ = start_error;
+    turned_deg_ = 0.0;
+    gyro_integrating_ = true;
+    gyro_dir_settled_ = false;
+    gyro_check_at_ = now + secondsToSteady(gyro_check_sec_);
 
     yaw_align_state_ = YawAlignTurning;
     yaw_in_window_count_ = 0;
@@ -1390,7 +1434,13 @@ bool BallFollower::processYawAlign(bool ball_visible)
     return false;
   }
 
-  const double error = normalizeAngleDeg(yaw_target_deg_ - body_yaw_deg_);
+  // SISA PUTARAN dihitung dari gyro, bukan dari magnetometer.
+  //
+  // turn_target_deg_ dikunci saat robot diam (magnetometer sahih di situ),
+  // turned_deg_ adalah integrasi gyro sejak saat itu. Selisihnya = sisa yang
+  // belum diputar. Magnetometer sengaja TIDAK dilihat di sini: selama gait
+  // berjalan ia berayun 40 derajat per detik dan akan merusak kendalinya.
+  const double error = turn_target_deg_ - turned_deg_;
 
   if (fabs(error) <= yaw_tolerance_deg_)
   {
@@ -1398,8 +1448,9 @@ bool BallFollower::processYawAlign(bool ball_visible)
     if (yaw_in_window_count_ >= yaw_ready_count_)
     {
       RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
-                  "Yaw LURUS: %+.1f deg (target %+.1f +-%.1f, galat %+.1f).",
-                  body_yaw_deg_, yaw_target_deg_, yaw_tolerance_deg_, error);
+                  "Putaran SELESAI menurut gyro: sudah berputar %+.1f dari %+.1f deg "
+                  "(sisa %+.1f, toleransi %.1f). Menunggu diam lalu dicek magnetometer.",
+                  turned_deg_, turn_target_deg_, error, yaw_tolerance_deg_);
       return finishYawTurn("yaw sudah di dalam toleransi");
     }
   }
@@ -1441,63 +1492,55 @@ bool BallFollower::processYawAlign(bool ball_visible)
     return finishYawTurn("batas waktu habis");
   }
 
-  // Koreksi tanda otomatis, SEKALI per run (bukan per tendangan).
+  // Koreksi arah putaran DARI GYRO. Cepat dan tegas, karena gyro langsung
+  // memberi tahu robot sedang berputar ke mana.
   //
-  // Arah putaran positif walking_module belum pernah diukur terhadap tanda yaw
-  // magnetometer di robot ini, dan menebak tanda sudah dua kali memakan waktu
-  // berjam-jam di berkas ini (lihat catatan head_tilt di processFollowing).
-  // Daripada menebak: kalau sesudah jendela pengamatan galatnya justru MEMBESAR
-  // melewati margin, tandanya dibalik satu kali lalu dicatat dengan keras --
-  // angka yang tercetak itulah yang dipasang permanen lewat kick_yaw_turn_sign.
-  // Jendelanya harus lebih lama dari soft_start_time walking_module (bawaan
-  // 2 detik), karena selama ramp itu amplitudo putar belum penuh dan galat
-  // memang belum banyak bergerak.
+  // Ini yang dulu tidak mungkin: dengan magnetometer, menilai arah butuh
+  // jendela 3-5 detik dan hasilnya tetap salah dua kali, karena deraunya lebih
+  // besar daripada sinyalnya. Gyro tidak punya masalah itu; sesudah ~1 detik
+  // tanda putarannya sudah jelas.
   //
-  // yaw_sign_settled_ TIDAK dinolkan lagi oleh startYawAlign(), jadi begitu
-  // arahnya terukur sekali ia dipakai untuk seluruh tendangan sesudahnya.
-  if (yaw_sign_settled_ == false && now >= yaw_sign_check_at_)
+  // Syaratnya sudah benar-benar berputar (di atas 2 derajat), supaya getaran
+  // kecil saat gait mulai tidak salah dibaca sebagai arah.
+  if (gyro_dir_settled_ == false && now >= gyro_check_at_)
   {
-    // Galat awal harus cukup BESAR sebelum penilaian ini sah.
-    //
-    // Terukur 2026-08-28: bacaan yaw sambil gait jalan berbeda 5-10 derajat
-    // dari bacaan sesudah robot diam. Kalau galat awalnya cuma 5,8 derajat,
-    // derau sebesar itu sendirian sudah bisa membuatnya terlihat "membesar
-    // 12,9 derajat" -- dan tandanya dibalik padahal arah putarannya benar.
-    // Itu persis yang terjadi: tanda -1 yang sudah terukur benar dibalik lagi
-    // jadi +1 di tengah rangkaian cek-ulang bergalat kecil.
-    //
-    // Di bawah ambang ini penilaian DITUNDA, bukan diputuskan: yaw_sign_settled_
-    // dibiarkan false supaya kesempatan menilai tetap ada pada penyelarasan
-    // berikutnya yang galatnya cukup besar.
-    if (yaw_align_ref_error_ < yaw_sign_min_error_deg_)
+    if (fabs(turned_deg_) < 2.0)
     {
-      RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
-                  "Penilaian arah putaran DITUNDA: galat awal %.1f deg masih di "
-                  "bawah %.1f deg, deraunya lebih besar daripada sinyalnya.",
-                  yaw_align_ref_error_, yaw_sign_min_error_deg_);
-      yaw_sign_check_at_ = now + secondsToSteady(yaw_sign_check_sec_);
-    }
-    else if (fabs(error) > yaw_align_ref_error_ + yaw_sign_margin_deg_)
-    {
-      yaw_sign_settled_ = true;
-      yaw_turn_sign_ *= -1.0;
-      RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
-                   "ARAH PUTARAN TERBALIK: galat naik %.1f -> %.1f deg dalam %.1f s. "
-                   "Tanda dibalik jadi %+.0f. Pasang permanen dengan "
-                   "kick_yaw_turn_sign:=%.1f",
-                   yaw_align_ref_error_, fabs(error), yaw_sign_check_sec_,
-                   yaw_turn_sign_, yaw_turn_sign_);
+      // Belum ada putaran terukur sama sekali. Bisa jadi soft start belum
+      // selesai, bisa juga gyro memang tidak menjawab. Tunda penilaian dan
+      // beri tahu supaya bedanya kelihatan di log.
+      RCLCPP_WARN_THROTTLE(rclcpp::get_logger("BallFollower"), *log_clock_, 2000,
+                           "Gyro belum mencatat putaran (%.1f deg sesudah %.1f s). "
+                           "Kalau angkanya tetap nol, periksa gyro_z di /robotis/open_cr/imu.",
+                           turned_deg_, gyro_check_sec_);
+      gyro_check_at_ = now + secondsToSteady(gyro_check_sec_);
     }
     else
     {
-      // Galat awalnya cukup besar DAN tidak membesar: arah putaran terbukti
-      // benar. Dikunci supaya tidak dinilai ulang di penyelarasan bergalat
-      // kecil, tempat derau bisa membalikkannya secara keliru.
-      yaw_sign_settled_ = true;
-      RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
-                  "Arah putaran TERBUKTI benar (%+.0f): galat %.1f -> %.1f deg "
-                  "dalam %.1f s. Tidak akan dinilai ulang di run ini.",
-                  yaw_turn_sign_, yaw_align_ref_error_, fabs(error), yaw_sign_check_sec_);
+      gyro_dir_settled_ = true;
+
+      // Berputar ke arah yang BERLAWANAN dengan yang diminta: balik tandanya
+      // sekali, lalu nolkan hitungan supaya putaran yang salah tadi tidak ikut
+      // terhitung sebagai kemajuan.
+      if (turned_deg_ * turn_target_deg_ < 0.0)
+      {
+        yaw_turn_sign_ *= -1.0;
+        RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
+                     "ARAH PUTARAN TERBALIK menurut gyro: diminta %+.1f deg tapi "
+                     "berputar %+.1f deg dalam %.1f s. Tanda dibalik jadi %+.0f. "
+                     "Pasang permanen dengan kick_yaw_turn_sign:=%.1f",
+                     turn_target_deg_, turned_deg_, gyro_check_sec_,
+                     yaw_turn_sign_, yaw_turn_sign_);
+        turn_target_deg_ -= turned_deg_;
+        turned_deg_ = 0.0;
+      }
+      else
+      {
+        RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
+                    "Arah putaran benar menurut gyro (%+.0f): diminta %+.1f, "
+                    "sudah berputar %+.1f deg.",
+                    yaw_turn_sign_, turn_target_deg_, turned_deg_);
+      }
     }
   }
 

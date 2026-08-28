@@ -715,6 +715,16 @@ void SoccerDemo::imuDataCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
   // convertQuaternionToRPY() membongkarnya pada urutan ZYX yang sama.
   ball_follower_.setBodyYaw(rpy_orientation.coeff(2, 0));
 
+  // Gyro sumbu tegak, rad/detik. Inilah yang mengendalikan putaran; yaw di
+  // atas hanya dipakai saat robot DIAM untuk menetapkan targetnya.
+  ball_follower_.setBodyGyroZ(msg->angular_velocity.z);
+
+  // Gyro sumbu tegak: laju putar badan, rad/detik. Inilah yang mengendalikan
+  // fase memutar, karena ia tidak terganggu medan magnet motor seperti
+  // magnetometer. Disuapkan tiap pesan supaya integrasinya tidak kehilangan
+  // sampel.
+  ball_follower_.setBodyGyroZ(msg->angular_velocity.z);
+
   if (stop_fallen_check_ == true)
     return;
 

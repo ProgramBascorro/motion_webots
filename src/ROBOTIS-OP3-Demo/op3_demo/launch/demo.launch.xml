@@ -281,45 +281,36 @@
        itu tidak dipercaya. Cek dengan
          ros2 topic echo /robotis/open_cr/mag_status
        Yang dicari 2 atau 3. -->
-  <!-- PENYELARASAN YAW DIMATIKAN (0.0) sejak 2026-08-29.
+  <!-- PENYELARASAN YAW, dengan pembagian tugas dua sensor.
 
-       Bukan karena logikanya salah, tapi karena SINYAL YAW-nya tidak bisa
-       dipakai saat robot berjalan. Terukur di run op_demo_node_3716, dalam
-       satu penyelarasan yang sama dengan perintah putar TETAP +8 deg/langkah:
+       Sempat dimatikan 2026-08-29 karena magnetometer tidak bisa dipakai saat
+       robot berjalan: terukur berayun -87, -78, -58, -43, -25, -82 derajat
+       dalam hitungan detik padahal robot cuma jalan di tempat, dan akibatnya
+       robot berputar menjauh sampai pengaman menghentikannya di 100, 158, dan
+       167 derajat.
 
-         berhenti (fase mengerem) : yaw bergeser 1,8 lalu 1,7 lalu 1,6 deg
-         berjalan (fase memutar)  : -87, -78, -58, -43, -25, -82, -47, -60
+       Tapi magnetometer TENANG saat robot berhenti: pada run yang sama,
+       selama fase mengerem ia cuma bergeser 1,8 lalu 1,7 lalu 1,6 derajat.
+       Dan gyro punya sifat kebalikannya: ia mengukur laju putar, bukan arah
+       mata angin, jadi tidak terganggu medan magnet motor, tapi tidak tahu
+       di mana gawangnya.
 
-       Robot yang jalan di tempat tidak mungkin berayun 40 derajat dalam satu
-       detik. Jadi angkanya bukan sudut badan, melainkan derau; magnetometer
-       OpenCR hampir pasti terganggu arus 20 servo saat gait jalan.
+       Jadi masing-masing dipakai HANYA di tempat ia bisa dipercaya:
 
-       Buktinya juga muncul sebagai kontradiksi yang tidak bisa diselesaikan
-       dengan menyetel tanda: dua run dengan tanda BERLAWANAN memberi arah
-       hanyutan yang SAMA.
+         magnetometer, sekali, saat DIAM  -> berapa derajat harus diputar
+         gyro, terus-menerus, saat JALAN  -> sudah berputar berapa derajat
 
-         perintah -15 deg/langkah : yaw hanyut -5,9 deg/detik
-         perintah  +8 deg/langkah : yaw hanyut -8,7 deg/detik
+       Urutan lengkapnya: bola di jangkauan, BERHENTI sampai yaw benar-benar
+       diam, baca target dari magnetometer sekali, putar sambil menghitung
+       gyro, berhenti, cek ulang dengan magnetometer saat diam lagi, ulangi
+       kalau masih meleset, lalu menendang.
 
-       Dari dua persamaan itu wewenang perintah cuma 0,12 deg/detik per
-       derajat/langkah, melawan hanyutan tetap -7,7 deg/detik. Untuk
-       melawannya perlu perintah sekitar 63 deg/langkah, jauh di atas batas
-       aman 15. Dengan kata lain perintah putar praktis tidak berpengaruh
-       dibanding derau sinyalnya.
+       Hanyutan gyro tidak sempat menumpuk karena tiap putaran cuma beberapa
+       detik dan hitungannya dinolkan tiap kali putaran baru dimulai.
 
-       Akibatnya kalau dinyalakan: tiap tendangan membuang 12 detik lalu
-       berakhir dengan putaran liar yang dihentikan pengaman. Demo lebih baik
-       tanpa ini sampai sumber yaw-nya diperbaiki.
-
-       Menyalakan lagi: kick_yaw_align_enable:=1.0
-
-       Perbaikan sebenarnya (belum dikerjakan): jangan pakai magnetometer untuk
-       putaran pendek. Integrasikan gyro_z selama putaran saja, atau pakai
-       sudut leher sebagai acuan arah bola. Semua bagian lain dari fase ini
-       (mengerem sampai benar-benar diam, mengitari bola, pengaman putaran
-       liar, pemilihan ulang kaki) sudah terbukti bekerja dan tinggal dipakai
-       lagi begitu sumber sudutnya sahih. -->
-  <arg name="kick_yaw_align_enable" default="0.0"/>
+       Matikan lagi dengan kick_yaw_align_enable:=0.0 kalau perlu demo cepat
+       tanpa fase memutar. -->
+  <arg name="kick_yaw_align_enable" default="1.0"/>
   <arg name="kick_yaw_target_deg" default="0.0"/>
   <arg name="kick_yaw_tolerance_deg" default="5.0"/>
 
@@ -371,6 +362,20 @@
 
        Setel 0 untuk mematikan pengaman ini (tidak disarankan). -->
   <arg name="kick_yaw_runaway_deg" default="45.0"/>
+
+  <!-- Arah putar gyro dan jendela penilaiannya.
+
+       kick_yaw_gyro_sign menyamakan tanda gyro_z dengan tanda yaw. Kalau
+       terbalik, hasil integrasi akan berlawanan dengan target dan robot
+       mengira dirinya berputar menjauh.
+
+       kick_yaw_gyro_check_sec: sesudah selang ini arah putaran dinilai dari
+       hasil integrasi gyro, dan dibalik sekali kalau ternyata berlawanan
+       dengan yang diminta. Cukup 1,2 detik karena gyro langsung memberi tahu
+       robot sedang berputar ke mana; dengan magnetometer hal yang sama butuh
+       3 sampai 5 detik dan hasilnya tetap salah dua kali. -->
+  <arg name="kick_yaw_gyro_sign" default="1.0"/>
+  <arg name="kick_yaw_gyro_check_sec" default="1.2"/>
 
   <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
 
@@ -554,6 +559,8 @@
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
+    <param name="kick_yaw_gyro_sign" value="$(var kick_yaw_gyro_sign)" type="float"/>
+    <param name="kick_yaw_gyro_check_sec" value="$(var kick_yaw_gyro_check_sec)" type="float"/>
     <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
     <param name="kick_yaw_strafe_max_mm" value="$(var kick_yaw_strafe_max_mm)" type="float"/>
     <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>

@@ -106,6 +106,10 @@ class BallFollower // : public rclcpp::Node
   // 3 = sedang kalibrasi hard-iron. Pada 0 dan 1, open_cr_module MEMAKSA
   // yaw = 0, jadi angkanya bukan pengukuran dan tidak boleh dipercaya.
   void setMagStatus(int mag_status);
+  // Laju putar sumbu tegak, rad/detik, dari gyro OpenCR. Dipanggil tiap pesan
+  // IMU. Selama fase memutar, nilainya langsung DIINTEGRASIKAN di sini supaya
+  // tiap sampel terpakai, bukan cuma yang kebetulan terbaca saat tick demo.
+  void setBodyGyroZ(double gyro_z_rad_per_sec);
 
   // true  = penyelarasan dimulai, robot memang perlu memutar.
   // false = tidak perlu (sudah lurus) atau tidak bisa (yaw tak terpakai);
@@ -382,6 +386,26 @@ class BallFollower // : public rclcpp::Node
   // servo. Lihat processFollowing().
   bool orbit_enable_;
   double orbit_max_strafe_;     // batas geseran menyamping per langkah, meter
+  // ---- Putaran dikendalikan GYRO, arah gawang dibaca magnetometer saat DIAM.
+  //
+  // Magnetometer tidak bisa dipakai selama gait berjalan (terukur berayun 40
+  // derajat per detik), tapi TENANG saat robot berhenti (1,6 derajat). Gyro
+  // sebaliknya: ia mengukur laju putar, bukan arah mata angin, jadi tidak
+  // terganggu medan magnet motor, tapi tidak tahu di mana gawangnya.
+  //
+  // Jadi masing-masing dipakai di tempat ia bisa dipercaya: magnetometer
+  // menetapkan BERAPA DERAJAT harus diputar (sekali, saat diam), gyro
+  // mengukur SUDAH BERPUTAR BERAPA (terus-menerus, saat berjalan).
+  double body_gyro_z_;              // rad/detik, sampel terakhir
+  bool gyro_seen_;
+  bool gyro_integrating_;           // sedang menghitung putaran
+  std::chrono::steady_clock::time_point gyro_stamp_;
+  double turned_deg_;               // hasil integrasi gyro sejak putaran mulai
+  double turn_target_deg_;          // dari magnetometer, dibaca sekali saat diam
+  double gyro_sign_;
+  double gyro_check_sec_;           // kapan arah putaran dinilai dari gyro
+  std::chrono::steady_clock::time_point gyro_check_at_;
+  bool gyro_dir_settled_;
   double yaw_strafe_gain_;      // meter per derajat simpangan arah bola
   double yaw_strafe_max_;       // batas atas geseran menyamping, meter
   double yaw_runaway_deg_;
