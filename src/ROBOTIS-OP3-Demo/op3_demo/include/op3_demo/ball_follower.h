@@ -406,8 +406,10 @@ class BallFollower // : public rclcpp::Node
   double gyro_check_sec_;           // kapan arah putaran dinilai dari gyro
   std::chrono::steady_clock::time_point gyro_check_at_;
   bool gyro_dir_settled_;
+  // Jarak bola terakhir yang sahih (dari radius bola). Dipakai fase memutar
+  // untuk menghitung geseran menyamping yang benar secara geometri.
+  double last_ball_distance_;
   double yaw_strafe_gain_;      // meter per derajat simpangan arah bola
-  double yaw_strafe_max_;       // batas atas geseran menyamping, meter
   double yaw_runaway_deg_;
   double yaw_runaway_ref_error_;
   int yaw_recheck_max_;

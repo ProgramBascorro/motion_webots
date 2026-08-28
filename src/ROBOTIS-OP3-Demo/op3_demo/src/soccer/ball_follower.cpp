@@ -162,8 +162,8 @@ BallFollower::BallFollower()
     gyro_sign_(1.0),
     gyro_check_sec_(1.2),
     gyro_dir_settled_(false),
+    last_ball_distance_(0.30),
     yaw_strafe_gain_(0.30 * 0.001),   // 0,30 mm per derajat simpangan
-    yaw_strafe_max_(12.0 * 0.001),
     yaw_runaway_deg_(45.0),
     yaw_runaway_ref_error_(0.0),
     yaw_recheck_max_(3),
@@ -357,7 +357,6 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     orbit_enable_        = read_param("walk_orbit_enable", orbit_enable_ ? 1.0 : 0.0) > 0.5;
     orbit_max_strafe_    = read_param("walk_orbit_max_strafe_mm", orbit_max_strafe_ * 1000.0) * 0.001;
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
-    yaw_strafe_max_      = read_param("kick_yaw_strafe_max_mm", yaw_strafe_max_ * 1000.0) * 0.001;
     gyro_sign_           = read_param("kick_yaw_gyro_sign", gyro_sign_);
     gyro_check_sec_      = read_param("kick_yaw_gyro_check_sec", gyro_check_sec_);
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
@@ -720,6 +719,9 @@ bool BallFollower::processFollowing(double x_angle, double y_angle, double ball_
     {
       distance_for_walk = sqrt(ground_sq);
       walk_distance_from_radius = true;
+      // Disimpan untuk fase memutar: di sana bola sering tidak terlihat karena
+      // badan berputar, jadi jaraknya harus diingat dari saat terakhir sahih.
+      last_ball_distance_ = distance_for_walk;
     }
     else
     {
@@ -1608,34 +1610,49 @@ bool BallFollower::processYawAlign(bool ball_visible)
   const double turn_rad =
       yaw_turn_sign_ * ((error >= 0.0) ? turn_deg : -turn_deg) * M_PI / 180.0;
 
-  // MENGITARI bola, bukan berputar di poros sendiri.
+  // MENGITARI bola: bola yang jadi poros, bukan kaki robot.
   //
-  // Robot yang berputar di tempat pasti melempar bola keluar dari tengah:
-  // bola diam, badan berputar, jadi arah bola relatif badan bergeser sebesar
-  // sudut putarnya. Supaya bola tetap di tengah, robot harus bergeser
-  // MENYAMPING sambil berputar, yaitu mengitari bola.
+  // Geserannya dihitung dari GEOMETRI, bukan dari umpan balik lemah. Memutar
+  // sudut theta sementara bola sejauh d di depan menuntut geseran d*theta ke
+  // sisi berlawanan arah putar. Itu jumlah yang sebenarnya diperlukan:
   //
-  // Umpan baliknya sudut leher. Kepala dipegang head_tracking_node dan terus
-  // mengunci bola, jadi current_pan_ itu arah bola relatif badan: positif
-  // berarti bola di kiri. Untuk membawanya kembali ke nol, robot bergeser ke
-  // sisi yang sama dengan bolanya.
+  //   bola 0,30 m, putar 5 deg  ->  26,2 mm
+  //   bola 0,30 m, putar 8 deg  ->  41,9 mm
+  //   bola 0,50 m, putar 8 deg  ->  69,8 mm
   //
-  // Tandanya TIDAK ditebak: ia mengikuti konvensi yang sama dengan sumbu putar
-  // yang sudah diukur di robot ini (angle_move_amplitude positif memutar ke
-  // kiri dan menaikkan yaw), yaitu y_move_amplitude positif bergerak ke kiri.
-  // Kalaupun keliru, ini lingkar tertutup dengan batas atas kecil: efeknya
-  // geseran menyamping yang salah arah beberapa milimeter, bukan putaran liar.
+  // Versi sebelumnya cuma umpan balik 0,30 mm per derajat simpangan dengan
+  // batas 12 mm: pada simpangan 20 derajat ia memberi 6 mm, seperempat dari
+  // yang dibutuhkan. Itu sebabnya bola tidak pernah benar-benar jadi poros.
+  //
+  // Umpan balik tetap dipakai sebagai KOREKSI di atas umpan-maju, untuk
+  // menutup sisa simpangan yang menumpuk.
+  //
+  // Kalau geseran yang diperlukan melebihi batas aman, sudut putarnya ikut
+  // DIKECILKAN dengan pecahan yang sama. Ini yang menjaga bola tetap jadi
+  // poros: memotong geserannya saja akan membuat robot berputar lebih cepat
+  // daripada yang bisa diimbangi, dan bola lepas lagi.
   double y_move = 0.0;
   const double ball_bearing_deg = current_pan_ * 180.0 / M_PI;
+  double turn_rad_out = turn_rad;
 
-  if (ball_visible == true && yaw_strafe_gain_ > 0.0)
+  if (yaw_strafe_gain_ > 0.0 || orbit_max_strafe_ > 0.0)
   {
-    y_move = ball_bearing_deg * yaw_strafe_gain_;
-    y_move = fmin(y_move, yaw_strafe_max_);
-    y_move = fmax(y_move, -yaw_strafe_max_);
+    const double d = (last_ball_distance_ > 0.05) ? last_ball_distance_ : 0.30;
+
+    y_move = -d * turn_rad;
+
+    if (ball_visible == true)
+      y_move += ball_bearing_deg * yaw_strafe_gain_;
+
+    if (orbit_max_strafe_ > 0.0 && fabs(y_move) > orbit_max_strafe_)
+    {
+      const double scale = orbit_max_strafe_ / fabs(y_move);
+      y_move *= scale;
+      turn_rad_out *= scale;
+    }
   }
 
-  setWalkingParam(0.0, y_move, turn_rad);
+  setWalkingParam(0.0, y_move, turn_rad_out);
 
   const double elapsed =
       std::chrono::duration<double>(now - yaw_align_started_at_).count();
@@ -1644,10 +1661,10 @@ bool BallFollower::processYawAlign(bool ball_visible)
                        *log_clock_, 500,
                        "menyelaraskan yaw: sekarang %+.1f deg, target %+.1f, galat %+.1f "
                        "(toleransi %.1f) -> putar %+.1f deg/langkah "
-                       "(batas bawah %.1f) | bola %+.1f deg -> geser %+.1f mm (%s) | sudah %.1f s",
+                       "(jadi %+.1f sesudah orbit) | bola %+.1f deg, jarak %.2f m -> geser %+.1f mm (%s) | sudah %.1f s",
                        body_yaw_deg_, yaw_target_deg_, error, yaw_tolerance_deg_,
-                       turn_rad * 180.0 / M_PI, yaw_turn_floor_deg_,
-                       ball_bearing_deg, y_move * 1000.0,
+                       turn_rad * 180.0 / M_PI, turn_rad_out * 180.0 / M_PI,
+                       ball_bearing_deg, last_ball_distance_, y_move * 1000.0,
                        ball_visible ? "bola terlihat" : "bola TIDAK terlihat, tidak menggeser",
                        elapsed);
 
