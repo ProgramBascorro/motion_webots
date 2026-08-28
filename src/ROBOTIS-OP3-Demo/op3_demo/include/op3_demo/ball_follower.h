@@ -221,6 +221,7 @@ class BallFollower // : public rclcpp::Node
   // sebagai BATAS ATAS; z_move_min_ratio_ = pecahan batas atas saat robot nyaris
   // diam. Lihat setWalkingParam().
   double z_move_max_;
+  bool z_move_max_captured_;   // batas atas dikunci sekali, lihat getWalkingParam()
   double z_move_min_ratio_;
   // Berapa siklus berturut-turut syaratnya harus benar sebelum menendang.
   // Jendela servo cuma selebar 2 derajat, jadi kalau kepala masih bergoyang

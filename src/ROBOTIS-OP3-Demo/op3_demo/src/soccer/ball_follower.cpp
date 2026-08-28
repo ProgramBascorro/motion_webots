@@ -93,6 +93,7 @@ BallFollower::BallFollower()
     kick_image_width_px_(640.0),        // sama dengan camera_param.yaml
     kick_ball_radius_margin_(0.10),     // ambang dipotong 10%, lihat setNode()
     z_move_max_(0.037),                 // foot_height param.yaml; ditimpa getWalkingParam()
+    z_move_max_captured_(false),
     z_move_min_ratio_(0.5),
     kick_ready_count_(10),
     NOT_FOUND_THRESHOLD(50),
@@ -402,6 +403,21 @@ void BallFollower::startFollowing()
   on_tracking_ = true;
   RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Start Ball following");
 
+  // Ramp langkah dikembalikan ke titik AWAL tiap kali mulai mengejar bola.
+  //
+  // current_x_move_ adalah keadaan ramp yang dipakai calcFootstep(); ia diisi
+  // setWalkingParam() tiap tick dan sebelumnya TIDAK PERNAH dikembalikan.
+  // Sesudah menendang, demo mulai lagi sambil membawa nilai terakhirnya, jadi
+  // langkah pertama langsung meloncat ke tengah ramp alih-alih merambat dari
+  // MIN_FB_STEP. Karena tinggi angkat kaki kini mengikuti kemajuan ramp yang
+  // sama, z ikut meloncat -- persis keluhan "rapi cuma di awal, sesudah
+  // menendang tidak rapi lagi".
+  //
+  // 0.003 m = nilai awal yang sama dengan di konstruktor.
+  current_x_move_ = 0.003;
+  current_r_angle_ = 0.0;
+  accum_period_time_ = 0.0;
+
   // setWalkingCommand("start") already calls getWalkingParam() internally and
   // populates current_walking_param_ before publishing the "start" command.
   // We READ THE CACHED VALUES instead of calling getWalkingParam() a second
@@ -498,7 +514,28 @@ void BallFollower::calcFootstep(double target_distance, double target_angle, dou
       next_movement += UNIT_FB_STEP;
   }
   fb_goal = fmin(next_movement, fb_goal);
-  fb_move = fmax(fb_goal, MIN_FB_STEP);
+
+  // BERHENTI kalau jarak berhentinya sudah tercapai.
+  //
+  // Inilah sebab robot menabrak bola, dan tidak bisa diperbaiki dengan
+  // menyetel kick_distance. Baris lama fb_move = fmax(fb_goal, MIN_FB_STEP)
+  // memaksa langkah maju MINIMUM 5 mm tiap langkah -- selamanya. target_distance
+  // sudah dijepit ke nol di atas, jadi begitu robot sampai di kick_distance
+  // fb_goal memang jadi 0, tapi fmax mengembalikannya ke +5 mm dan robot terus
+  // merayap maju 5 mm per langkah sampai kakinya menyentuh bola.
+  //
+  // MIN_FB_STEP tetap dipakai selama masih MENDEKAT: di bawah itu langkahnya
+  // terlalu kecil untuk benar-benar memindahkan badan. Yang berubah hanya
+  // keadaan "sudah sampai".
+  //
+  // IN_PLACE_FB_STEP (-3 mm) dipakai, bukan 0, karena itu nilai yang sama
+  // dengan yang dipakai setWalkingCommand("start") untuk jalan di tempat:
+  // gait tetap hidup (jadi robot siap memutar untuk penyelarasan yaw) tanpa
+  // maju.
+  if (target_distance <= 0.0)
+    fb_move = IN_PLACE_FB_STEP;
+  else
+    fb_move = fmax(fb_goal, MIN_FB_STEP);
   if (DEBUG_PRINT)
   {
     RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "distance to ball : %6.4f, fb : %6.4f, delta : %6.6f", target_distance, fb_move, delta_time);
@@ -1500,12 +1537,28 @@ bool BallFollower::getWalkingParam()
       current_walking_param_ = result->parameters;
 
       // BATAS ATAS tinggi angkat kaki diambil dari sini, yaitu foot_height di
-      // param.yaml. Harus disimpan terpisah: setWalkingParam() menulisi
-      // current_walking_param_.z_move_amplitude tiap tick dengan nilai hasil
-      // penskalaan, jadi membacanya lagi dari situ akan memberi nilai yang
-      // sudah dikecilkan, bukan batas atasnya.
-      if (current_walking_param_.z_move_amplitude > 0.0)
+      // param.yaml -- TAPI HANYA SEKALI, dan ini wajib.
+      //
+      // setWalkingParam() MENERBITKAN z hasil penskalaan ke walking_module.
+      // Jadi begitu robot pernah berjalan pelan, isi walking_module bukan lagi
+      // foot_height asli melainkan angka yang sudah dikecilkan. Kalau batas
+      // atas ditangkap ulang tiap getWalkingParam(), ia menyusut sendiri lewat
+      // umpan balik: 37 -> 18,5 -> 9,25 mm, satu tingkat tiap kali demo
+      // dimulai lagi sesudah menendang.
+      //
+      // Persis itu yang dilaporkan operator: ramp x dan z rapi di awal, lalu
+      // kacau sesudah tendangan pertama.
+      //
+      // Konsekuensinya foot_height yang diubah lewat Bascorro Studio di tengah
+      // sesi tidak ikut terbaca; jalankan ulang demo supaya terbaca lagi.
+      if (z_move_max_captured_ == false && current_walking_param_.z_move_amplitude > 0.0)
+      {
         z_move_max_ = current_walking_param_.z_move_amplitude;
+        z_move_max_captured_ = true;
+        RCLCPP_WARN(rclcpp::get_logger("BallFollower"),
+                    "Batas atas tinggi angkat kaki dikunci di %.1f mm (foot_height param.yaml).",
+                    z_move_max_ * 1000.0);
+      }
 
       if (DEBUG_PRINT)
         RCLCPP_INFO(rclcpp::get_logger("BallFollower"), "Get walking parameters");
