@@ -153,6 +153,7 @@ BallFollower::BallFollower()
     yaw_auto_sign_(true),
     yaw_sign_check_sec_(3.0),
     yaw_sign_margin_deg_(6.0),
+    yaw_sign_min_error_deg_(20.0),
     yaw_max_age_sec_(1.0),
     yaw_stall_sec_(4.0),
     yaw_stall_margin_deg_(3.0),
@@ -316,6 +317,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     yaw_auto_sign_       = read_param("kick_yaw_auto_sign", yaw_auto_sign_ ? 1.0 : 0.0) > 0.5;
     yaw_sign_check_sec_  = read_param("kick_yaw_sign_check_sec", yaw_sign_check_sec_);
     yaw_sign_margin_deg_ = read_param("kick_yaw_sign_margin_deg", yaw_sign_margin_deg_);
+    yaw_sign_min_error_deg_ = read_param("kick_yaw_sign_min_error_deg", yaw_sign_min_error_deg_);
     yaw_max_age_sec_     = read_param("kick_yaw_max_age_sec", yaw_max_age_sec_);
     yaw_stall_sec_       = read_param("kick_yaw_stall_sec", yaw_stall_sec_);
     yaw_stall_margin_deg_ = read_param("kick_yaw_stall_margin_deg", yaw_stall_margin_deg_);
@@ -1194,10 +1196,29 @@ bool BallFollower::processYawAlign()
   // arahnya terukur sekali ia dipakai untuk seluruh tendangan sesudahnya.
   if (yaw_sign_settled_ == false && now >= yaw_sign_check_at_)
   {
-    yaw_sign_settled_ = true;
-
-    if (fabs(error) > yaw_align_ref_error_ + yaw_sign_margin_deg_)
+    // Galat awal harus cukup BESAR sebelum penilaian ini sah.
+    //
+    // Terukur 2026-08-28: bacaan yaw sambil gait jalan berbeda 5-10 derajat
+    // dari bacaan sesudah robot diam. Kalau galat awalnya cuma 5,8 derajat,
+    // derau sebesar itu sendirian sudah bisa membuatnya terlihat "membesar
+    // 12,9 derajat" -- dan tandanya dibalik padahal arah putarannya benar.
+    // Itu persis yang terjadi: tanda -1 yang sudah terukur benar dibalik lagi
+    // jadi +1 di tengah rangkaian cek-ulang bergalat kecil.
+    //
+    // Di bawah ambang ini penilaian DITUNDA, bukan diputuskan: yaw_sign_settled_
+    // dibiarkan false supaya kesempatan menilai tetap ada pada penyelarasan
+    // berikutnya yang galatnya cukup besar.
+    if (yaw_align_ref_error_ < yaw_sign_min_error_deg_)
     {
+      RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
+                  "Penilaian arah putaran DITUNDA: galat awal %.1f deg masih di "
+                  "bawah %.1f deg, deraunya lebih besar daripada sinyalnya.",
+                  yaw_align_ref_error_, yaw_sign_min_error_deg_);
+      yaw_sign_check_at_ = now + secondsToSteady(yaw_sign_check_sec_);
+    }
+    else if (fabs(error) > yaw_align_ref_error_ + yaw_sign_margin_deg_)
+    {
+      yaw_sign_settled_ = true;
       yaw_turn_sign_ *= -1.0;
       RCLCPP_ERROR(rclcpp::get_logger("BallFollower"),
                    "ARAH PUTARAN TERBALIK: galat naik %.1f -> %.1f deg dalam %.1f s. "
@@ -1205,6 +1226,17 @@ bool BallFollower::processYawAlign()
                    "kick_yaw_turn_sign:=%.1f",
                    yaw_align_ref_error_, fabs(error), yaw_sign_check_sec_,
                    yaw_turn_sign_, yaw_turn_sign_);
+    }
+    else
+    {
+      // Galat awalnya cukup besar DAN tidak membesar: arah putaran terbukti
+      // benar. Dikunci supaya tidak dinilai ulang di penyelarasan bergalat
+      // kecil, tempat derau bisa membalikkannya secara keliru.
+      yaw_sign_settled_ = true;
+      RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
+                  "Arah putaran TERBUKTI benar (%+.0f): galat %.1f -> %.1f deg "
+                  "dalam %.1f s. Tidak akan dinilai ulang di run ini.",
+                  yaw_turn_sign_, yaw_align_ref_error_, fabs(error), yaw_sign_check_sec_);
     }
   }
 

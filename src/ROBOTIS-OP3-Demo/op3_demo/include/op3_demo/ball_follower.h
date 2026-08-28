@@ -362,6 +362,10 @@ class BallFollower // : public rclcpp::Node
   bool yaw_auto_sign_;
   double yaw_sign_check_sec_;
   double yaw_sign_margin_deg_;
+  // Galat awal MINIMUM sebelum koreksi tanda otomatis boleh menilai. Di bawah
+  // ini derau yaw lebih besar daripada sinyalnya dan tandanya bisa terbalik
+  // karena goyangan semata.
+  double yaw_sign_min_error_deg_;
   double yaw_max_age_sec_;
   double yaw_stall_sec_;
   double yaw_stall_margin_deg_;

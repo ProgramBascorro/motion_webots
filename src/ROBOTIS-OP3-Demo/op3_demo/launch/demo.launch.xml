@@ -312,6 +312,20 @@
   <arg name="kick_yaw_sign_check_sec" default="3.0"/>
   <arg name="kick_yaw_sign_margin_deg" default="6.0"/>
 
+  <!-- Galat awal MINIMUM sebelum koreksi tanda otomatis boleh menilai, derajat.
+
+       Terukur 2026-08-28: bacaan yaw sambil gait jalan berbeda 5 sampai 10
+       derajat dari bacaan sesudah robot berhenti. Kalau galat awalnya cuma
+       5,8 derajat, derau sebesar itu sendirian sudah bisa membuatnya terlihat
+       "membesar 12,9 derajat", dan tandanya dibalik padahal arah putarannya
+       sudah benar. Itu persis yang terjadi: tanda -1 yang sudah terukur benar
+       dibalik lagi jadi +1 di tengah rangkaian cek-ulang bergalat kecil.
+
+       Di bawah ambang ini penilaian DITUNDA, bukan diputuskan, jadi
+       kesempatan menilai tetap ada pada penyelarasan berikutnya yang
+       galatnya cukup besar. -->
+  <arg name="kick_yaw_sign_min_error_deg" default="20.0"/>
+
   <!-- Umur maksimum pesan IMU yang masih boleh dipakai, detik. Yaw yang basi
        berarti memutar buta. -->
   <arg name="kick_yaw_max_age_sec" default="1.0"/>
@@ -372,6 +386,7 @@
     <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
     <param name="kick_yaw_sign_check_sec" value="$(var kick_yaw_sign_check_sec)" type="float"/>
     <param name="kick_yaw_sign_margin_deg" value="$(var kick_yaw_sign_margin_deg)" type="float"/>
+    <param name="kick_yaw_sign_min_error_deg" value="$(var kick_yaw_sign_min_error_deg)" type="float"/>
     <param name="kick_yaw_max_age_sec" value="$(var kick_yaw_max_age_sec)" type="float"/>
     <param name="kick_refresh_foot_after_align" value="$(var kick_refresh_foot_after_align)" type="float"/>
     <param name="kick_yaw_stall_sec" value="$(var kick_yaw_stall_sec)" type="float"/>
