@@ -1686,6 +1686,24 @@ bool BallFollower::processYawAlign(bool ball_visible)
       const double scale = orbit_max_strafe_ / fabs(y_move);
       y_move *= scale;
       turn_rad_out *= scale;
+
+      // Penskalaan orbit TIDAK BOLEH menekan putaran di bawah batas bawahnya.
+      //
+      // Ada ambang torsi minimum yang sudah terukur: di bawah sekitar 5
+      // deg/langkah kaki tidak benar-benar memindahkan badan, jadi robot diam
+      // saja. Terukur di run 2026-08-28: galat 39 deg memberi 13,7 deg/langkah
+      // dan yaw bergerak, sementara galat 12 deg memberi 5,0 deg/langkah dan
+      // yaw TIDAK bergerak sama sekali.
+      //
+      // Kalau penskalaan dibiarkan menembus ambang itu, orbitnya sendiri yang
+      // membuat robot membeku: putaran tidak terjadi, dan karena tidak ada
+      // putaran, orbitnya pun tidak ada gunanya. Lebih baik memutar sedikit
+      // lebih cepat daripada yang bisa diimbangi geseran (bola bergeser
+      // sedikit, lalu ditarik kembali umpan balik) daripada tidak bergerak
+      // sama sekali.
+      const double floor_rad = yaw_turn_floor_deg_ * M_PI / 180.0;
+      if (fabs(turn_rad_out) < floor_rad)
+        turn_rad_out = (turn_rad_out >= 0.0) ? floor_rad : -floor_rad;
     }
   }
 

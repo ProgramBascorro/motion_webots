@@ -257,7 +257,7 @@
   <arg name="walk_x_ramp_step_mm" default="0.3"/>
 
   <arg name="walk_orbit_enable" default="1.0"/>
-  <arg name="walk_orbit_max_strafe_mm" default="35.0"/>
+  <arg name="walk_orbit_max_strafe_mm" default="45.0"/>
 
   <!-- Berapa TICK BERTURUT-TURUT syaratnya harus benar sebelum menendang.
        Loop demo 30 Hz, jadi 4 tick kira-kira 0,13 detik.
@@ -329,9 +329,9 @@
        Kalau robot bolak-balik melewati toleransi (oleng kiri-kanan tanpa pernah
        berhenti), turunkan kick_yaw_min_turn_deg atau lebarkan toleransinya —
        satu langkah gait memang tidak bisa lebih halus dari batas bawah ini. -->
-  <arg name="kick_yaw_max_turn_deg" default="8.0"/>
-  <arg name="kick_yaw_min_turn_deg" default="5.0"/>
-  <arg name="kick_yaw_turn_gain" default="0.20"/>
+  <arg name="kick_yaw_max_turn_deg" default="12.0"/>
+  <arg name="kick_yaw_min_turn_deg" default="7.0"/>
+  <arg name="kick_yaw_turn_gain" default="0.35"/>
 
   <!-- Batas waktu memutar. Kalau habis, robot TETAP menendang (dengan WARN di
        log) alih-alih membeku. Bawaannya longgar karena walking_module memakai
