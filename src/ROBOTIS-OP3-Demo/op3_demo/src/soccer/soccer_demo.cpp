@@ -329,7 +329,10 @@ void SoccerDemo::process()
       // tombol STOP dan deteksi jatuh tetap hidup selama robot berputar.
       if (ball_follower_.isYawAligning() == true)
       {
-        if (ball_follower_.processYawAlign() == true)
+        // Sudut leher hanya sahih sebagai arah bola kalau pelacak memang
+        // sedang melihat bola; kalau tidak, kepala sedang menyapu dan
+        // angkanya akan menyesatkan geseran menyamping.
+        if (ball_follower_.processYawAlign(tracking_status_ == BallTracker::Found) == true)
           kickAfterYawAlign();
         break;
       }

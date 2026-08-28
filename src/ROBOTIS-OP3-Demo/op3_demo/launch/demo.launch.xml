@@ -232,9 +232,9 @@
        Kalau robot bolak-balik melewati toleransi (oleng kiri-kanan tanpa pernah
        berhenti), turunkan kick_yaw_min_turn_deg atau lebarkan toleransinya —
        satu langkah gait memang tidak bisa lebih halus dari batas bawah ini. -->
-  <arg name="kick_yaw_max_turn_deg" default="15.0"/>
+  <arg name="kick_yaw_max_turn_deg" default="8.0"/>
   <arg name="kick_yaw_min_turn_deg" default="5.0"/>
-  <arg name="kick_yaw_turn_gain" default="0.35"/>
+  <arg name="kick_yaw_turn_gain" default="0.20"/>
 
   <!-- Batas waktu memutar. Kalau habis, robot TETAP menendang (dengan WARN di
        log) alih-alih membeku. Bawaannya longgar karena walking_module memakai
@@ -273,6 +273,21 @@
 
        Setel 0 untuk mematikan pengaman ini (tidak disarankan). -->
   <arg name="kick_yaw_runaway_deg" default="45.0"/>
+
+  <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
+
+       Robot yang berputar di porosnya sendiri pasti melempar bola keluar dari
+       tengah: bola diam, badan berputar, jadi arah bola relatif badan bergeser
+       sebesar sudut putarnya. Supaya tetap di tengah, robot bergeser
+       MENYAMPING sambil berputar, yaitu mengitari bola.
+
+       Umpan baliknya sudut leher: kepala terus mengunci bola, jadi head_pan
+       adalah arah bola relatif badan. Geseran menyamping sebanding simpangan
+       itu, dengan batas atas supaya tidak pernah jadi langkah samping besar.
+
+       Setel gain 0 untuk mematikan (kembali berputar di poros sendiri). -->
+  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="0.30"/>
+  <arg name="kick_yaw_strafe_max_mm" default="12.0"/>
 
   <!-- Lama MENGEREM sebelum memutar, detik.
 
@@ -438,6 +453,8 @@
     <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
+    <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
+    <param name="kick_yaw_strafe_max_mm" value="$(var kick_yaw_strafe_max_mm)" type="float"/>
     <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>
     <param name="kick_yaw_brake_max_sec" value="$(var kick_yaw_brake_max_sec)" type="float"/>
     <param name="kick_yaw_brake_still_deg" value="$(var kick_yaw_brake_still_deg)" type="float"/>

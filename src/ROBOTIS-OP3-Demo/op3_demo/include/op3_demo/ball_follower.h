@@ -115,7 +115,9 @@ class BallFollower // : public rclcpp::Node
   void pauseFollowingForTurn();
   bool startYawAlign();
   // Satu langkah penyelarasan. true = selesai, boleh menendang.
-  bool processYawAlign();
+  // ball_visible: pelacak sedang benar-benar melihat bola. Hanya saat itu
+  // sudut leher boleh dipercaya sebagai arah bola untuk menjaga bola di tengah.
+  bool processYawAlign(bool ball_visible = false);
   void cancelYawAlign();
   // Berapa lama fase reda sesudah putaran berhenti. Dibaca soccer_demo supaya
   // jeda pra-tendang tidak menghitung ulang waktu diam yang SUDAH dijalani.
@@ -366,6 +368,12 @@ class BallFollower // : public rclcpp::Node
   std::chrono::steady_clock::time_point yaw_brake_deadline_;
   std::chrono::steady_clock::time_point yaw_brake_sample_at_;
   double yaw_brake_last_yaw_;
+  // Menjaga bola tetap di TENGAH selama memutar. Robot yang berputar di
+  // porosnya sendiri pasti melempar bola keluar dari tengah pandangan; supaya
+  // tetap di tengah ia harus MENGITARI bola, yaitu bergeser menyamping sambil
+  // berputar. Lihat processYawAlign().
+  double yaw_strafe_gain_;      // meter per derajat simpangan arah bola
+  double yaw_strafe_max_;       // batas atas geseran menyamping, meter
   double yaw_runaway_deg_;
   double yaw_runaway_ref_error_;
   int yaw_recheck_max_;
