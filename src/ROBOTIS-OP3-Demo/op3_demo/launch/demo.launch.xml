@@ -226,6 +226,24 @@
        memakai keputusan lama apa adanya. -->
   <arg name="kick_refresh_foot_after_align" default="1.0"/>
 
+  <!-- Eskalasi saat putaran MACET. Terukur di robot 2026-08-28: galat 39 deg
+       memberi perintah 13,7 deg/langkah dan yaw bergerak, tapi galat 12 deg
+       memberi 5,0 deg/langkah dan yaw TIDAK bergerak sama sekali. Jadi ada
+       ambang torsi minimum, dan justru galat KECIL yang jatuh di bawahnya.
+
+       Kalau selama kick_yaw_stall_sec galat terbaiknya tidak membaik lebih
+       dari kick_yaw_stall_margin_deg, batas BAWAH putaran dinaikkan sebesar
+       kick_yaw_turn_step_deg (tidak pernah melewati kick_yaw_max_turn_deg).
+       Yang dinaikkan batas bawahnya, bukan gain: yang kurang memang cuma
+       langkah terkecil.
+
+       Catatan lapangan: kalau robot DIGANTUNG, kakinya tidak menapak dan yaw
+       memang tidak akan pernah berubah. Dalam keadaan itu eskalasi akan mentok
+       di batas atas dan mencetak peringatan; itu benar, bukan kerusakan. -->
+  <arg name="kick_yaw_stall_sec" default="4.0"/>
+  <arg name="kick_yaw_stall_margin_deg" default="3.0"/>
+  <arg name="kick_yaw_turn_step_deg" default="2.5"/>
+
   <node pkg="op3_demo" exec="op_demo_node" output="screen">
     <param name="kick_camera_height" value="$(var kick_camera_height)" type="float"/>
     <param name="kick_distance" value="$(var kick_distance)" type="float"/>
@@ -253,6 +271,9 @@
     <param name="kick_yaw_sign_margin_deg" value="$(var kick_yaw_sign_margin_deg)" type="float"/>
     <param name="kick_yaw_max_age_sec" value="$(var kick_yaw_max_age_sec)" type="float"/>
     <param name="kick_refresh_foot_after_align" value="$(var kick_refresh_foot_after_align)" type="float"/>
+    <param name="kick_yaw_stall_sec" value="$(var kick_yaw_stall_sec)" type="float"/>
+    <param name="kick_yaw_stall_margin_deg" value="$(var kick_yaw_stall_margin_deg)" type="float"/>
+    <param name="kick_yaw_turn_step_deg" value="$(var kick_yaw_turn_step_deg)" type="float"/>
     <param name="grass_demo" value="False"/>
     <param name="p_gain" value="0.45"/>
     <param name="d_gain" value="0.045"/>
