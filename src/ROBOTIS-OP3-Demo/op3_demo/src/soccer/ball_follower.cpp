@@ -160,6 +160,8 @@ BallFollower::BallFollower()
     turned_deg_(0.0),
     turn_target_deg_(0.0),
     gyro_sign_(1.0),
+    gyro_scale_(1.0),
+    mag_before_deg_(0.0),
     gyro_check_sec_(1.2),
     gyro_dir_settled_(false),
     last_ball_distance_(0.30),
@@ -358,6 +360,7 @@ void BallFollower::setNode(rclcpp::Node::SharedPtr node)
     orbit_max_strafe_    = read_param("walk_orbit_max_strafe_mm", orbit_max_strafe_ * 1000.0) * 0.001;
     yaw_strafe_gain_     = read_param("kick_yaw_strafe_gain_mm_per_deg", yaw_strafe_gain_ * 1000.0) * 0.001;
     gyro_sign_           = read_param("kick_yaw_gyro_sign", gyro_sign_);
+    gyro_scale_          = read_param("kick_yaw_gyro_scale", gyro_scale_);
     gyro_check_sec_      = read_param("kick_yaw_gyro_check_sec", gyro_check_sec_);
     yaw_brake_sec_       = read_param("kick_yaw_brake_sec", yaw_brake_sec_);
     yaw_brake_max_sec_   = read_param("kick_yaw_brake_max_sec", yaw_brake_max_sec_);
@@ -1101,7 +1104,7 @@ void BallFollower::setBodyGyroZ(double gyro_z_rad_per_sec)
     // Lompatan waktu yang tidak masuk akal (mis. pesan tertahan) dibuang
     // daripada menyuntikkan putaran palsu ke hasil integrasi.
     if (dt > 0.0 && dt < 0.5)
-      turned_deg_ += gyro_sign_ * gyro_z_rad_per_sec * 180.0 / M_PI * dt;
+      turned_deg_ += gyro_scale_ * gyro_sign_ * gyro_z_rad_per_sec * 180.0 / M_PI * dt;
   }
 
   body_gyro_z_ = gyro_z_rad_per_sec;
@@ -1323,6 +1326,7 @@ bool BallFollower::processYawAlign(bool ball_visible)
 
     turn_target_deg_ = start_error;
     turned_deg_ = 0.0;
+    mag_before_deg_ = body_yaw_deg_;
     gyro_integrating_ = true;
     gyro_dir_settled_ = false;
     gyro_check_at_ = now + secondsToSteady(gyro_check_sec_);
@@ -1369,6 +1373,25 @@ bool BallFollower::processYawAlign(bool ball_visible)
     if (isBodyYawUsable() == true)
     {
       const double settled_error = normalizeAngleDeg(yaw_target_deg_ - body_yaw_deg_);
+
+      // Pengali gyro TERUKUR, dari dua bacaan magnetometer yang sama-sama
+      // diambil saat robot DIAM (satu sebelum memutar, satu sekarang). Itu
+      // satu-satunya pembanding yang sahih di robot ini.
+      //
+      // Dicetak, bukan dipakai otomatis: satu pengukuran belum cukup jadi
+      // dasar, dan lingkarnya sudah benar sendiri lewat cek ulang ini walaupun
+      // pengalinya meleset. Kalau angkanya konsisten di beberapa tendangan,
+      // pasang permanen lewat kick_yaw_gyro_scale.
+      const double mag_turned = normalizeAngleDeg(body_yaw_deg_ - mag_before_deg_);
+      if (fabs(turned_deg_) > 3.0)
+      {
+        RCLCPP_INFO(rclcpp::get_logger("BallFollower"),
+                    "Pengali gyro terukur: magnetometer %+.1f deg vs gyro %+.1f deg "
+                    "-> %.2f. Pasang dengan kick_yaw_gyro_scale kalau angkanya "
+                    "berulang konsisten.",
+                    mag_turned, turned_deg_,
+                    (fabs(turned_deg_) > 0.01) ? (mag_turned / turned_deg_) : 0.0);
+      }
 
       if (fabs(settled_error) > yaw_tolerance_deg_ && yaw_recheck_left_ > 0)
       {

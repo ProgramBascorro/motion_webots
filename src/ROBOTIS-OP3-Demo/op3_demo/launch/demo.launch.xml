@@ -380,6 +380,23 @@
        robot sedang berputar ke mana; dengan magnetometer hal yang sama butuh
        3 sampai 5 detik dan hasilnya tetap salah dua kali. -->
   <arg name="kick_yaw_gyro_sign" default="1.0"/>
+
+  <!-- Pengali hasil integrasi gyro.
+
+       Terukur di robot ini gyro UNDER-BACA: satu putaran yang menurut
+       magnetometer 32,4 derajat (dua bacaan, keduanya diambil saat robot DIAM,
+       jadi sahih) hanya tercatat 18,6 derajat oleh gyro, yaitu selisih 1,74
+       kali.
+
+       Bawaannya tetap 1.0 karena satu pengukuran belum cukup jadi dasar, DAN
+       karena lingkarnya sudah benar sendiri: cek ulang magnetometer sesudah
+       gait reda menangkap sisa galatnya lalu memutar lagi. Pengali yang meleset
+       membuat putarannya butuh lebih banyak percobaan, bukan salah arah.
+
+       Tiap tendangan mencetak angka terukurnya di log ("Pengali gyro
+       terukur"). Kalau angkanya berulang konsisten di beberapa tendangan,
+       pasang di sini. -->
+  <arg name="kick_yaw_gyro_scale" default="1.0"/>
   <arg name="kick_yaw_gyro_check_sec" default="1.2"/>
 
   <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
@@ -564,6 +581,7 @@
     <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
     <param name="kick_yaw_gyro_sign" value="$(var kick_yaw_gyro_sign)" type="float"/>
+    <param name="kick_yaw_gyro_scale" value="$(var kick_yaw_gyro_scale)" type="float"/>
     <param name="kick_yaw_gyro_check_sec" value="$(var kick_yaw_gyro_check_sec)" type="float"/>
     <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
     <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>

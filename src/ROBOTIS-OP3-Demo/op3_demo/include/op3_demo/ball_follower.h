@@ -403,6 +403,11 @@ class BallFollower // : public rclcpp::Node
   double turned_deg_;               // hasil integrasi gyro sejak putaran mulai
   double turn_target_deg_;          // dari magnetometer, dibaca sekali saat diam
   double gyro_sign_;
+  // Pengali hasil integrasi gyro. Terukur di robot ini gyro UNDER-BACA: satu
+  // putaran yang menurut magnetometer (dibaca saat diam, dua kali) 32,4 derajat
+  // hanya tercatat 18,6 derajat oleh gyro. Lihat setNode().
+  double gyro_scale_;
+  double mag_before_deg_;      // yaw saat putaran mulai, untuk mengukur pengali
   double gyro_check_sec_;           // kapan arah putaran dinilai dari gyro
   std::chrono::steady_clock::time_point gyro_check_at_;
   bool gyro_dir_settled_;
