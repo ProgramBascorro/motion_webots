@@ -221,7 +221,45 @@
        itu tidak dipercaya. Cek dengan
          ros2 topic echo /robotis/open_cr/mag_status
        Yang dicari 2 atau 3. -->
-  <arg name="kick_yaw_align_enable" default="1.0"/>
+  <!-- PENYELARASAN YAW DIMATIKAN (0.0) sejak 2026-08-29.
+
+       Bukan karena logikanya salah, tapi karena SINYAL YAW-nya tidak bisa
+       dipakai saat robot berjalan. Terukur di run op_demo_node_3716, dalam
+       satu penyelarasan yang sama dengan perintah putar TETAP +8 deg/langkah:
+
+         berhenti (fase mengerem) : yaw bergeser 1,8 lalu 1,7 lalu 1,6 deg
+         berjalan (fase memutar)  : -87, -78, -58, -43, -25, -82, -47, -60
+
+       Robot yang jalan di tempat tidak mungkin berayun 40 derajat dalam satu
+       detik. Jadi angkanya bukan sudut badan, melainkan derau; magnetometer
+       OpenCR hampir pasti terganggu arus 20 servo saat gait jalan.
+
+       Buktinya juga muncul sebagai kontradiksi yang tidak bisa diselesaikan
+       dengan menyetel tanda: dua run dengan tanda BERLAWANAN memberi arah
+       hanyutan yang SAMA.
+
+         perintah -15 deg/langkah : yaw hanyut -5,9 deg/detik
+         perintah  +8 deg/langkah : yaw hanyut -8,7 deg/detik
+
+       Dari dua persamaan itu wewenang perintah cuma 0,12 deg/detik per
+       derajat/langkah, melawan hanyutan tetap -7,7 deg/detik. Untuk
+       melawannya perlu perintah sekitar 63 deg/langkah, jauh di atas batas
+       aman 15. Dengan kata lain perintah putar praktis tidak berpengaruh
+       dibanding derau sinyalnya.
+
+       Akibatnya kalau dinyalakan: tiap tendangan membuang 12 detik lalu
+       berakhir dengan putaran liar yang dihentikan pengaman. Demo lebih baik
+       tanpa ini sampai sumber yaw-nya diperbaiki.
+
+       Menyalakan lagi: kick_yaw_align_enable:=1.0
+
+       Perbaikan sebenarnya (belum dikerjakan): jangan pakai magnetometer untuk
+       putaran pendek. Integrasikan gyro_z selama putaran saja, atau pakai
+       sudut leher sebagai acuan arah bola. Semua bagian lain dari fase ini
+       (mengerem sampai benar-benar diam, mengitari bola, pengaman putaran
+       liar, pemilihan ulang kaki) sudah terbukti bekerja dan tinggal dipakai
+       lagi begitu sumber sudutnya sahih. -->
+  <arg name="kick_yaw_align_enable" default="0.0"/>
   <arg name="kick_yaw_target_deg" default="0.0"/>
   <arg name="kick_yaw_tolerance_deg" default="5.0"/>
 
