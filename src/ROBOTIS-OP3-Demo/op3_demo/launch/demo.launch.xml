@@ -201,18 +201,15 @@
 
        0.5 berarti berkisar antara setengah foot_height sampai penuh. Setel
        1.0 untuk mengembalikan perilaku lama (selalu penuh). -->
-  <!-- -1.0 = DIHITUNG SENDIRI sebagai MIN_FB_STEP/MAX_FB_STEP (0,276), yaitu
-       tinggi angkat kaki naik BERTAHAP mengikuti kemajuan langkah maju, dengan
-       persentase yang sama persis:
+  <!-- Bawaan -1.0 berarti DIHITUNG SENDIRI sebagai MIN_FB_STEP/MAX_FB_STEP
+       (5,0 / 18,1 = 0,276). Pakai itu.
 
-         x  5,0 mm  27,6 %  ->  z 10,2 mm  27,6 %
-         x 11,0 mm  60,8 %  ->  z 22,5 mm  60,8 %
-         x 18,1 mm 100,0 %  ->  z 37,0 mm 100,0 %
-
-       Ramp langkah majunya sendiri TIDAK dipercepat (walk_x_ramp_step_mm tetap
-       0,3 mm, nilai asli ROBOTIS), sesuai permintaan operator.
-
-       Setel 1.0 untuk tinggi angkat selalu penuh seperti perilaku asli. -->
+       Angka bulat 0,5 yang dipakai sebelumnya membuat z MENDAHULUI x: pada
+       langkah pertama x baru di 27,6 % dari maksimumnya (karena langkah
+       terkecilnya MIN_FB_STEP), sementara z sudah di 50 %. Di lapangan
+       terlihat seperti kaki sudah terangkat penuh padahal robot belum
+       melangkah. Dengan pecahan yang dihitung, keduanya berangkat dari
+       persentase yang sama persis. -->
   <arg name="walk_z_move_min_ratio" default="-1.0"/>
 
   <!-- MENGITARI bola: jadikan bola porosnya saat robot meluruskan badan ke
@@ -243,21 +240,18 @@
   <!-- Besar kenaikan langkah maju tiap seperempat periode gait, milimeter.
 
        Ini yang menentukan seberapa cepat x_move_amplitude merambat dari
-       langkah terkecil (5,0 mm) ke penuh (18,1 mm):
+       langkah terkecil (5,0 mm) ke penuh (18,1 mm). Nilai asli ROBOTIS 0,3 mm
+       membuat perjalanan itu makan 8,7 detik: robot mengangkat kaki tapi maju
+       hanya 5 mm per langkah, dan sepanjang detik-detik awal itu terlihat
+       seperti kaki sudah terangkat sementara badan belum bergerak.
 
-         0,3 mm (asli ROBOTIS)  ->  8,7 detik
-         0,8 mm                 ->  3,3 detik
-         1,5 mm (sekarang)      ->  1,7 detik
-
-       Dinaikkan ke 1,5 bersamaan dengan dikembalikannya tinggi angkat kaki ke
-       penuh: karena kaki tidak lagi ditahan rendah, badan harus menyusul lebih
-       cepat supaya keduanya terlihat berangkat bersama.
-
-       Turunkan kalau robot jadi kurang mantap saat mulai berjalan. -->
-  <arg name="walk_x_ramp_step_mm" default="0.3"/>
+       0,8 mm memangkasnya jadi sekitar 3,3 detik, jadi majunya terlihat naik
+       BERSAMAAN dengan tinggi angkat kaki. Naikkan lagi kalau masih terasa
+       lambat; turunkan kalau robot jadi kurang mantap saat mulai jalan. -->
+  <arg name="walk_x_ramp_step_mm" default="0.8"/>
 
   <arg name="walk_orbit_enable" default="1.0"/>
-  <arg name="walk_orbit_max_strafe_mm" default="45.0"/>
+  <arg name="walk_orbit_max_strafe_mm" default="20.0"/>
 
   <!-- Berapa TICK BERTURUT-TURUT syaratnya harus benar sebelum menendang.
        Loop demo 30 Hz, jadi 4 tick kira-kira 0,13 detik.
@@ -329,9 +323,9 @@
        Kalau robot bolak-balik melewati toleransi (oleng kiri-kanan tanpa pernah
        berhenti), turunkan kick_yaw_min_turn_deg atau lebarkan toleransinya —
        satu langkah gait memang tidak bisa lebih halus dari batas bawah ini. -->
-  <arg name="kick_yaw_max_turn_deg" default="12.0"/>
-  <arg name="kick_yaw_min_turn_deg" default="7.0"/>
-  <arg name="kick_yaw_turn_gain" default="0.35"/>
+  <arg name="kick_yaw_max_turn_deg" default="8.0"/>
+  <arg name="kick_yaw_min_turn_deg" default="5.0"/>
+  <arg name="kick_yaw_turn_gain" default="0.20"/>
 
   <!-- Batas waktu memutar. Kalau habis, robot TETAP menendang (dengan WARN di
        log) alih-alih membeku. Bawaannya longgar karena walking_module memakai
@@ -400,23 +394,6 @@
        terukur"). Kalau angkanya berulang konsisten di beberapa tendangan,
        pasang di sini. -->
   <arg name="kick_yaw_gyro_scale" default="1.0"/>
-
-  <!-- Pecahan putaran yang BENAR-BENAR terlaksana dibanding yang
-       diperintahkan.
-
-       Geseran menyamping saat mengitari dihitung dari sudut yang DIPERINTAHKAN
-       (geser = jarak x sudut). Tapi robot tidak melaksanakan seluruhnya:
-       terukur di run op_demo_node_1667 ia diperintahkan berputar 61,5 derajat
-       total dan benar-benar berputar 32,4 derajat, yaitu 53 persen.
-
-       Tanpa pecahan ini robot menggeser PENUH sambil berputar setengahnya,
-       sehingga bola justru terdorong keluar dari tengah: terbaca +1,9 lalu
-       +29,2 derajat sepanjang satu putaran.
-
-       Naikkan mendekati 1.0 kalau robot ternyata melaksanakan putaran lebih
-       penuh; turunkan kalau bola masih terdorong ke sisi yang sama dengan arah
-       geseran. -->
-  <arg name="kick_yaw_orbit_ff_scale" default="0.5"/>
   <arg name="kick_yaw_gyro_check_sec" default="1.2"/>
 
   <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
@@ -431,7 +408,8 @@
        itu, dengan batas atas supaya tidak pernah jadi langkah samping besar.
 
        Setel gain 0 untuk mematikan (kembali berputar di poros sendiri). -->
-  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="1.5"/>
+  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="0.30"/>
+  <arg name="kick_yaw_strafe_max_mm" default="12.0"/>
 
   <!-- Lama MENGEREM sebelum memutar, detik.
 
@@ -602,9 +580,9 @@
     <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
     <param name="kick_yaw_gyro_sign" value="$(var kick_yaw_gyro_sign)" type="float"/>
     <param name="kick_yaw_gyro_scale" value="$(var kick_yaw_gyro_scale)" type="float"/>
-    <param name="kick_yaw_orbit_ff_scale" value="$(var kick_yaw_orbit_ff_scale)" type="float"/>
     <param name="kick_yaw_gyro_check_sec" value="$(var kick_yaw_gyro_check_sec)" type="float"/>
     <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
+    <param name="kick_yaw_strafe_max_mm" value="$(var kick_yaw_strafe_max_mm)" type="float"/>
     <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>
     <param name="kick_yaw_brake_max_sec" value="$(var kick_yaw_brake_max_sec)" type="float"/>
     <param name="kick_yaw_brake_still_deg" value="$(var kick_yaw_brake_still_deg)" type="float"/>
