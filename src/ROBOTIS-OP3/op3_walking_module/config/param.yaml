@@ -83,3 +83,48 @@ balance_ankle_pitch_gain: 0.9
 p_gain: 36
 i_gain: 0
 d_gain: 0
+
+# ACUAN POSE BERDIRI -- ditambahkan 2026-09-09.
+# =============================================================================
+# Satu kalimat: nilai berapa yang berarti "BERDIRI PERSIS DI PAGE 2".
+#
+#     pose = page 2 + [ neutral(offset yang hidup) - neutral(acuan ini) ]
+#
+# Jadi yang memiringkan robot bukan angka offset itu sendiri, melainkan
+# SELISIHNYA terhadap blok ini.
+#
+# KENAPA ADA. Sebelum ini acuannya diambil dari offset yang kebetulan sedang
+# hidup pada saat walking_module dinyalakan. Akibatnya nilai yang baru saja
+# di-Apply dikurangkan terhadap dirinya sendiri: hasilnya nol, robot berdiri
+# persis di page 2, dan offset operator TIDAK PERNAH terasa. Gejalanya di mata
+# operator: "load nilai tersimpan lalu Apply & Start, robot tetap di page 2,
+# jadi harus ditambah lagi tiap sesi" -- dan memang nilai tersimpannya menumpuk
+# terus (-0,18 -> -0,28 -> -0,34) tanpa robot pernah berubah.
+#
+# KENAPA KUNCINYA TERPISAH, bukan memakai x_offset/pitch_offset di atas.
+# Perintah "save" (tombol Simpan ke robot di Bascorro Studio) menuliskan seluruh
+# nilai yang sedang hidup ke berkas ini. Kalau acuannya ikut kunci-kunci di atas,
+# sekali Simpan acuannya sudah pindah ke nilai yang baru dipakai, dan pada boot
+# berikutnya bug-nya kembali. Blok terpisah ini ditulis balik apa adanya oleh
+# saveWalkingParam(), jadi kebal.
+#
+# ANGKA pitch_offset DI BAWAH. Dipilih supaya nilai tersimpan operator saat ini
+# (Bascorro Studio "JALAN MENUJU MEKKAH", init_pitch_offset -0,34 rad) memberi
+# kemiringan yang SAMA dengan yang sudah dia setel dan sukai, yaitu sekitar
+# 0,10 rad lebih maju dari acuan:
+#
+#     -0,34 - (-0,24) = -0,10 rad  ->  hip -5,5 deg, lutut +3,6, pergelangan -7,8
+#
+# Dengan begitu tidak ada satu pun nilai tuning operator yang perlu diubah.
+# Sesudah ini angkanya MUTLAK: nilai yang sama selalu memberi pose yang sama,
+# lintas sesi maupun lintas restart.
+#
+# SATUANNYA sama dengan blok di atas: METER untuk x/z, DERAJAT untuk sudut.
+# Dibaca SEKALI saat boot -- sesudah diubah, jalankan ulang op3_manager.
+bias_reference:
+  x_offset: -0.02
+  z_offset: 0.0408
+  roll_offset: 0
+  pitch_offset: -13.750987083139757
+  yaw_offset: 0
+  hip_pitch_offset: 7.9984904662224929

@@ -243,7 +243,7 @@ TEST_F(KickAlignmentTest, WalkingPresetMatchesAllScreenshotFields)
   const auto walking = presets["jalan"];
   const std::map<std::string, double> expected = {
     {"init_x_offset", -0.03}, {"init_y_offset", 0.028}, {"init_z_offset", 0.0408},
-    {"init_roll_offset", 0.0}, {"init_pitch_offset", -0.12}, {"init_yaw_offset", 0.0},
+    {"init_roll_offset", 0.0}, {"init_pitch_offset", -0.34}, {"init_yaw_offset", 0.0},
     {"period_time", 0.77}, {"dsp_ratio", 0.4}, {"step_fb_ratio", 0.25},
     {"x_move_amplitude", 0.016}, {"y_move_amplitude", 0.0},
     {"z_move_amplitude", 0.037}, {"angle_move_amplitude", 0.0},
