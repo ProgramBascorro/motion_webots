@@ -1526,6 +1526,10 @@ void WalkingModule::loadWalkingParam(const std::string &path)
   //
   //     pose = page 2 + [ neutral(offset hidup) - neutral(acuan ini) ]
   //
+  // Sejak 2026-09-09 isinya NOL semua (kecuali z_offset, lihat param.yaml):
+  // titik nolnya pose page 2 itu sendiri, jadi angka offset dihitung langsung
+  // dari page 2 dan bukan dari nilai yang tersimpan sebelumnya.
+  //
   // Kalau bloknya tidak ada, acuannya jatuh ke offset biasa -- itu perilaku
   // lama, dan berarti offset tidak pernah terasa saat berdiri.
   //
