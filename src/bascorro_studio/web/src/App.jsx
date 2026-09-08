@@ -25,6 +25,7 @@ import {
   Play,
   PlayCircle,
   RefreshCw,
+  Ruler,
   Save,
   Send,
   Square,
@@ -45,6 +46,7 @@ import {
   KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
   decodeKickParameters, makeKickParameters,
 } from "./kickParams.js";
+import { measureBall, MEASURE_WINDOW_DEFAULTS } from "./kickMeasure.js";
 import { callRosService, waitForRobot } from "./net/services.js";
 import {
   computeDefaultRosbridgeUrl,
@@ -131,11 +133,36 @@ const PARAM_TYPES = {
   string: 4,
 };
 
-const YOLO_PARAM_KEYS = [
-  "ball_confidence_threshold",
-  "goalpost_confidence_threshold",
-  "robot_confidence_threshold",
-];
+// Parameter DETEKTOR yang benar-benar jalan, yaitu node
+// /ball_detector_node/yolo_ball_detector dari paket op3_ball_detector -- yang
+// sama dengan yang di-include demo.launch.xml.
+//
+// SEBELUM 2026-09-08 daftar ini berisi ball_/goalpost_/robot_confidence_threshold
+// dan ditembakkan ke /op3_yolo_vision/*. Tiga-tiganya salah sekaligus:
+//   1. nama nodenya bukan "op3_yolo_vision" melainkan "yolo_detector";
+//   2. pipeline itu memang tidak pernah dijalankan peluncur mana pun;
+//   3. detektor yang JALAN tidak punya satu pun nama parameter itu.
+// Jadi slider di halaman Vision tidak pernah berpengaruh sama sekali.
+//
+// Yang dibuka hanya dua ambang yang memang dibaca ulang saat berjalan (lihat
+// _on_set_parameters di yolo_ball_detector.py). model_path, imgsz, device dan
+// detection_rate SENGAJA tidak dibuka: ketiganya cuma dipakai saat memuat model
+// atau membuat timer, jadi menyetelnya lewat parameter tidak berpengaruh.
+const YOLO_PARAM_KEYS = ["confidence_threshold", "iou_threshold"];
+
+const YOLO_PARAM_INFO = {
+  confidence_threshold: {
+    label: "Ambang keyakinan",
+    help: "Di bawah angka ini deteksi dibuang. Terikat pada BOBOT yang dipakai: " +
+      "v8n (Bola-baru) memberi keyakinan sekitar 0,45 sehingga 0,50 memblokir semuanya, " +
+      "sedangkan ball_yolov8n int8 sekitar 0,85. Turunkan kalau bola tidak pernah terdeteksi.",
+  },
+  iou_threshold: {
+    label: "Ambang IoU",
+    help: "Seberapa banyak dua kotak boleh bertindih sebelum salah satunya dibuang. " +
+      "Jarang perlu diubah; naikkan kalau satu bola terdeteksi jadi beberapa kotak.",
+  },
+};
 
 // What the grid shows before the first Load, so it has to be the same gait the robot
 // actually boots with: every value here mirrors op3_walking_module/config/param.yaml,
@@ -1193,6 +1220,12 @@ export default function App() {
   // bukan sekadar berhenti menggambar: saat menera jarak, gambar 640x480 mentah
   // lewat rosbridge itu beban yang tidak perlu kalau memang tidak dilihat.
   const [kickCameraOn, setKickCameraOn] = useState(true);
+  // PENGUKUR JARAK: pengamatan MENTAH dari robot (lingkaran bola + sudut leher).
+  // Sengaja disimpan mentah, bukan sudah jadi jarak: jaraknya dihitung ulang
+  // tiap render dengan parameter yang SEDANG DIKETIK, supaya operator melihat
+  // akibat draftnya sebelum mengirim apa pun.
+  const [kickObservation, setKickObservation] = useState(null);
+  const [kickHipPitch, setKickHipPitch] = useState(null);
   const [kickSavedAt, setKickSavedAt] = useState(null);
   const [kickSaveMessage, setKickSaveMessage] = useState("");
   // Apakah node yang dibutuhkan halaman Tendangan dan Demo benar-benar hidup.
@@ -1212,10 +1245,11 @@ export default function App() {
   const [cameraTopicsError, setCameraTopicsError] = useState("");
   
   // Tuning - Vision Params
+  // Bawaan mengikuti config/yolo_ball_detector_openvino_params.yaml, supaya
+  // tampilan sebelum tombol Muat tidak menyesatkan.
   const [yoloParams, setYoloParams] = useState({
-    ball_confidence_threshold: 0.2,
-    goalpost_confidence_threshold: 0.5,
-    robot_confidence_threshold: 0.2,
+    confidence_threshold: 0.3,
+    iou_threshold: 0.45,
   });
   
   // Input
@@ -1238,6 +1272,8 @@ export default function App() {
   const overlayCanvasRef = useRef(null);
   const kickCanvasRef = useRef(null);
   const kickCameraOnRef = useRef(true);
+  // Sudut leher terbaru; dipasangkan ke lingkaran bola begitu deteksi tiba.
+  const kickHeadRef = useRef(null);
   const overlayLastRef = useRef({ stampMs: null, fps: 0, dropped: 0 });
   const showOverlayRef = useRef(true);
   
@@ -1495,12 +1531,12 @@ export default function App() {
 
     yoloSetServiceRef.current = new ROSLIB.Service({
       ros,
-      name: "/op3_yolo_vision/set_parameters",
+      name: "/ball_detector_node/yolo_ball_detector/set_parameters",
       serviceType: "rcl_interfaces/srv/SetParameters",
     });
     yoloGetServiceRef.current = new ROSLIB.Service({
       ros,
-      name: "/op3_yolo_vision/get_parameters",
+      name: "/ball_detector_node/yolo_ball_detector/get_parameters",
       serviceType: "rcl_interfaces/srv/GetParameters",
     });
     snapshotServiceRef.current = new ROSLIB.Service({
@@ -1664,6 +1700,80 @@ export default function App() {
     const id = window.setInterval(() => setCameraTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, [overlayWanted]);
+
+  // ---- PENGUKUR JARAK TENDANGAN -----------------------------------------
+  //
+  // Dua langganan RINGAN, hidup hanya selama halaman Tendangan terbuka:
+  // sudut leher dan lingkaran bola. Keduanya dibatasi 200 ms lewat
+  // throttle_rate rosbridge -- /robotis/present_joint_states terbit 125 Hz
+  // untuk 20 sendi, dan mengalirkan itu utuh ke browser tidak ada gunanya
+  // untuk mengukur bola yang diam.
+  //
+  // Yang disimpan pengamatan MENTAH. Jaraknya dihitung di render.
+  useEffect(() => {
+    if (!rosRef.current || rosState !== "connected" || activeTab !== "tendangan") {
+      return undefined;
+    }
+    const ros = rosRef.current;
+
+    const jointSub = new ROSLIB.Topic({
+      ros, name: "/robotis/present_joint_states", messageType: "sensor_msgs/JointState",
+      throttle_rate: 200, queue_length: 1,
+    });
+    jointSub.subscribe((msg) => {
+      const pan = msg.name.indexOf("head_pan");
+      const tilt = msg.name.indexOf("head_tilt");
+      if (pan < 0 || tilt < 0) return;
+      kickHeadRef.current = { pan: msg.position[pan], tilt: msg.position[tilt] };
+    });
+
+    const circleSub = new ROSLIB.Topic({
+      ros, name: "/ball_detector_node/circle_set",
+      messageType: "op3_ball_detector_msgs/CircleSetStamped",
+      throttle_rate: 200, queue_length: 1,
+    });
+    circleSub.subscribe((msg) => {
+      const head = kickHeadRef.current;
+      // Deteksi tanpa sudut leher tidak bisa dipakai: seluruh geometrinya
+      // bergantung ke mana kepala menghadap.
+      if (!head) return;
+      if (!msg.circles || msg.circles.length === 0) {
+        setKickObservation((prev) => (prev ? { ...prev, circle: null, at: Date.now() } : prev));
+        return;
+      }
+      // Detektor sudah mengurutkan bola terbesar di depan.
+      const c = msg.circles[0];
+      setKickObservation({
+        circle: { x: c.x, y: c.y, radiusPx: c.z },
+        head, at: Date.now(),
+      });
+    });
+
+    return () => {
+      jointSub.unsubscribe();
+      circleSub.unsubscribe();
+      kickHeadRef.current = null;
+    };
+  }, [rosState, activeTab]);
+
+  // hip_pitch_offset ikut menentukan arah pandang kamera, dan ia milik
+  // walking_module -- bukan parameter tendangan. Dibaca sekali saat halaman
+  // dibuka; kalau gagal (manager mati), pengukurannya sengaja tidak ditampilkan
+  // daripada memakai tebakan.
+  useEffect(() => {
+    if (rosState !== "connected" || activeTab !== "tendangan") return undefined;
+    let batal = false;
+    (async () => {
+      try {
+        const result = await callRosService(walkingGetServiceRef.current,
+          { get_param: true }, { timeoutMs: 4000 });
+        if (!batal) setKickHipPitch(Number(result?.parameters?.hip_pitch_offset));
+      } catch {
+        if (!batal) setKickHipPitch(null);
+      }
+    })();
+    return () => { batal = true; };
+  }, [rosState, activeTab]);
 
   // Auto-enable head_control_module on the real robot so head torque comes
   // up as soon as the manager is reachable. Without this, WALKING_READY's head
@@ -2018,17 +2128,47 @@ export default function App() {
     sendStatus(`Walking version saved: ${name}`);
   };
 
+  // Memuat versi tersimpan: versinya SELALU masuk kotak isian dulu, pembacaan
+  // robot menyusul sebagai bonus.
+  //
+  // Halaman ini punya DUA tombol bernama "Load": yang di baris PARAMETER
+  // membaca robot, yang di baris Versi Tersimpan cuma mengisi kotak isian.
+  // Operator menekan yang kedua lalu Apply, dan Apply menolak dengan "Load
+  // parameter dari robot terlebih dahulu" -- pesan yang menunjuk tombol lain
+  // tanpa mengatakannya. Karena itu tombol ini sekalian membaca robot: itu yang
+  // memasang angka pembanding yang dibutuhkan Apply.
+  //
+  // URUTANNYA: isi draft DULU, baca robot belakangan. Versi pertama fungsi ini
+  // melakukan sebaliknya, dan itu SALAH -- kalau op3_manager tidak menjawab
+  // (mati, atau baru dinyalakan), pembacaannya melempar dan baris pengisi draft
+  // TIDAK PERNAH dijalankan, sehingga versi yang dipilih tidak jadi dimuat sama
+  // sekali. Operator melihatnya sebagai "gerakan yang tersimpan hilang".
+  //
+  // Membalik urutannya aman: readWalkingRuntime() hanya menulis
+  // walkingCurrentParams (kolom CURRENT) dan TIDAK menyentuh walkingParams,
+  // jadi ia tidak bisa membuang draft yang baru saja diisi. Komentar lama di
+  // sini yang mengatakan sebaliknya keliru.
   const loadWalkingVersion = () => {
     if (walkingOperationRef.current) return;
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     if (!selected) {
-      sendStatus("Select a walking version first", true);
+      sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
+
     setWalkingParams(normalizeWalkingParams(selected.params));
     setWalkingVersionName(selected.name);
     setWalkingError("");
-    sendStatus(`Walking version loaded: ${selected.name}`);
+
+    if (!rosConnected) {
+      sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
+        + "pembacaan robot: tekan Load di baris PARAMETER sebelum Apply.", true);
+      return;
+    }
+    runRobotOperation("walking", async (context) => {
+      await readWalkingRuntime(context);
+      sendStatus(`Versi "${selected.name}" dimuat, dan parameter robot ikut dibaca. Tinggal Apply.`);
+    });
   };
 
   const deleteWalkingVersion = () => {
@@ -2747,7 +2887,7 @@ export default function App() {
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
                 Tersimpan di browser
               </span>
-              <span className="text-[10px] text-gray-400">Load Version mengisi UI — tetap perlu Apply untuk kirim ke robot</span>
+              <span className="text-[10px] text-gray-400">Muat versi mengisi kotak isian (dan ikut membaca robot) — tetap perlu Apply untuk kirim</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
               <input
@@ -2784,10 +2924,10 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
                 onClick={loadWalkingVersion}
-                disabled={!selectedWalkingVersion}
-                title="Isi UI dengan parameter dari versi terpilih"
+                disabled={!selectedWalkingVersion || walkingBusy}
+                title="Baca parameter robot, lalu isi kotak isian dengan versi terpilih"
               >
-                Load
+                <RefreshCw size={14} /> Muat versi
               </button>
               <button
                 className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
@@ -2944,6 +3084,30 @@ export default function App() {
           "dengan tombol Scan di halaman Vision.";
       }
     }
+
+    // PENGUKURAN LANGSUNG. Dihitung ulang tiap render supaya ia memakai
+    // parameter yang SEDANG DIKETIK, bukan yang tersimpan di robot.
+    const measureParams = { ...MEASURE_WINDOW_DEFAULTS, ...kickParams };
+    const obsAgeSec = kickObservation ? (Date.now() - kickObservation.at) / 1000 : null;
+    const obsFresh = obsAgeSec !== null && obsAgeSec < 2;
+    const measurement =
+      obsFresh && kickObservation.circle && Number.isFinite(kickHipPitch)
+        ? measureBall(kickObservation.circle, kickObservation.head, kickHipPitch, measureParams)
+        : null;
+    const draftKickDistance = parseWalkingNumber(kickParams.kick_distance, NaN);
+    const draftPanMax = parseWalkingNumber(kickParams.kick_pan_max_distance, NaN);
+    // Kenapa belum ada angka. Diurut dari yang paling sering jadi sebabnya.
+    const measureBlocker = !rosConnected
+      ? "ROS bridge belum tersambung."
+      : !Number.isFinite(kickHipPitch)
+        ? "hip_pitch_offset belum terbaca dari walking_module -- op3_manager belum jalan."
+        : kickObservation === null
+          ? "Belum ada deteksi sama sekali di /ball_detector_node/circle_set -- jalankan usb_cam + detektor."
+          : !obsFresh
+            ? `Deteksi terakhir sudah ${fmt(obsAgeSec, 1)} detik lalu.`
+            : !kickObservation.circle
+              ? "Detektor jalan tapi tidak melihat bola. Dekatkan bola atau turunkan confidence_threshold di halaman Vision."
+              : "Sudut tunduk di luar rentang sahih; kepala terlalu datar untuk mengukur.";
 
     const geometry = computeKickGeometry(kickParams);
     const liveGeometry = kickCurrentParams ? computeKickGeometry(kickCurrentParams) : null;
@@ -3242,9 +3406,115 @@ export default function App() {
               </div>
             </div>
 
-            {/* Akibat dari angka yang sedang diketik — dihitung dengan rumus yang
-                sama persis dengan yang dipakai robot. */}
+            {/* PENGUKUR JARAK: taruh bola di tempat yang diinginkan, baca
+                angkanya, lalu pakai. Ini menjawab "berapa kick_distance yang
+                pas" tanpa meteran dan tanpa menebak. */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Ruler size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Ukur jarak bola sekarang</h3>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${measurement ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {measurement ? "terukur" : "menunggu bola"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Letakkan bola tepat di tempat Abang ingin robot BERHENTI, arahkan kepala ke bola,
+                  lalu tekan <span className="font-bold">Pakai jarak ini</span>. Dihitung dengan geometri
+                  yang sama persis dengan yang dipakai robot saat demo.
+                </p>
+              </div>
+
+              {measurement && measurement.distanceM !== null ? (
+                <>
+                  <div className="px-5 py-4 flex flex-wrap items-end gap-x-8 gap-y-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Jarak bola</div>
+                      <div className="font-mono text-3xl font-bold text-undip-blue">
+                        {fmt(measurement.distanceM, 3)} <span className="text-lg">m</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Jarak tendang (draft)</div>
+                      <div className="font-mono text-xl text-gray-700">{fmt(draftKickDistance, 3)} m</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Selisih</div>
+                      <div className={`font-mono text-xl font-bold ${Math.abs(measurement.distanceM - draftKickDistance) < 0.02 ? "text-green-600" : "text-amber-600"}`}>
+                        {measurement.distanceM > draftKickDistance ? "+" : ""}
+                        {fmt((measurement.distanceM - draftKickDistance) * 100, 1)} cm
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100 border-y border-gray-100">
+                    {[
+                      { l: "Radius bola", v: `${fmt(measurement.radiusPx, 1)} px`,
+                        n: `ambang ${fmt(geometry.thresholdPx, 1)} px` },
+                      { l: "Sudut tunduk", v: `${fmt(measurement.depressionDeg, 1)} deg`, n: "ke pusat bola" },
+                      { l: "Arah bola", v: `${fmt(measurement.bearingDeg, 1)} deg`, n: "+ = kiri" },
+                      { l: "Jendela kaki", v: measurement.footWindow === "right" ? "KANAN"
+                          : measurement.footWindow === "left" ? "KIRI" : "di luar",
+                        n: `servo ${fmt(measurement.servoWindowDeg, 1)} deg` },
+                    ].map((k) => (
+                      <div key={k.l} className="bg-white px-4 py-3">
+                        <div className="text-[10px] font-bold uppercase text-gray-400">{k.l}</div>
+                        <div className="font-mono text-sm font-bold text-gray-800">{k.v}</div>
+                        <div className="text-[10px] text-gray-400">{k.n}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="px-5 py-4 flex flex-wrap items-center gap-3">
+                    <button
+                      className={`${kickButtonBase} bg-undip-blue text-white hover:bg-undip-blue/90`}
+                      onClick={() => {
+                        updateKickParam("kick_distance", measurement.distanceM.toFixed(3));
+                        sendStatus(`Jarak tendang draft diisi ${measurement.distanceM.toFixed(3)} m dari pengukuran`);
+                      }}
+                      title="Isi kotak Jarak tendang dengan jarak bola yang barusan diukur"
+                    >
+                      <Crosshair size={14} /> Pakai jarak ini
+                    </button>
+                    <span className="text-[11px] text-gray-500">
+                      Baru mengisi kotak isian; masih perlu tombol kirim untuk sampai ke robot.
+                    </span>
+                  </div>
+
+                  {Number.isFinite(draftPanMax) && Number.isFinite(draftKickDistance)
+                    && draftPanMax <= draftKickDistance && (
+                    <div className="px-5 pb-4 text-[11px] text-yellow-800 bg-yellow-50 border-t border-yellow-100 pt-3">
+                      <span className="font-bold">Perhatian:</span> batas mulai penyelarasan
+                      ({fmt(draftPanMax, 3)} m) tidak boleh lebih kecil daripada jarak tendang
+                      ({fmt(draftKickDistance, 3)} m) -- robot tidak akan pernah mulai meluruskan yaw.
+                      Isi sekitar 5 cm lebih besar.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="px-5 py-6 text-sm text-gray-500">
+                  <div className="font-bold text-gray-700">Belum ada angka.</div>
+                  <div className="mt-1">{measureBlocker}</div>
+                  {measurement && measurement.distanceM === null && (
+                    <div className="mt-2 text-[11px]">
+                      Arah bola terbaca ({fmt(measurement.bearingDeg, 1)} deg) tapi jaraknya tidak:
+                      sudut tunduk {fmt(measurement.depressionDeg, 1)} deg di luar rentang sahih
+                      ({fmt(parseWalkingNumber(kickParams.kick_min_depression_deg, NaN), 1)} sampai 89 deg).
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>
+
+          {/* Akibat dari angka yang sedang diketik — dihitung dengan rumus yang
+              sama persis dengan yang dipakai robot.
+
+              SELEBAR HALAMAN, dan isinya ubin, bukan daftar menurun. Dulu ia
+              kartu ketiga di grid dua kolom di atas, jadi ia sendirian di baris
+              kedua dan separuh kanan halaman kosong sepanjang kartunya. */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="p-5 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <Crosshair size={18} className="text-undip-blue" />
@@ -3255,31 +3525,36 @@ export default function App() {
                   Belum tentu sama dengan yang di robot sampai tombol kirim ditekan.
                 </p>
               </div>
-              <div className="divide-y divide-gray-100">
-                {geometryRows.map((row) => (
-                  <div key={row.label} className="flex flex-wrap items-baseline justify-between gap-2 px-5 py-3">
-                    <div className="min-w-0">
-                      <div className={`text-sm ${row.highlight ? "font-bold text-gray-900" : "text-gray-700"}`}>{row.label}</div>
-                      <div className="text-[11px] text-gray-400">{row.note}</div>
+              <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-5">
+                  {geometryRows.map((row) => (
+                    <div key={row.label} className={`rounded-xl border px-4 py-3 ${row.highlight ? "border-undip-blue/20 bg-blue-50/40" : "border-gray-100 bg-gray-50"}`}>
+                      <div className={`text-xs ${row.highlight ? "font-bold text-gray-900" : "text-gray-600"}`}>{row.label}</div>
+                      <div className={`mt-1 font-mono ${row.highlight ? "text-xl font-bold text-undip-blue" : "text-base text-gray-800"}`}>
+                        {row.value}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-snug text-gray-400">{row.note}</div>
                     </div>
-                    <div className={`font-mono ${row.highlight ? "text-base font-bold text-undip-blue" : "text-sm text-gray-700"}`}>
-                      {row.value}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
                 {liveGeometry && (
-                  <div className="px-5 py-3 text-[11px] text-gray-500">
+                  <div className="px-5 pb-4 -mt-1 text-[11px] text-gray-500">
                     Pada pembacaan robot terakhir, ambang radius hitung/manual <span className="font-mono font-bold">{fmt(liveGeometry.thresholdPx, 1)} px</span> pada
                     jarak tendang <span className="font-mono font-bold">{fmt(parseWalkingNumber(kickCurrentParams.kick_distance, NaN), 3)} m</span>.
                   </div>
                 )}
               </div>
-            </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* KOLOM CSS, bukan grid. Keempat grup ini isinya 2, 6, 4 dan 3 field;
+              di grid dua kolom tinggi tiap BARIS mengikuti kartu tertinggi, jadi
+              "Jarak tendang" (2 field) meninggalkan lubang setinggi 4 field di
+              sebelah "Geometri pengukur jarak" (6 field). Kolom CSS menata
+              kartunya berurutan dan menyeimbangkan tinggi kedua kolom sendiri.
+              Jarak antar kartu pakai mb-6: row-gap tidak berlaku di multikolom. */}
+          <div className="columns-1 xl:columns-2 gap-6">
             {KICK_PARAM_GROUPS.map((group) => (
-              <div key={group.title} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
+              <div key={group.title} className="mb-6 break-inside-avoid bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
                 <div className="p-5 border-b border-gray-100">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal size={18} className="text-undip-blue" />
@@ -4132,19 +4407,27 @@ export default function App() {
           <div className="flex flex-col gap-6 mt-2">
             {YOLO_PARAM_KEYS.map(key => (
               <div key={key}>
-                <div className="flex justify-between mb-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">{key.replace(/_confidence_threshold|_/g, " ")}</label>
+                <div className="flex justify-between mb-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    {YOLO_PARAM_INFO[key]?.label || key}
+                  </label>
                   <span className="text-xs font-mono font-bold text-undip-blue">{yoloParams[key].toFixed(2)}</span>
                 </div>
                 <input
-                  type="range" min="0" max="1" step="0.05"
+                  type="range" min="0.05" max="0.95" step="0.01"
                   className="w-full accent-undip-blue h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer"
                   value={yoloParams[key]}
                   onChange={e => setYoloParams({ ...yoloParams, [key]: Number(e.target.value) })}
                 />
+                <p className="mt-1 text-[11px] leading-relaxed text-gray-500">{YOLO_PARAM_INFO[key]?.help}</p>
               </div>
             ))}
-            <button className="w-full py-3 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyYoloParams}>Apply Thresholds</button>
+            <p className="text-[11px] text-gray-400">
+              Ditulis ke <span className="font-mono">/ball_detector_node/yolo_ball_detector</span>, langsung
+              berlaku tanpa memuat ulang model. Tidak permanen: kembali ke isi
+              <span className="font-mono"> yolo_ball_detector_openvino_params.yaml</span> saat detektor dijalankan ulang.
+            </p>
+            <button className="w-full py-3 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyYoloParams}>Kirim ke detektor</button>
           </div>
         </div>
       </div>

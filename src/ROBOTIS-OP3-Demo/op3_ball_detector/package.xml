@@ -31,6 +31,8 @@
        NOTE: the "ultralytics" / torch wheels have no rosdep key and must be
        installed manually, e.g.  pip3 install ultralytics -->
   <exec_depend>rclpy</exec_depend>
+  <!-- SetParametersResult: ambang keyakinan/IoU bisa diubah selagi node jalan. -->
+  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
