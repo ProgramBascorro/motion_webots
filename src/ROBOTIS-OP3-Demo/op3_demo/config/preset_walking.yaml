@@ -1,4 +1,21 @@
 # Preset walking untuk DEMO SEPAK BOLA.
+#
+# !! JANGAN ASAL JALANKAN scripts/sync_preset_from_studio.py --write !!
+#
+# 2026-09-08 berkas ini sempat disamakan dengan versi tersimpan di Bascorro
+# Studio (10 nilai di mencari_celah, putar_kiri, putar_kanan, geser_kiri,
+# geser_kanan). Hasilnya operator melapor SELURUH gerakan jadi tidak sesuai,
+# dan angkanya DIKEMBALIKAN ke keadaan sebelumnya pada hari yang sama.
+#
+# Yang paling berpengaruh: init_pitch_offset -0,09 jadi -0,28 rad (badan
+# mencondong ~11 derajat lebih jauh) di empat gerakan sekaligus.
+#
+# Versi Studio yang bersangkutan TIDAK diperbaiki -- ia masih berisi angka itu,
+# plus init_x_offset -0,18 di kedua GESER yang bahkan di luar jangkauan kaki.
+# Jadi menjalankan skrip sinkronisasi dengan --write akan MEMASANGNYA LAGI.
+# Simpan ulang versinya di Studio dengan angka yang benar dulu, atau salin
+# tangan hanya field yang memang mau diubah.
+#
 # =============================================================================
 #
 # Enam gerakan, enam bagian. Semuanya disetel operator langsung di robot lewat
@@ -168,17 +185,17 @@ jalan:
 # Sama seperti putar dan geser, preset ini ditimpakan DI ATAS hasil preset
 # JALAN: field yang tidak disebut di sini mewarisi angka JALAN.
 mencari_celah:
-  init_x_offset: -0.018
+  init_x_offset: -0.027
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  init_pitch_offset: -0.28
+  init_pitch_offset: -0.09
   init_yaw_offset: 0.0
 
   period_time: 0.57
   dsp_ratio: 0.4
   step_fb_ratio: 0.25
-  soft_start_time: 0.03
+  soft_start_time: 0.005
 
   x_move_amplitude: 0.0
   y_move_amplitude: 0.0
@@ -216,11 +233,11 @@ mencari_celah:
 #
 # Sebelum ini angle_move_amplitude 0,0 dan turn_in +0,025.
 putar_kiri:
-  init_x_offset: -0.022
+  init_x_offset: -0.027
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  init_pitch_offset: -0.2
+  init_pitch_offset: -0.09
   init_yaw_offset: 0.0
 
   period_time: 0.57
@@ -274,11 +291,11 @@ putar_kiri:
 # sama dengan keempat preset lain. Kalau di Studio ternyata beda, kirim
 # tangkapan layar bagian bawahnya.
 putar_kanan:
-  init_x_offset: -0.022
+  init_x_offset: -0.027
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  init_pitch_offset: -0.18
+  init_pitch_offset: -0.09
   init_yaw_offset: 0.0
 
   period_time: 0.57
@@ -340,13 +357,13 @@ geser_kiri:
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  init_pitch_offset: -0.28
+  init_pitch_offset: -0.12
   init_yaw_offset: 0.0
 
   period_time: 0.55
   dsp_ratio: 0.4
   step_fb_ratio: 0.25
-  soft_start_time: 0.01
+  soft_start_time: 0.05
 
   x_move_amplitude: -0.0026
   y_move_amplitude: -0.025
@@ -399,7 +416,7 @@ geser_kanan:
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  init_pitch_offset: -0.28
+  init_pitch_offset: -0.12
   init_yaw_offset: 0.0
 
   period_time: 0.56
