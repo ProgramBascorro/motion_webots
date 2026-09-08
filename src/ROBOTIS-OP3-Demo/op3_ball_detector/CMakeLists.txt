@@ -66,10 +66,27 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
 )
 
-# YOLO ball detector (Python). Installed alongside the C++ executable so it can
-# be launched with `ros2 run op3_ball_detector yolo_ball_detector.py`.
+# YOLO detectors (Python). Installed alongside the C++ executable so they can
+# be launched with `ros2 run op3_ball_detector <script>.py`.
+#   yolo_ball_detector.py     : single "ball" -> op3_ball_detector_msgs/CircleSetStamped
+#   yolo_field_detector.py    : multi-class field -> vision_msgs/Detection2DArray
+#   yolo_landmark_detector.py : 5-class landmark (OpenVINO) -> Detection2DArray + FPS
+#   yolo_goalline_detector.py : goal line (garis gawang) -> PolygonStamped + FPS
+#   goalline_fps_benchmark.py : same detection offline (video/camera) + FPS report
+#
+# The last two entries are LIBRARIES, not nodes, but they MUST land in the same
+# directory as the scripts above -- each script imports them by putting its own
+# directory on sys.path:
+#   detector_fps.py           : the one FPS meter every detector reports with
+#   goalline_core.py          : goal-line geometry + drawing helpers
 install(PROGRAMS
   scripts/yolo_ball_detector.py
+  scripts/yolo_field_detector.py
+  scripts/yolo_landmark_detector.py
+  scripts/yolo_goalline_detector.py
+  scripts/goalline_fps_benchmark.py
+  scripts/detector_fps.py
+  scripts/goalline_core.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

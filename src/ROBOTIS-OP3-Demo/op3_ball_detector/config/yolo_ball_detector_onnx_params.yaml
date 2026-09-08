@@ -6,10 +6,11 @@
   ros__parameters:
     # ONNX weights, relative to the package share dir (install/.../share/
     # op3_ball_detector/) or an absolute path. ultralytics runs these through
-    # onnxruntime (CPUExecutionProvider). v8n.onnx is the light "nano" model,
-    # exported at imgsz 320 for low CPU load (~26 ms/frame on an i5-1340P vs
-    # ~120 ms for v8s @ 640). Rebuild after editing so it lands in install/.
-    model_path: "model/v8s.onnx"
+    # onnxruntime (CPUExecutionProvider). ball_yolov8n.onnx is the "nano" model
+    # of the ball dataset, exported at imgsz 640 (input [1,3,640,640], output
+    # [1,5,8400] = 4 box + 1 class). Rebuild after editing so it lands in
+    # install/.
+    model_path: "model/ball_yolov8n.onnx"
 
     # .onnx carries no task metadata; set it explicitly so ultralytics does not
     # warn and guess. This is a detection model.
@@ -22,10 +23,11 @@
     confidence_threshold: 0.5
     iou_threshold: 0.45
 
-    # MUST match the imgsz the ONNX was exported with. v8n.onnx here is exported
-    # at 320. A mismatch makes onnxruntime reject the input tensor shape. To
-    # change it, re-export: yolo export model=model/v8n.pt format=onnx imgsz=NNN
-    imgsz: 320
+    # MUST match the imgsz the ONNX was exported with. ball_yolov8n.onnx here is
+    # exported at 640. A mismatch makes onnxruntime reject the input tensor
+    # shape. To change it, re-export:
+    #   yolo export model=model/ball_yolov8n_best.pt format=onnx imgsz=NNN
+    imgsz: 640
 
     # ONNX here is the CPU build → keep device "cpu" and half false. FP16 / GPU
     # would require an onnxruntime-gpu or onnxruntime-openvino build.
@@ -33,9 +35,10 @@
     half: false
     max_detections: 10
 
-    # Model class names to treat as "the ball". The model exposes "Bola-baru".
+    # Model class names to treat as "the ball". ball_yolov8n.onnx exposes exactly
+    # one class: "ball" (class 0).
     # If none of these match the model, every class is treated as a ball.
-    target_classes: ["Bola-baru"]
+    target_classes: ["ball"]
 
     # Inference loop rate (Hz). Always uses the freshest camera frame. Capped at
     # 15 Hz: the ball_follower does not need more, and it keeps the CPU free for
@@ -48,3 +51,8 @@
 
     # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
     enable_at_start: true
+    # Also publish the ball center as geometry_msgs/PointStamped in [0,1] image
+    # coords on this topic (only while a ball is seen), feeding
+    # op3_ball_localization/head_tracking_node in demo.launch.xml. Set "" to
+    # disable. Leave absolute (leading /) so it is global across namespaces.
+    ball_center_topic: "/vision/yolo/ball_center"

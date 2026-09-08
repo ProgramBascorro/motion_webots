@@ -7,9 +7,66 @@
 /**:
   ros__parameters:
     # OpenVINO model is a DIRECTORY (.xml + .bin + metadata.yaml), not a single
-    # file. Relative to the package share dir or an absolute path. Re-export
-    # with: yolo export model=model/ball_yolov8n_best.pt format=openvino imgsz=640
-    model_path: "model/ball_yolov8n_openvino_model"
+    # file. Relative to the package share dir or an absolute path.
+    #
+    # Bentuknya 384x640 (tinggi x lebar), BUKAN persegi -- lihat imgsz_hw di
+    # bawah. Dan bobotnya INT8, bukan FP32.
+    #
+    # Kenapa INT8: demo penuh membuat inferensi FP32 melar jadi 47,7 ms --
+    # MELEWATI jatah 41,7 ms per frame pada 24 FPS, jadi frame mulai hilang
+    # (terukur di demo sungguhan: 7-11 FPS). INT8 memangkasnya cukup untuk
+    # tetap masuk jatah walau CPU sedang diperebutkan:
+    #
+    #   kondisi                       FP32      INT8     jatah 24 FPS
+    #   tanpa pesaing                 30,1 ms   16,9 ms   41,7 ms
+    #   3 pesaing bebas (= demo)      47,7 ms   28,4 ms   41,7 ms   <- ini yang penting
+    #   3 pesaing dikurung ke 3,7     33,6 ms   18,5 ms   41,7 ms
+    #
+    # Akurasinya diverifikasi, bukan diasumsikan (tes_infer.mp4, 30 frame):
+    #   FP32: 30/30 deteksi, conf rata2 0,869, conf MIN 0,848
+    #   INT8: 30/30 deteksi, conf rata2 0,856, conf MIN 0,843
+    # Ulangi sendiri kapan saja: scripts/compare_ball_models.py
+    #
+    # PERINGATAN yang jujur: frame kalibrasinya direkam di dalam ruangan, BUKAN
+    # di lapangan sebenarnya. Kuantisasi mempelajari rentang nilai dari contoh
+    # yang diberikan, jadi kalau pencahayaan/warna lapangan jauh berbeda,
+    # rekam ulang dan kuantisasi ulang:
+    #   scripts/capture_calib_frames.py     (arahkan ke lapangan, bola macam2 jarak)
+    #   scripts/quantize_ball_int8.py       (WAJIB di container --rm, baca docstring-nya)
+    #   scripts/compare_ball_models.py      (gerbang kecepatan + akurasi)
+    #
+    # Jalan mundur: ganti ke "model/ball_yolov8n_384x640_openvino_model" (FP32,
+    # sengaja ditinggal utuh). Yang 640x640 asli juga masih ada di
+    # "model/ball_yolov8n_openvino_model". imgsz_hw tetap [384, 640] untuk
+    # ketiganya.
+    # DIPILIH OPERATOR 2026-09-06: kembali ke bobot v8n (kelas "Bola-baru"),
+    # yaitu bobot yang tulisannya dikenal di lapangan.
+    #
+    # Bobot ini FP32 (int8: false) dan diekspor 320x320 PERSEGI.
+    #
+    # KECEPATAN: bukan taruhannya. Diukur di NUC ini, satu frame kamera yang
+    # sama, 25 kali tiap bobot, dua kali dengan urutan dibalik supaya bukan
+    # sekadar efek pemanasan:
+    #     v8n  @320x320    83,8 dan 80,1 ms
+    #     int8 @384x640   100,8 dan 104,0 ms
+    # Jadi v8n justru LEBIH CEPAT di sini -- masukannya 320x320 (102k piksel)
+    # lawan 384x640 (246k piksel), dan itu lebih menentukan daripada INT8.
+    # Angka mutlaknya tinggi karena mesin sedang terpakai; yang berlaku
+    # perbandingannya, bukan angkanya.
+    #
+    # YANG BENAR-BENAR DITUKAR: jangkauan. Dengan masukan PERSEGI, frame kamera
+    # 640x360 dipadding jadi 320x320, sehingga bola menempati kira-kira setengah
+    # ukuran linier dibanding 384x640. Bola JAUH jadi lebih sulit terdeteksi.
+    # Bobotnya juga dilatih dari data yang berbeda (Bola-baru-1), jadi
+    # perilakunya memang tidak sama.
+    #
+    # Radius yang dilaporkan TIDAK ikut mengecil: Ultralytics mengembalikan
+    # kotak ke koordinat gambar asli, jadi kick_ball_radius_px tetap sebanding.
+    #
+    # Jalan kembali: model_path "model/ball_yolov8n_384x640_int8_openvino_model",
+    # target_classes ["ball"], imgsz_hw [384, 640], dan kalau tulisannya ingin
+    # tetap sama: display_class_names ["ball=Bola baru"].
+    model_path: "model/v8n_openvino_model"
 
     # OpenVINO carries no task in the way ultralytics auto-detects reliably;
     # set it explicitly. This is a detection model.
@@ -19,13 +76,55 @@
     use_compressed: true
 
     # Detection thresholds / inference settings.
-    confidence_threshold: 0.5
+    #
+    # 0,5 -> 0,30 pada 2026-09-06, WAJIB menyertai bobot v8n.
+    #
+    # Bobot v8n memberi keyakinan jauh lebih rendah daripada ball_yolov8n untuk
+    # bola yang sama. Diukur dari 30 frame BERURUTAN kamera robot, adegan sama:
+    #
+    #   bobot                    ambang 0,50   ambang 0,35   keyakinan rata
+    #   v8n (Bola-baru)             0/30           30/30          0,45
+    #   ball_yolov8n int8           30/30          30/30          0,85
+    #
+    # Jadi dengan ambang 0,50 robot TIDAK PERNAH melihat bola sama sekali --
+    # puncak keyakinan v8n (0,45-0,47) memang di bawah ambangnya. Gejalanya di
+    # lapangan: detektor hidup, gambar mengalir, tapi tidak ada satu pun kotak.
+    #
+    # 0,30 memberi jarak 0,15 dari rata-rata terukur. Angka ini terikat pada
+    # bobot: kalau kembali ke ball_yolov8n, kembalikan juga ke 0,5 -- di sana
+    # 0,30 cuma mengundang deteksi palsu. Diukur di dalam ruangan; di lapangan
+    # dengan cahaya berbeda perlu diperiksa ulang.
+    confidence_threshold: 0.30
     iou_threshold: 0.45
 
-    # MUST match the imgsz the model was exported with (640 here — ball_yolov8n
-    # was trained AND exported at 640; its IR input is a static [1,3,640,640]).
-    # Re-export to change it (see model_path comment).
-    imgsz: 640
+    # imgsz WAJIB sama persis dengan bentuk saat model diekspor: masukan IR
+    # OpenVINO itu STATIS dan menolak bentuk lain. Mengubahnya di sini saja
+    # tidak cukup -- dan reshape() saat runtime juga tidak bisa, karena grid
+    # anchor sudah dibakar jadi konstanta waktu ekspor.
+    #
+    # imgsz di bawah dipakai hanya kalau imgsz_hw dimatikan ([0, 0]).
+    imgsz: 320
+
+    # --- masukan PERSEGI PANJANG [tinggi, lebar] ---------------------------
+    # Kamera 640x360. Dengan imgsz persegi, Ultralytics mem-padding jadi
+    # 640x640 sebelum inferensi: hanya 230400 dari 409600 piksel yang berisi
+    # gambar, jadi 44% komputasi habis memproses bar abu-abu.
+    #
+    # 384x640 mengikuti rasio kamera (360 dibulatkan ke kelipatan 32 stride).
+    # Skala letterbox tetap 1,0 seperti sebelumnya, jadi bola TIDAK diperkecil
+    # sedikit pun -- ini murni membuang padding, bukan menukar akurasi dengan
+    # kecepatan.
+    #
+    # Terukur di NUC ini (ball_yolov8n, OpenVINO CPU, taskset 0-2):
+    #   640x640 ... 42 ms  -> 24 FPS
+    #   320x320 ... 12 ms  -> 85 FPS  (3,57x; TAPI bola ikut mengecil 2x)
+    #   384x640 ... lihat baris "Model ceiling" di log saat node start
+    #
+    # [0, 0] mematikannya dan kembali ke imgsz persegi di atas.
+    # [0, 0] WAJIB untuk bobot v8n: IR-nya dibakar dengan masukan statis
+    # 1x3x320x320 (persegi), jadi 384x640 akan ditolak. Dengan [0, 0], yang
+    # dipakai adalah imgsz persegi di atas.
+    imgsz_hw: [0, 0]
 
     # OpenVINO runs on the Intel CPU; keep device "cpu" and half false. (FP16 is
     # handled inside the OpenVINO IR, not via this flag.)
@@ -36,7 +135,18 @@
     # Model class names to treat as "the ball". ball_yolov8n exposes exactly one
     # class: "ball" (class 0).
     # If none of these match the model, every class is treated as a ball.
-    target_classes: ["ball"]
+    target_classes: ["Bola-baru"]
+
+    # Nama yang ditulis di gambar debug (image_out), bentuknya
+    # "nama_di_model=Nama Tampilan". KOSONG = pakai nama asli model.
+    #
+    # Sekarang kosong karena bobot v8n memang sudah menamai kelasnya
+    # "Bola-baru". Knob ini disimpan untuk kalau bobotnya diganti lagi ke
+    # ball_yolov8n (kelas "ball") tapi tulisannya ingin tetap sama:
+    #   display_class_names: ["ball=Bola baru"]
+    # Hanya mempengaruhi gambar debug; pemilihan kelas tetap lewat
+    # target_classes dengan nama asli model.
+    display_class_names: []
 
     # Inference loop rate (Hz). Always uses the freshest camera frame.
     #
@@ -50,14 +160,39 @@
     #
     # Sesudah akar itu dibereskan, 25 Hz dikembalikan.
     #
-    # Catatan jujur soal angkanya: model ini terukur ~43 ms/frame (OpenVINO
-    # CPU, imgsz 640), jadi langit-langitnya ~23 FPS. Menyetel 25 di sini tidak
-    # membuatnya 25 Hz -- ia berjalan di langit-langitnya. Node akan bilang
-    # sendiri saat start ("Model ceiling on this machine: NN.N FPS"). Kalau mau
-    # benar-benar 25 Hz, ekspor ulang di 320 px (~4x lebih cepat):
-    #   yolo export model=model/ball_yolov8n_best.pt format=openvino imgsz=320
-    # (lalu setel imgsz: 320 di atas -- input IR sekarang STATIS 640x640)
-    detection_rate: 25.0
+    # SENGAJA JAUH DI ATAS LAJU KAMERA (20 Hz). Ini BUKAN target FPS, dan
+    # menaikkannya tidak menambah beban -- baca dulu sebelum menurunkannya.
+    #
+    # Node ini memisahkan inferensi dari kedatangan frame: timer menyala pada
+    # laju ini, mengambil gambar TERBARU, lalu memprosesnya. Kalau lajunya
+    # terlalu dekat dengan laju kamera, keduanya BERADU-LAYANG. Executor rclpy
+    # itu satu utas, jadi urutan yang sering terjadi:
+    #   timer menyala -> _latest_image masih None -> keluar
+    #   5 ms kemudian frame tiba dan hanya duduk menunggu
+    #   tik timer berikutnya baru 40 ms lagi   <- frame terlambat penuh 40 ms
+    #
+    # TERUKUR di robot ini (kamera 20 FPS, model 384x640):
+    #   detection_rate 25 Hz -> 13,4 FPS rata-rata   (33% frame hangus)
+    #   detection_rate 60 Hz -> 19,4 FPS rata-rata   (mentok di kamera)
+    #
+    # Tik yang menyala saat belum ada frame baru harganya cuma satu lock plus
+    # satu tes None, jadi menaikkannya praktis gratis.
+    #
+    # Dinaikkan 60 -> 100 saat kamera naik ke 24 FPS. Aritmetikanya:
+    #   periode kamera 24 FPS = 41,7 ms ; inferensi ~30 ms
+    #   agar frame tidak terlewat: 30 + periode_timer < 41,7
+    #                           -> periode_timer < 11,7 ms  ->  laju > 85 Hz
+    # 60 Hz (16,7 ms) sudah TIDAK cukup untuk 24 FPS. 100 Hz memberi marjin.
+    #
+    # Patokannya: setel MINIMAL 3x laju kamera, dan periksa ulang aritmetika di
+    # atas setiap kali framerate di camera_param.yaml diubah.
+    #
+    # Riwayat, supaya tidak diputar balik lagi: sempat diturunkan ke 12 Hz
+    # (2026-08-24) karena beban YOLO terlihat meruntuhkan pembacaan servo dari
+    # 125 Hz jadi 0,2 Hz. Itu terukur, tapi DIAGNOSISNYA KELIRU -- akarnya
+    # penjadwalan USB (OpenCR full-speed berbagi hub dengan U2D2), sudah
+    # diperbaiki di robotis_controller.cpp commit 2b76d84.
+    detection_rate: 100.0
 
     # Publish an annotated debug image on image_out.
     publish_image: true

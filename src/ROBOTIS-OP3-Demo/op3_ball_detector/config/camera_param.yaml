@@ -1,7 +1,7 @@
 /**:
     ros__parameters:
       video_device: "/dev/video0"
-      framerate: 15.0
+      framerate: 24.0
       io_method: "mmap"
       frame_id: "cam_link"
       pixel_format: "mjpeg2rgb"  # see usb_cam/supported_formats for list of supported formats
@@ -20,6 +20,38 @@
       # Rasio 16:9 SENGAJA dipertahankan supaya fov_width_deg/fov_height_deg
       # di head_tracking.yaml tetap sahih -- jangan pindah ke 640x480.
       # Modelnya sendiri mengecilkan gambar ke 640 px, jadi 720p memang mubazir.
+      #
+      # 2026-09-01: laju dinaikkan 15 -> 20 FPS. RESOLUSI TIDAK DIUBAH.
+      # Yang dulu memakan 73% CPU itu 720p-nya, BUKAN lajunya; pada 640x360
+      # satu frame jauh lebih murah, dan 20 fps diperkirakan ~17% satu inti.
+      # usb_cam sekarang juga terkurung ke inti 3,7 lewat aux_cpu_affinity di
+      # yolo_ball_detector_openvino.launch.py, jadi ongkosnya tidak lagi
+      # mengganggu detektor.
+      # Alasannya: sesudah model diekspor ulang ke 384x640, inferensi tinggal
+      # di bawah 40 ms sehingga KAMERA yang jadi pengikat -- 15 FPS akan
+      # membuang kelebihan tenaga yang baru saja didapat.
+      # Kalau umur gambar (header.stamp) naik lagi, turunkan balik ke 15.0.
+      #
+      # 2026-09-01 (kedua): 20 -> 24 FPS. ANGKA INI TERIKAT PERANGKAT KERAS.
+      # Kamera cuma menawarkan 30 / 24 / 20 / 15 / 10 / 7,5 / 5 di 640x360
+      # (`v4l2-ctl -d /dev/video0 --list-formats-ext`). 25 TIDAK ADA -- jangan
+      # "dirapikan" jadi 25, nanti diam-diam jatuh ke mode terdekat.
+      #
+      # Alasan naik: target operator adalah LANTAI 20 FPS. Kalau kamera disetel
+      # pas 20, hasil sempurnanya 20,0 dan sentakan sekecil apa pun menjatuhkan
+      # ke 19. Lantai 20 menuntut marjin di atasnya; 24 memberi itu.
+      #
+      # HARGANYA CAHAYA, dan ini bukan efek samping kecil. Laju frame membatasi
+      # waktu pajan: 24 FPS berarti pajan <= 41,7 ms, turun dari 66,6 ms
+      # sebelumnya = 1,6x lebih sedikit cahaya (-0,68 EV). `gain` sudah mentok
+      # 255 jadi TIDAK BISA ditebus sensor. Kalau confidence deteksi ikut
+      # jatuh mendekati confidence_threshold, kembalikan ke 20.0 (pajan 50 ms)
+      # atau tambah penerangan lapangan.
+      #
+      # Pembatasan pajan itu sendiri dilakukan di
+      # launch/yolo_ball_detector_openvino.launch.py lewat
+      # `v4l2-ctl -c exposure_dynamic_framerate=0`. Tanpa itu, angka di sini
+      # cuma PERMINTAAN: kamera tetap boleh memperlambat diri jadi 15 FPS.
       image_width: 640
       image_height: 360
       camera_name: "camera"

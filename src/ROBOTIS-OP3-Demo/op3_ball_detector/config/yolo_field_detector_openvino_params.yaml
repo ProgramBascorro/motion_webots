@@ -1,0 +1,51 @@
+# Parameters for the YOLO FIELD (lapangan) detector running an OpenVINO model.
+# Runs yolo_field_detector.py — a MULTI-CLASS detector that publishes every
+# detection WITH its class label/score as vision_msgs/Detection2DArray on
+# `detections` (it does NOT feed the ball pipeline).
+# Applied via the "/**" wildcard so they reach the node regardless of the
+# namespace/name it is launched under.
+/**:
+  ros__parameters:
+    # OpenVINO model is a DIRECTORY (.xml + .bin + metadata.yaml), not a single
+    # file. Relative to the package share dir or an absolute path. Export with:
+    #   yolo export model=model/v8n_lapangan_best.pt format=openvino imgsz=320
+    model_path: "model/v8n_lapangan_best_openvino_model"
+
+    # OpenVINO carries no task ultralytics auto-detects reliably; set it.
+    model_task: "detect"
+
+    # Subscribe to a CompressedImage (true) or a raw Image (false) on image_in.
+    use_compressed: true
+
+    # Detection thresholds / inference settings.
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+
+    # MUST match the imgsz the model was exported with (320 here). Re-export to
+    # change it (see model_path comment).
+    imgsz: 320
+
+    # OpenVINO runs on the Intel CPU; keep device "cpu" and half false. (FP16 is
+    # handled inside the OpenVINO IR, not via this flag.)
+    device: "cpu"
+    half: false
+
+    # Field models can have many boxes on screen (lines, corners, spots...).
+    max_detections: 30
+
+    # Which model class names to KEEP. Leave EMPTY ([]) to keep every class the
+    # model exposes — the usual choice for a field detector. To filter, list the
+    # exact class names (check the node log "Model classes: {...}" or the model's
+    # metadata.yaml). Example: ["Garis", "Gawang", "Titik-penalti"].
+    target_classes: []
+
+    # Inference loop rate (Hz). Field detection usually needs less frequency than
+    # the ball head-tracker; 15 Hz keeps CPU budget for walking + the ball node.
+    detection_rate: 15.0
+
+    # Publish an annotated debug image on image_out.
+    publish_image: true
+    detection_frame_id: "detector"
+
+    # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
+    enable_at_start: true
