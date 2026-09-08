@@ -611,14 +611,7 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
       walking_bias_ = goal_position_;
       double neutral_leg[12];
       // false: keep init_y_offset out of the bias so it does not cancel itself out.
-      //
-      // bias_reference_param_ (isi param.yaml), BUKAN walking_param_ yang hidup.
-      // Kalau memakai yang hidup, offset preset yang baru saja di-Apply dikurangkan
-      // terhadap dirinya sendiri: hasilnya nol, robot berdiri persis di page 2, dan
-      // init_x/init_pitch operator tidak pernah terasa. Terukur 2026-09-09: Apply
-      // SEBELUM enable menggeser stance 0,2-0,5 deg (nol), Apply SESUDAH enable
-      // menggeser 64,8 deg -- nilai yang sama, dua hasil berbeda.
-      walking_bias_valid_ = computeNeutralLegAngle(neutral_leg, false, bias_reference_param_);
+      walking_bias_valid_ = computeNeutralLegAngle(neutral_leg, false);
       if (walking_bias_valid_ == true)
       {
         for (int i = 0; i < 12; i++)
@@ -656,7 +649,7 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     double idle_leg[12];
     bool idle_tracks_offsets = false;
     if (walking_idle == true && walking_bias_valid_ == true)
-      idle_tracks_offsets = computeNeutralLegAngle(idle_leg, true, walking_param_);
+      idle_tracks_offsets = computeNeutralLegAngle(idle_leg, true);
 
     // The gait pipeline only runs while a gait is actually running. It used to be
     // called every cycle, which cost a full leg IK plus a gyro feedback pass per 8 ms
@@ -1457,9 +1450,6 @@ void WalkingModule::loadWalkingParam(const std::string &path)
   } catch (const std::exception& e)
   {
     RCLCPP_ERROR(this->get_logger(), "Fail to load yaml file.");
-    // Acuan bias tetap harus terisi: nilai bawaan initialize() dipakai apa adanya,
-    // supaya walking_bias_ tidak pernah dihitung terhadap struct kosong.
-    bias_reference_param_ = walking_param_;
     return;
   }
 
@@ -1510,15 +1500,6 @@ void WalkingModule::loadWalkingParam(const std::string &path)
   walking_param_.p_gain = doc["p_gain"].as<int>();
   walking_param_.i_gain = doc["i_gain"].as<int>();
   walking_param_.d_gain = doc["d_gain"].as<int>();
-
-  // Acuan tetap untuk walking_bias_, dikunci di sini SEKALI saja. Yang dipakai
-  // hanya offset init_* dan hip_pitch_offset; sisanya ikut supaya strukturnya
-  // utuh dan mudah dicetak saat menelusuri.
-  //
-  // Sengaja TIDAK ikut diperbarui oleh Apply maupun perintah "save": acuan yang
-  // ikut bergeser persis itulah yang membuat nilai sama memberi hasil berbeda.
-  // Sesudah param.yaml diubah, jalankan ulang op3_manager.
-  bias_reference_param_ = walking_param_;
 }
 
 void WalkingModule::saveWalkingParam(std::string &path)
@@ -1575,25 +1556,12 @@ void WalkingModule::onModuleDisable()
   walking_bias_valid_ = false;
 }
 
-bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset,
-                                           const op3_walking_module_msgs::msg::WalkingParam &src)
+bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset)
 {
   // IK of the standing pose with zero swap/move amplitudes — used to derive
   // walking_bias_ so the gait oscillates around the captured WALKING_READY instead
   // of init_position_ zeros.
-  //
-  // Offset dibaca LOKAL dari src, bukan lewat updatePoseParam(). Dua alasan:
-  // pemanggilnya memang memakai set parameter yang berbeda (penangkapan bias
-  // memakai acuan param.yaml, penjejakan diam memakai parameter hidup), dan
-  // fungsi ini jadi tidak lagi punya efek samping ke x_offset_ dkk yang dipakai
-  // computeLegAngle().
-  const double x_off = src.init_x_offset;
-  const double y_off = src.init_y_offset;
-  const double z_off = src.init_z_offset;
-  const double r_off = src.init_roll_offset;
-  const double p_off = src.init_pitch_offset;
-  const double a_off = src.init_yaw_offset;
-  const double hip_pitch_off = src.hip_pitch_offset;
+  updatePoseParam();
 
   double leg_length = op3_kd_->thigh_length_m_ + op3_kd_->calf_length_m_ + op3_kd_->ankle_length_m_;
   // The lateral offset is the one offset that is treated differently by the two
@@ -1615,22 +1583,22 @@ bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset,
   //
   // The other offsets stay in for both callers: they only set the operating point the
   // gait oscillation is linearised around.
-  const double y_ep = (with_y_offset == true) ? y_off / 2 : 0.0;
+  const double y_ep = (with_y_offset == true) ? y_offset_ / 2 : 0.0;
   double ep[12];
   // right leg
-  ep[0] = x_off;
+  ep[0] = x_offset_;
   ep[1] = -y_ep;
-  ep[2] = z_off - leg_length;
-  ep[3] = -r_off / 2;
-  ep[4] = p_off;
-  ep[5] = -a_off / 2;
+  ep[2] = z_offset_ - leg_length;
+  ep[3] = -r_offset_ / 2;
+  ep[4] = p_offset_;
+  ep[5] = -a_offset_ / 2;
   // left leg
-  ep[6] = x_off;
+  ep[6] = x_offset_;
   ep[7] = y_ep;
-  ep[8] = z_off - leg_length;
-  ep[9] = r_off / 2;
-  ep[10] = p_off;
-  ep[11] = a_off / 2;
+  ep[8] = z_offset_ - leg_length;
+  ep[9] = r_offset_ / 2;
+  ep[10] = p_offset_;
+  ep[11] = a_offset_ / 2;
 
   if (op3_kd_->calcInverseKinematicsForRightLeg(&neutral[0], ep[0], ep[1], ep[2], ep[3], ep[4], ep[5]) == false)
     return false;
@@ -1638,8 +1606,8 @@ bool WalkingModule::computeNeutralLegAngle(double *neutral, bool with_y_offset,
     return false;
 
   // Match the hip_pitch offset that computeLegAngle applies on top of the IK result.
-  neutral[joint_table_["r_hip_pitch"]] -= op3_kd_->getJointDirection("r_hip_pitch") * hip_pitch_off;
-  neutral[joint_table_["l_hip_pitch"]] -= op3_kd_->getJointDirection("l_hip_pitch") * hip_pitch_off;
+  neutral[joint_table_["r_hip_pitch"]] -= op3_kd_->getJointDirection("r_hip_pitch") * hit_pitch_offset_;
+  neutral[joint_table_["l_hip_pitch"]] -= op3_kd_->getJointDirection("l_hip_pitch") * hit_pitch_offset_;
 
   for (int i = 0; i < 12; i++)
   {
