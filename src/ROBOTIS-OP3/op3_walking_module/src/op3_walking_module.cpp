@@ -656,14 +656,10 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     // for a result the idle branch below throws away, let computeLegAngle() log
     // "non-finite IK" while the robot was merely standing, and kept processPhase()
     // re-entering its phase branches (each one calls updateTimeParam()) forever at
-    // whatever phase the last stop froze time_ at.
-    //
-    // Catatan lama di sini menyebut processPhase() ikut menolkan
-    // x/y/angle_move_amplitude di dalam walking_param_ saat ctrl_running_ false.
-    // Itu SUDAH TIDAK BERLAKU: sejak 2026-09-08 penghentian dikerjakan sasaran
-    // ramp di bawah, dan walking_param_ tidak pernah lagi ditimpa. Menjauhkan
-    // processPhase() dari jalur diam tetap berguna untuk alasan aslinya, yaitu
-    // ongkos IK dan phase branch yang berputar percuma saat robot cuma berdiri.
+    // whatever phase the last stop froze time_ at. Note processPhase() also writes
+    // back into walking_param_ (it zeroes x/y/angle_move_amplitude when ctrl_running_
+    // is false), so keeping it out of the idle path also keeps the amplitudes sent by
+    // Bascorro Studio's Apply exactly as they were sent.
     if (walking_idle == false)
     {
       processPhase(time_unit);
@@ -788,30 +784,11 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     // Soft start maju per siklus kontrol, bukan per batas fase, supaya lamanya
     // tetap soft_start_time berapa pun period_time-nya. Nilainya baru dipakai
     // saat updateMovementParam()/updateTimeParam() dipanggil di batas fase.
-    //
-    // BERHENTI = sasaran ramp jadi NOL, bukan setelannya yang dinolkan.
-    //
-    // Versi ROBOTIS asli menghentikan gait dengan menimpa walking_param_ jadi
-    // nol di batas fase (lihat processPhase()). Itu berhasil menghentikan
-    // robot, tapi ikut MEMBUANG setelan operator: nilai yang sama juga yang
-    // dikembalikan /robotis/walking/get_params, jadi sesudah Apply lalu Start
-    // lalu Stop, Bascorro Studio membaca 0 dan setelannya terlihat hilang
-    // sendiri. Paling kentara pada gerakan MENCARI CELAH, karena di sana
-    // angle_move_amplitude (-0,2) adalah SATU SATUNYA gerakan yang dipunyai
-    // preset itu: sesudah Stop, presetnya jadi sama dengan berdiri diam.
-    //
-    // z SENGAJA tidak ikut dinolkan: tinggi angkat kaki bukan arah gerak, dan
-    // versi lama pun tidak pernah menyentuhnya.
-    const double move_target_x = (ctrl_running_ == true) ? walking_param_.x_move_amplitude : 0.0;
-    const double move_target_y = (ctrl_running_ == true) ? walking_param_.y_move_amplitude : 0.0;
-    const double move_target_a = (ctrl_running_ == true) ? walking_param_.angle_move_amplitude : 0.0;
-    const double move_target_ai = (ctrl_running_ == true) ? walking_param_.angle_move_amplitude_turn_in : 0.0;
-
-    x_move_ramped_ = rampToward(x_move_ramped_, move_target_x, time_unit);
-    y_move_ramped_ = rampToward(y_move_ramped_, move_target_y, time_unit);
+    x_move_ramped_ = rampToward(x_move_ramped_, walking_param_.x_move_amplitude, time_unit);
+    y_move_ramped_ = rampToward(y_move_ramped_, walking_param_.y_move_amplitude, time_unit);
     z_move_ramped_ = rampToward(z_move_ramped_, walking_param_.z_move_amplitude, time_unit);
-    a_move_ramped_ = rampToward(a_move_ramped_, move_target_a, time_unit);
-    ai_move_ramped_ = rampToward(ai_move_ramped_, move_target_ai, time_unit);
+    a_move_ramped_ = rampToward(a_move_ramped_, walking_param_.angle_move_amplitude, time_unit);
+    ai_move_ramped_ = rampToward(ai_move_ramped_, walking_param_.angle_move_amplitude_turn_in, time_unit);
 
     if (move_ramp_ < 1.0)
     {
@@ -969,13 +946,12 @@ void WalkingModule::processPhase(const double &time_unit)
       }
       else
       {
-        // walking_param_ SENGAJA TIDAK disentuh di sini. Penghentiannya
-        // dikerjakan sasaran ramp di process(); menolkan nilai tersimpan hanya
-        // membuang setelan operator. Lihat catatan panjang di sana.
-        //
-        // Yang tetap dinolkan cuma pembukuan langkah: gait berikutnya berangkat
-        // dari diam lagi, jadi potongan setengah langkah pertama di
-        // updateMovementParam() harus dipasang ulang.
+        // set walking param to init
+        walking_param_.x_move_amplitude = 0;
+        walking_param_.y_move_amplitude = 0;
+        walking_param_.angle_move_amplitude = 0;
+        walking_param_.angle_move_amplitude_turn_in = 0;
+
         previous_x_move_amplitude_ = 0;
       }
     }
@@ -1001,10 +977,14 @@ void WalkingModule::processPhase(const double &time_unit)
       {
         real_running_ = false;
       }
-      // Tidak ada lagi cabang "else" yang menimpa walking_param_. Versi lama
-      // menulis ulang x dengan previous_x_move_amplitude_, dan karena PHASE0 di
-      // atas sudah menolkan penghitung itu, nilainya juga selalu 0 -- jadi
-      // tidak ada perilaku yang hilang, cuma setelan operator yang selamat.
+      else
+      {
+        // set walking param to init
+        walking_param_.x_move_amplitude = previous_x_move_amplitude_;
+        walking_param_.y_move_amplitude = 0;
+        walking_param_.angle_move_amplitude = 0;
+        walking_param_.angle_move_amplitude_turn_in = 0;
+      }
     }
   }
   else if (time_ >= (phase3_time_ - time_unit / 2) && time_ < (phase3_time_ + time_unit / 2))  // the position of right foot is the highest.
