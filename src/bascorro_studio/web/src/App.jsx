@@ -105,13 +105,24 @@ const WALKING_LEG_JOINTS = [
 const SYNC_ITEM_GAP_MS = 60;
 // Batas kecepatan servo yang dipasang sebelum torsi dinyalakan.
 //
-// APA YANG SEBENARNYA DIBATASI: profile_velocity/profile_acceleration hanya
-// mengekang gerakan yang dihasilkan SERVO SENDIRI, yaitu sentakan saat torsi
-// menyala sementara posisi sekarang jauh dari goal yang tersimpan. Kecepatan
-// Init Pose dan gait TIDAK ikut terkekang -- action_module dan walking_module
-// menghitung lintasannya sendiri lalu menulis goal baru tiap 8 ms dengan
-// langkah yang sudah kecil-kecil, jadi profil servo hampir tidak berperan di
-// situ. Lamanya Init Pose ditentukan halaman di ALPHONSE.bin, bukan di sini.
+// APA YANG DIBATASI -- DIUKUR ULANG 2026-09-09, KOREKSI DARI CATATAN LAMA.
+// Catatan sebelumnya di sini menyatakan "Init Pose dan gait TIDAK ikut
+// terkekang" karena modulnya menulis goal kecil-kecil tiap 8 ms. ITU SALAH.
+// profile_velocity adalah pembangkit lintasan DI DALAM servo dan berlaku untuk
+// SETIAP penulisan goal_position, termasuk yang 8 ms itu. Terukur di robot,
+// preset JALAN MENUJU MEKKAH, parameter operator tanpa diubah sedikit pun:
+//
+//   batas masih terpasang : perintah ayun pinggul 23,21 deg -> nyata  5,0 deg (22%)
+//                           lutut          36,30 deg -> nyata  4,0 deg (11%)
+//                           telat ~350 ms = hampir setengah periode gait
+//   profile_velocity = 0  : pinggul 23,21 -> 17,50 deg (75%), lutut 36,30 -> 21,88 (60%)
+//
+// Jadi batas yang tertinggal membuat robot berjalan pelan dengan langkah kecil
+// PADAHAL parameternya sama persis -- persis keluhan "nilainya jadi kecil
+// sendiri". Berdiri diam tidak terpengaruh (galat cuma 0,2-0,4 deg), jadi
+// gejalanya cuma muncul saat berjalan.
+//
+// Lamanya Init Pose sendiri tetap ditentukan halaman di ALPHONSE.bin.
 //
 // Satuan XM430-W350: profile_velocity 0,229 rpm per hitungan, jadi 8 kira-kira
 // 11 deg/detik di keluaran. 0 berarti TANPA BATAS.
@@ -1942,12 +1953,19 @@ export default function App() {
     return true;
   };
 
+  // onDone SELALU dipanggil, juga saat urutannya dibatalkan atau ROS putus --
+  // argumennya menyatakan apakah semua item sempat terkirim. Kalau pemanggil
+  // menunggunya sebagai Promise (restoreFullSpeed), keluar diam-diam di sini
+  // berarti Promise itu tidak pernah selesai dan Apply & Start menggantung.
   const writeSyncItemsSequential = (items, onDone) => {
     const sequence = motionSequenceRef.current;
     let idx = 0;
     const next = () => {
-      if (sequence !== motionSequenceRef.current || !rosRef.current?.isConnected) return;
-      if (idx >= items.length) { onDone?.(); return; }
+      if (sequence !== motionSequenceRef.current || !rosRef.current?.isConnected) {
+        onDone?.(false);
+        return;
+      }
+      if (idx >= items.length) { onDone?.(true); return; }
       const [name, val] = items[idx++];
       writeSyncItem(name, val);
       window.setTimeout(next, SYNC_ITEM_GAP_MS);
@@ -1956,18 +1974,32 @@ export default function App() {
   };
 
   // 0 = tanpa batas di tabel kontrol Dynamixel.
+  //
+  // Mengembalikan Promise: writeSyncItemsSequential menyela tiap item dengan
+  // setTimeout, jadi tanpa menunggu, "start" bisa terkirim sebelum tulisannya
+  // mendarat dan langkah pertama tetap terkekang.
   const restoreFullSpeed = (note) => {
-    writeSyncItemsSequential([
-      ["profile_velocity", 0],
-      ["profile_acceleration", 0],
-    ]);
+    const selesai = new Promise((resolve) => {
+      writeSyncItemsSequential([
+        ["profile_velocity", 0],
+        ["profile_acceleration", 0],
+      ], resolve);
+    });
     setTorqueLimitActive(false);
     if (note) sendStatus(note);
+    return selesai;
   };
 
   const initThenEnableWalking = async (context) => {
     context.check();
-    if (torqueLimitActive) restoreFullSpeed();
+    // TANPA SYARAT. torqueLimitActive cuma state React: hilang begitu halaman
+    // dimuat ulang, sementara batasnya hidup di RAM servo sampai daya servo
+    // dimatikan. Jadi urutan "Torque ON -> reload Studio -> Apply & Start"
+    // dulu berjalan dengan batas yang masih terpasang dan tidak ada satu pun
+    // yang melepasnya. Menulis 0 saat tidak ada batas sama sekali tidak
+    // berbahaya (0 = nilai pabrik), sedangkan melewatkannya melumpuhkan gait.
+    await restoreFullSpeed();
+    context.check();
     if (!await walkingOwnsLegs(context)) {
       context.check();
       walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
@@ -2324,8 +2356,9 @@ export default function App() {
     // Memilih mode SUDAH memulai demonya (lihat DEMO_MODES), dan demo berjalan
     // dengan gait -- batas kecepatan servo yang masih terpasang akan
     // melumpuhkannya. Dilepas dulu, kecuali saat keluar ke posisi siap.
-    if (mode !== "ready" && torqueLimitActive) {
-      restoreFullSpeed("Batas kecepatan servo dilepas — demo butuh kecepatan penuh");
+    // Tanpa syarat, alasannya sama seperti di initThenEnableWalking.
+    if (mode !== "ready") {
+      restoreFullSpeed("Batas kecepatan servo dinolkan — demo butuh kecepatan penuh");
     }
     demoModePubRef.current.publish(new ROSLIB.Message({ data: mode }));
     pushDemoStatus(`mode ${mode}`, mode);

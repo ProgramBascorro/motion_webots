@@ -29,6 +29,8 @@
 #include "robotis_controller_msgs/msg/sync_write_item.hpp"
 
 #include <execinfo.h>
+#include <string>
+#include <vector>
 #include <fcntl.h>
 #include <csignal>
 #include <unistd.h>
@@ -46,6 +48,7 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
 void goInitPose();
 void playSound(const std::string &path);
 void setLED(int led);
+void clearServoSpeedLimit();
 bool checkManagerRunning(std::string& manager_name);
 void dxlTorqueChecker();
 void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -249,6 +252,15 @@ int main(int argc, char **argv)
     {
       if (current_demo)
         current_demo->setDemoDisable();
+
+      // Batas kecepatan servo yang tertinggal (Bascorro Studio atau
+      // op3_action_editor) melumpuhkan gait tanpa satu pun pesan galat --
+      // lihat catatan panjang di clearServoSpeedLimit(). Demo sering
+      // diluncurkan dari terminal tanpa membuka Studio sama sekali, jadi
+      // demo melepasnya sendiri. Ready dilewati: ia cuma memutar page 2,
+      // tidak ada gait di sana.
+      if (desired_status != Ready)
+        clearServoSpeedLimit();
 
       switch (desired_status)
       {
@@ -460,6 +472,51 @@ void setLED(int led)
   syncwrite_msg.joint_name.push_back("open-cr");
   syncwrite_msg.value.push_back(led);
   led_pub->publish(syncwrite_msg);
+}
+
+// Nolkan batas kecepatan servo sebelum demo bergerak.
+//
+// profile_velocity adalah pembangkit lintasan DI DALAM servo: ia mengekang
+// SETIAP penulisan goal_position, termasuk goal 8 ms milik walking_module.
+// Terukur di robot 2026-09-09 dengan batas yang tertinggal: ayunan pinggul
+// yang diperintahkan 23,21 deg hanya terlaksana 5,0 deg (22%), telat ~350 ms
+// -- robot berjalan pelan dengan langkah kecil padahal parameternya tidak
+// diubah sama sekali. Berdiri diam tidak terpengaruh, jadi gejalanya cuma
+// muncul saat berjalan.
+//
+// Batas itu bisa tertinggal dari DUA tempat, keduanya di luar demo:
+//   - tombol Torque ON di Bascorro Studio (sengaja menetap sampai dilepas),
+//   - op3_action_editor, yang menulis profile_velocity tiap "go to step" dan
+//     tidak pernah menolkannya lagi.
+// Nilainya hidup di RAM servo dan TIDAK hilang saat op3_manager dijalankan
+// ulang -- hanya daya servo yang menghapusnya. Karena demo bisa diluncurkan
+// dari terminal tanpa membuka Studio sama sekali, demo harus melepasnya
+// sendiri. Menulis 0 saat tidak ada batas sama sekali tidak berbahaya:
+// 0 = "tanpa batas" dan itu nilai pabrik.
+void clearServoSpeedLimit()
+{
+  static const std::vector<std::string> kJoints = {
+    "r_sho_pitch", "l_sho_pitch", "r_sho_roll", "l_sho_roll", "r_el", "l_el",
+    "r_hip_yaw", "l_hip_yaw", "r_hip_roll", "l_hip_roll",
+    "r_hip_pitch", "l_hip_pitch", "r_knee", "l_knee",
+    "r_ank_pitch", "l_ank_pitch", "r_ank_roll", "l_ank_roll",
+    "head_pan", "head_tilt",
+  };
+
+  // Dua item terpisah, diberi jarak: robotis_controller menggabungkan
+  // sync_write_item per port tiap siklus kontrol (~8 ms).
+  for (const char *item : {"profile_velocity", "profile_acceleration"})
+  {
+    robotis_controller_msgs::msg::SyncWriteItem syncwrite_msg;
+    syncwrite_msg.item_name = item;
+    for (const std::string &joint : kJoints)
+    {
+      syncwrite_msg.joint_name.push_back(joint);
+      syncwrite_msg.value.push_back(0);
+    }
+    led_pub->publish(syncwrite_msg);
+    rclcpp::sleep_for(std::chrono::milliseconds(60));
+  }
 }
 
 bool checkManagerRunning(std::string& manager_name)
