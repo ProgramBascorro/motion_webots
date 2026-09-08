@@ -268,6 +268,17 @@ health_check() {
     ensure_webots_bin
   fi
 
+  # Stack ini menyalakan op3_manager, dan manager kedua di bus yang sama tidak
+  # ditolak siapa pun: SDK membuka serial tanpa TIOCEXCL, jadi yang muncul bukan
+  # "port sedang dipakai" melainkan "first bulk read fail!!" -- menuduh servo,
+  # padahal cuma ada proses lama yang belum mati. Tolak di sini, sebut pelakunya.
+  local port_guard="$WS/scripts/op3_port_users.py"
+  if [[ -x "$port_guard" ]] && ! "$port_guard" --quiet; then
+    echo "${RED}ERROR:${RST} port robot masih dipegang proses lain (daftar di atas)." >&2
+    echo "${DIM}Matikan dulu:${RST} $port_guard --kill" >&2
+    exit 1
+  fi
+
   if ! $SHELL_RUNNER "source '$SETUP'; ros2 pkg prefix op3_joy_teleop >/dev/null 2>&1"; then
     echo "${RED}ERROR:${RST} Workspace is not built/installed (missing op3_joy_teleop)." >&2
     echo "${DIM}Try:${RST} colcon build --packages-select op3_joy_teleop" >&2

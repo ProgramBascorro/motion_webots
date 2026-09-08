@@ -35,6 +35,8 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --docker-run${RST}    Start container + open shell (op3_docker.sh)
   ${BOLD}./$(basename "$0") --docker-up${RST}     Start container    (op3_docker.sh up)
   ${BOLD}./$(basename "$0") --docker-down${RST}   Stop container     (op3_docker.sh down)
+  ${BOLD}./$(basename "$0") --match-mode on${RST}  Kurung desktop ke inti 3,7 (FPS deteksi naik)
+  ${BOLD}./$(basename "$0") --cpu-thieves${RST}   SELAMA demo: siapa yang mencuri CPU detektor
   ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
   ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
 
@@ -67,6 +69,16 @@ ${BOLD}Options${RST}
   --docker-run          Start container + open shell (op3_docker.sh)
   --docker-up           Start container    (op3_docker.sh up)
   --docker-down         Stop container     (op3_docker.sh down)
+  --free-port           Matikan proses yang masih memegang port serial
+                        (container dan sesi tmux dibiarkan jalan)
+  --cpu-thieves         Jalankan SELAMA demo, di terminal kedua: mencuplik 30
+                        detik lalu melaporkan proses mana yang duduk di inti
+                        sibling milik detektor (4,5,6) dan memperlambatnya.
+  --match-mode on|off|status
+                        Kurung sesi desktop (Firefox/VS Code/GNOME) ke inti
+                        fisik 3,7 supaya inti 0-2 bersih untuk detektor bola.
+                        Proses di inti 4,5,6 adalah HT-sibling milik YOLO dan
+                        memperlambatnya 2,1x. Hilang sendiri saat reboot.
   --usual, -u          Use saved selection from ~/.config/op3-stack/usual.txt
   --save-usual         Save selected components to ~/.config/op3-stack/usual.txt
   --dry-run            Print what would run (no changes)
@@ -138,6 +150,9 @@ op3_tmux_dispatch() {
   DO_DOCKER_RUN=0
   DO_DOCKER_UP=0
   DO_DOCKER_DOWN=0
+  DO_FREE_PORT=0
+  MATCH_MODE_ARG=""
+  DO_CPU_THIEVES=0
   DO_EXIT=0
   DO_STOP=0
   DO_USUAL=0
@@ -182,6 +197,9 @@ op3_tmux_dispatch() {
       --docker-run) DO_DOCKER_RUN=1; shift ;;
       --docker-up) DO_DOCKER_UP=1; shift ;;
       --docker-down) DO_DOCKER_DOWN=1; shift ;;
+      --free-port) DO_FREE_PORT=1; shift ;;
+      --match-mode) MATCH_MODE_ARG="${2:-status}"; shift 2 ;;
+      --cpu-thieves) DO_CPU_THIEVES=1; shift ;;
     --exit|-x) DO_EXIT=1; shift ;;
       --stop) DO_STOP=1; shift ;;
       --restart) RESTART_COMPONENT="$2"; shift 2 ;;
@@ -202,6 +220,9 @@ op3_tmux_dispatch() {
   if [[ "$DO_DOCKER_RUN" -eq 1 ]]; then action_docker_run; exit $?; fi
   if [[ "$DO_DOCKER_UP" -eq 1 ]]; then action_docker_up; exit $?; fi
   if [[ "$DO_DOCKER_DOWN" -eq 1 ]]; then action_docker_down; exit $?; fi
+  if [[ "$DO_FREE_PORT" -eq 1 ]]; then action_free_port; exit $?; fi
+  if [[ -n "$MATCH_MODE_ARG" ]]; then action_match_mode "$MATCH_MODE_ARG"; exit $?; fi
+  if [[ "$DO_CPU_THIEVES" -eq 1 ]]; then action_cpu_thieves; exit $?; fi
   if [[ "$DO_ATTACH" -eq 1 ]]; then action_attach; exit 0; fi
   if [[ "$DO_STOP" -eq 1 ]]; then action_stop; exit 0; fi
   if [[ -n "$RESTART_COMPONENT" ]]; then restart_component "$RESTART_COMPONENT"; exit 0; fi

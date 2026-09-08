@@ -206,6 +206,7 @@ Cek dulu model di robotmu dengan `op3_ping.py` sebelum menyalin apa pun.
 | `Error opening serial port` / `Error Set port` | Serial salah atau port dipakai proses lain |
 | Manager jalan, gait berputar, **robot diam**, `present_joint_states` beku | fd serial mati diam-diam — container tidak pakai `-v /dev:/dev` |
 | Editor/tuner nyangkut walau sudah Ctrl+C | Proses lama masih hidup memegang port: `pkill -x op3_action_edit` (nama dipotong 15 karakter!) |
+| `Failed to turn on the Power of DXLs!` / `first bulk read fail!!` padahal port ada | Proses lama masih memegang port — SDK buka serial tanpa `TIOCEXCL`, jadi dua pembaca berebut byte dan errornya menuduh perangkat. Cek: `scripts/op3_port_users.py`, matikan: `--kill`. Kalau alat itu bilang bebas dan errornya tetap, OpenCR-nya yang bisu → tekan tombol RESET di board |
 
 ---
 

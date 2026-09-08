@@ -350,6 +350,35 @@ resolve_selection() {
     selected=("${filtered[@]}")
   fi
 
+  # Studio membawa kameranya sendiri -- KECUALI kalau demo juga dipilih.
+  #
+  # Panel kamera di Bascorro Studio (halaman Vision dan halaman Tendangan)
+  # berlangganan gambar beranotasi detektor bola. Memilih Studio sendirian dulu
+  # selalu berakhir dengan panel hitam tanpa satu pun pesan galat, karena tidak
+  # ada satu pun komponen di peluncur ini yang menjalankan usb_cam.
+  #
+  # "YOLO Vision" sekarang menjalankan yolo_ball_detector_openvino.launch.py --
+  # BERKAS YANG SAMA PERSIS dengan yang di-include demo.launch.xml, lengkap
+  # dengan usb_cam-nya. Karena itulah pengecualian di bawah wajib ada: demo
+  # sudah membawa berkas itu sendiri, dan menjalankannya dua kali berarti dua
+  # usb_cam berebut /dev/video0 plus dua detektor berebut CPU.
+  #
+  # Ongkosnya nyata: detektornya memakai sekitar tiga inti. Matikan dengan
+  # OP3_STUDIO_IMPLIES_VISION=0 kalau Studio cuma dipakai untuk hal lain.
+  if [[ "${OP3_STUDIO_IMPLIES_VISION:-1}" == "1" ]]; then
+    local has_action_web=0 has_yolo_vision=0 has_demo_already=0
+    for item in "${selected[@]}"; do
+      case "$item" in
+        action_web) has_action_web=1 ;;
+        yolo_vision) has_yolo_vision=1 ;;
+        demo) has_demo_already=1 ;;
+      esac
+    done
+    if [[ "$has_action_web" -eq 1 && "$has_yolo_vision" -eq 0 && "$has_demo_already" -eq 0 ]]; then
+      selected+=(yolo_vision)
+    fi
+  fi
+
   validate_selection "${selected[@]}"
 
   # Always remember the last selection (used to preselect next time).

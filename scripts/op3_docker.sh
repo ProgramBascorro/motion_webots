@@ -28,6 +28,12 @@
 #   scripts/op3_docker.sh up       # nyalakan container (idempoten)
 #   scripts/op3_docker.sh shell    # buka shell baru di dalamnya (boleh berkali-kali)
 #   scripts/op3_docker.sh doctor   # periksa colokan + node + kecocokan OP3.robot
+#   scripts/op3_docker.sh match-mode on|off|status
+#                                  # kurung desktop ke inti 3,7 supaya YOLO dapat
+#                                  # inti 0-2 bersih (lihat MATCH_MODE_* di bawah)
+#   scripts/op3_docker.sh cpu-thieves
+#                                  # SELAMA demo jalan: siapa yang duduk di inti
+#                                  # sibling milik detektor dan memperlambatnya
 #   scripts/op3_docker.sh down     # matikan dan hapus container
 
 set -euo pipefail
@@ -70,6 +76,202 @@ robot_file_ports() {
   grep -o '/dev/serial/by-id/[^ |]*' "$ROBOT_FILE" | sort -u
 }
 
+# Latency timer FTDI. INI BUKAN detail sepele -- ini yang menentukan gerakan
+# robot mulus atau patah-patah.
+#
+# U2D2 memakai chip FTDI, dan driver ftdi_sio menahan byte yang masuk sampai
+# buffer penuh ATAU latency timer habis. Bawaan Linux: 16 ms. Sementara
+# OP3.robot menyetel control_cycle = 8 ms.
+#
+# Terukur di ALPHONSE (sync-read present_position 20 servo, 120 sampel):
+#     latency_timer 16 -> median 16,00 ms   (100% siklus MELEBIHI 8 ms)
+#     latency_timer  1 -> median  3,00 ms   (0% melebihi)
+#
+# Efeknya di robotis_controller: timerThread menambah 8 ms ke jadwal, memanggil
+# process(), lalu kalau ternyata sudah lewat ia MENYETEL ULANG jadwal ke
+# "sekarang + 3 ms" (robotis_controller.cpp:733-735). Jadi siklus kendali
+# menjadi tidak rata -- kadang 8 ms, kadang overrun lalu 3 ms. Trajektori kepala
+# dan kaki dihitung dengan asumsi langkah 8 ms yang TETAP, sehingga langkahnya
+# maju dengan laju jam dinding yang tidak rata. Itulah yang terlihat sebagai
+# gerakan patah-patah.
+#
+# Nilainya hilang tiap kali U2D2 dicabut/dicolok, jadi disetel ulang di sini
+# tiap `up` dan `doctor`. Untuk permanen, pasang aturan udev di host:
+#   echo 'ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"' \
+#     | sudo tee /etc/udev/rules.d/99-dynamixelsdk-usb.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger --action=add
+FTDI_LATENCY_TARGET=1
+
+# Tulis $2 ke berkas sysfs $1. Coba langsung dulu (kalau dijalankan sebagai
+# root), lalu lewat container yang privileged. Menggemakan "" kalau dua-duanya
+# gagal, supaya pemanggil bisa menyarankan sudo.
+write_sysfs() {
+  local path="$1" val="$2"
+  if [ -w "$path" ] && echo "$val" > "$path" 2>/dev/null; then
+    echo host; return 0
+  fi
+  if container_running && $DOCKER exec "$NAME" sh -c "echo $val > $path" 2>/dev/null; then
+    echo container; return 0
+  fi
+  echo ""
+}
+
+# Pastikan tiap port FTDI yang dipakai OP3.robot memakai latency timer 1 ms.
+# quiet=1 -> hanya lapor kalau ada yang perlu diperhatikan.
+ensure_ftdi_latency() {
+  local quiet="${1:-0}" tty path cur via any=0
+  for tty in $(ls /sys/bus/usb-serial/devices/ 2>/dev/null); do
+    path="/sys/bus/usb-serial/devices/$tty/latency_timer"
+    [ -r "$path" ] || continue
+    any=1
+    cur="$(cat "$path" 2>/dev/null || echo '?')"
+    if [ "$cur" = "$FTDI_LATENCY_TARGET" ]; then
+      [ "$quiet" = "1" ] || ok "$tty latency_timer = ${cur} ms"
+      continue
+    fi
+    via="$(write_sysfs "$path" "$FTDI_LATENCY_TARGET")"
+    if [ -n "$via" ]; then
+      ok "$tty latency_timer ${cur} -> ${FTDI_LATENCY_TARGET} ms (lewat $via)"
+    else
+      bad "$tty latency_timer = ${cur} ms, seharusnya ${FTDI_LATENCY_TARGET}."
+      bad "control_cycle 8 ms TIDAK mungkin dipenuhi -- gerakan akan patah-patah."
+      bad "perbaiki: echo 1 | sudo tee $path"
+    fi
+  done
+  [ "$any" = "1" ] || { [ "$quiet" = "1" ] || warn "tidak ada perangkat usb-serial FTDI terlihat"; }
+}
+
+# --- match mode: kurung desktop ke satu inti fisik ---------------------------
+#
+# i5-10210U ini 4 inti FISIK / 8 utas, pasangan Hyper-Threading 0<->4, 1<->5,
+# 2<->6, 3<->7. Dua utas dalam satu pasangan BERBAGI unit eksekusi, jadi proses
+# apa pun yang mendarat di 4/5/6 langsung memperlambat detektor bola yang
+# dipatok di 0-2. Terukur pada model ball_yolov8n @640:
+#
+#   inferensi, inti sibling sepi ....  40,3 ms
+#   inferensi, inti sibling sibuk ...  84,2 ms    <- 2,1x lebih lambat
+#
+# Pesaing terbesar BUKAN node ROS, melainkan desktop: saat diukur, Firefox
+# memakai 39% + 19% CPU dan VS Code sekitar 35%. `taskset` di berkas launch
+# hanya mengatur proses ROS; desktop tetap bebas berkeliaran ke mana saja.
+# Perintah ini mengurung SELURUH sesi pengguna (Firefox, VS Code, GNOME, Xorg)
+# ke inti fisik P3 lewat cgroup v2, menyisakan P0/P1/P2 utuh untuk YOLO.
+#
+# Sengaja perintah TERPISAH, bukan otomatis di `up`: kalau selalu menyala,
+# desktop terasa berat saat sedang ngoding. Nyalakan menjelang bertanding.
+#
+# `--runtime` berarti setelan ini HILANG SENDIRI saat reboot -- environment
+# permanen tidak diubah sama sekali.
+MATCH_MODE_SLICE="user.slice"
+MATCH_MODE_CPUS="3,7"      # inti untuk desktop; kebalikan dari cpu_affinity YOLO
+MATCH_MODE_ALL="0-7"
+
+match_mode_current() {
+  cat "/sys/fs/cgroup/${MATCH_MODE_SLICE}/cpuset.cpus.effective" 2>/dev/null || echo '?'
+}
+
+# Menerapkan AllowedCPUs. Butuh root: coba langsung, lalu lewat sudo non-interaktif.
+match_mode_set() {
+  local cpus="$1"
+  if systemctl set-property --runtime "$MATCH_MODE_SLICE" "AllowedCPUs=$cpus" 2>/dev/null; then
+    return 0
+  fi
+  if sudo -n systemctl set-property --runtime "$MATCH_MODE_SLICE" "AllowedCPUs=$cpus" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+cmd_match_mode() {
+  local action="${1:-status}"
+  case "$action" in
+    status)
+      local cur; cur="$(match_mode_current)"
+      if [ "$cur" = "$MATCH_MODE_CPUS" ]; then
+        ok "match mode NYALA - desktop terkurung di inti $cur, YOLO dapat 0-2 bersih"
+      else
+        warn "match mode MATI - desktop boleh memakai inti $cur"
+        warn "inti 4,5,6 adalah sibling HT milik YOLO. Nyalakan dengan salah satu:"
+        warn "  ./script.sh --match-mode on      (atau lewat menu: Match mode)"
+        warn "  scripts/op3_docker.sh match-mode on"
+      fi
+      ;;
+    on)
+      if match_mode_set "$MATCH_MODE_CPUS"; then
+        ok "desktop dikurung ke inti $MATCH_MODE_CPUS (sekarang: $(match_mode_current))"
+        echo "     inti 0-2 kini bersih untuk detektor bola; hilang sendiri saat reboot."
+      else
+        bad "gagal menerapkan (butuh root). Jalankan:"
+        bad "  sudo systemctl set-property --runtime $MATCH_MODE_SLICE AllowedCPUs=$MATCH_MODE_CPUS"
+      fi
+      ;;
+    off)
+      if match_mode_set "$MATCH_MODE_ALL"; then
+        ok "desktop dilepas kembali ke inti $(match_mode_current)"
+      else
+        bad "gagal menerapkan (butuh root). Jalankan:"
+        bad "  sudo systemctl set-property --runtime $MATCH_MODE_SLICE AllowedCPUs=$MATCH_MODE_ALL"
+      fi
+      ;;
+    *)
+      echo "Pemakaian: $0 match-mode {on|off|status}" >&2
+      return 1
+      ;;
+  esac
+}
+
+# --- laporan kamera: pajan membatasi FPS ------------------------------------
+#
+# Gejala "FPS turun" nyaris selalu ditebak sebagai masalah CPU. Sering BUKAN.
+# Kamera UVC boleh MEMPERLAMBAT DIRI supaya sensornya sempat memajan lebih lama
+# di tempat gelap, dan tidak ada optimasi komputasi yang bisa menambah frame
+# yang memang tidak pernah dikirim:
+#
+#     FPS maksimum = 1 / waktu_pajan
+#
+# Terukur di robot ini saat FPS turun ke 14-15: pajan 66,6 ms -> tepat 15,0 FPS.
+#
+# Bagian ini HANYA MELAPOR, tidak menyetel. Penyetelnya satu dan ada di
+# launch/yolo_ball_detector_openvino.launch.py (v4l2-ctl
+# exposure_dynamic_framerate=0), supaya tidak ada dua tempat yang bisa berbeda
+# pendapat soal keadaan kamera.
+report_camera_exposure() {
+  local dev="${1:-/dev/video0}"
+  if [ ! -e "$dev" ]; then
+    warn "$dev tidak ada -- kamera tidak terpasang?"
+    return 0
+  fi
+  if ! command -v v4l2-ctl >/dev/null 2>&1; then
+    warn "v4l2-ctl tidak ada di host; lewati pemeriksaan pajan kamera"
+    return 0
+  fi
+  local dyn exp gain
+  dyn="$(v4l2-ctl -d "$dev" -C exposure_dynamic_framerate 2>/dev/null | awk '{print $2}')"
+  exp="$(v4l2-ctl -d "$dev" -C exposure_time_absolute 2>/dev/null | awk '{print $2}')"
+  gain="$(v4l2-ctl -d "$dev" -C gain 2>/dev/null | awk '{print $2}')"
+
+  if [ -n "$exp" ] && [ "$exp" -gt 0 ] 2>/dev/null; then
+    # exposure_time_absolute satuannya 100 us.
+    local cap
+    cap="$(awk -v e="$exp" 'BEGIN{printf "%.1f", 10000.0/e}')"
+    echo "     pajan ${exp} (=$(awk -v e="$exp" 'BEGIN{printf "%.1f", e/10.0}') ms) -> batas FPS ${cap}"
+  fi
+
+  case "$dyn" in
+    0) ok "exposure_dynamic_framerate = 0 (kamera tidak boleh memperlambat diri)" ;;
+    1) bad "exposure_dynamic_framerate = 1 -- kamera BOLEH menurunkan laju di tempat gelap."
+       bad "itu membatasi FPS di sumbernya, bukan di CPU. Jalankan detektor lewat"
+       bad "launch-nya (yang menyetel ini ke 0), atau manual:"
+       bad "  v4l2-ctl -d $dev -c exposure_dynamic_framerate=0" ;;
+    *) warn "exposure_dynamic_framerate tidak terbaca (kamera mungkin tidak punya kontrol ini)" ;;
+  esac
+
+  if [ "$gain" = "255" ]; then
+    warn "gain = 255 (MENTOK) -- sensor tak punya cadangan cahaya lagi;"
+    warn "memperpendek pajan pasti menggelapkan gambar. Tambah penerangan lapangan."
+  fi
+}
+
 cmd_doctor() {
   echo "${BOLD}1. Perangkat di host${RST}"
   local ftdi
@@ -84,6 +286,15 @@ cmd_doctor() {
   else
     warn "OpenCR tidak terlihat di by-id"
   fi
+  # Lihat komentar di atas ensure_ftdi_latency(): 16 ms bawaan vs control_cycle
+  # 8 ms adalah selisih yang membuat gerakan patah-patah.
+  ensure_ftdi_latency
+  # Desktop yang berkeliaran ke inti 4,5,6 memperlambat YOLO 2,1x (lihat komentar
+  # di atas cmd_match_mode). Cuma dilaporkan di sini, tidak dipaksa.
+  cmd_match_mode status
+  # Pajan kamera membatasi FPS di SUMBERNYA -- lihat komentar di atas
+  # report_camera_exposure. Cuma dilaporkan, tidak dipaksa.
+  report_camera_exposure /dev/video0
 
   echo
   echo "${BOLD}2. Kestabilan colokan (kernel, 30 menit terakhir)${RST}"
@@ -144,6 +355,23 @@ except OSError as exc:
       bad "$(basename "$port") tidak terlihat di dalam container"
     fi
   done < <(robot_file_ports)
+
+  # "Bisa dibuka" BUKAN berarti bebas: SDK membuka serial tanpa TIOCEXCL, jadi
+  # proses kedua tetap sukses open() lalu berebut byte dengan proses lama --
+  # errornya kemudian menuduh perangkat ("Failed to turn on the Power of DXLs!",
+  # "first bulk read fail!!") padahal perangkatnya sehat. Pemegangnya juga sulit
+  # diburu sendiri: comm dipotong 15 karakter jadi 'op3_action_edit', sehingga
+  # 'pgrep -x op3_action_editor' selalu kosong.
+  local guard=/ros2_ws/scripts/op3_port_users.py holders_out
+  if ! $DOCKER exec "$NAME" test -f "$guard" 2>/dev/null; then
+    warn "op3_port_users.py tidak ada di container -- lewati cek pemegang port"
+  elif holders_out="$($DOCKER exec "$NAME" python3 "$guard" --brief 2>/dev/null)"; then
+    ok "tidak ada proses lain yang memegang port robot"
+  else
+    bad "port robot sedang dipegang proses lain:"
+    printf '%s\n' "$holders_out" | sed 's/^/  /'
+    bad "  matikan: scripts/op3_docker.sh shell -> scripts/op3_port_users.py --kill"
+  fi
 
   echo
   echo "${BOLD}5. Workspace di dalam container${RST}"
@@ -269,6 +497,7 @@ EOF
 cmd_up() {
   if container_running; then
     harden_container_shell
+    ensure_ftdi_latency 1
     echo "Container '$NAME' sudah jalan."
     echo "Buka shell: scripts/op3_docker.sh shell"
     return 0
@@ -354,6 +583,46 @@ cmd_shell() {
   exec $DOCKER exec -it "$NAME" /docker-entrypoint.sh bash
 }
 
+# Bebaskan port serial: matikan proses apa pun yang masih memegangnya.
+#
+# Kenapa harus lewat container dan bukan langsung dari host: stack ini hidup DI
+# DALAM container, dan /proc/<pid>/fd milik proses root di sana tidak terbaca
+# dari host, jadi jawaban "bersih" versi host menyesatkan. Membuka perangkatnya
+# juga bukan bukti apa-apa: SDK membuka serial tanpa TIOCEXCL, sehingga dua
+# proses memang boleh memegangnya bersamaan -- justru itu masalahnya.
+#
+# Pemindainya satu: scripts/op3_port_users.py, yang juga dipakai bagian 4 doctor,
+# executor.py, dan health_check launcher tmux.
+cmd_free_port() {
+  container_running || {
+    echo "Container '$NAME' tidak jalan -- tidak ada proses yang perlu dibereskan."
+    return 0
+  }
+  $DOCKER exec "$NAME" test -f /ros2_ws/scripts/op3_port_users.py 2>/dev/null || {
+    echo "scripts/op3_port_users.py tidak ada di dalam container." >&2
+    return 1
+  }
+  $DOCKER exec "$NAME" python3 /ros2_ws/scripts/op3_port_users.py --kill
+}
+
+# Siapa yang mencuri CPU dari detektor bola selama demo berjalan.
+#
+# Sengaja dijalankan di HOST, bukan di dalam container: /proc dibagi, jadi dari
+# host semua proses container tetap terlihat SEKALIGUS proses desktop -- dan
+# desktop justru sering jadi pencuri terbesar. Dijalankan dari dalam container,
+# desktop tidak akan terlihat sama sekali.
+#
+# Pemindainya satu: scripts/op3_cpu_thieves.py. Jangan bikin versi tandingan.
+cmd_cpu_thieves() {
+  local scanner="$WS/scripts/op3_cpu_thieves.py"
+  [ -f "$scanner" ] || { bad "Tidak ditemukan: $scanner"; return 1; }
+  if [ -e /.dockerenv ]; then
+    warn "Dijalankan DI DALAM container: proses desktop host tidak akan terlihat."
+    warn "Untuk gambaran penuh, jalankan dari host: ./script.sh --cpu-thieves"
+  fi
+  python3 "$scanner" "$@"
+}
+
 cmd_down() {
   container_exists || { echo "Container '$NAME' tidak ada."; return 0; }
   $DOCKER rm -f "$NAME" >/dev/null
@@ -361,12 +630,15 @@ cmd_down() {
 }
 
 case "${1:-up}" in
-  up)     cmd_up ;;
-  shell)  cmd_shell ;;
-  doctor) cmd_doctor ;;
-  down)   cmd_down ;;
+  up)        cmd_up ;;
+  shell)     cmd_shell ;;
+  doctor)    cmd_doctor ;;
+  free-port) cmd_free_port ;;
+  match-mode) shift; cmd_match_mode "${1:-status}" ;;
+  cpu-thieves) shift; cmd_cpu_thieves "$@" ;;
+  down)      cmd_down ;;
   *)
-    echo "Pemakaian: $0 {up|shell|doctor|down}" >&2
+    echo "Pemakaian: $0 {up|shell|doctor|free-port|match-mode|cpu-thieves|down}" >&2
     exit 1
     ;;
 esac

@@ -31,7 +31,7 @@ TOOLS_CMD="${OP3_TOOLS_CMD:-echo '[tools] /joy hz'; (ros2 topic hz /joy &) ; ech
 RQT_CMD="${OP3_RQT_CMD:-ros2 run rqt_image_view rqt_image_view}"
 
 # Vision/localization stack
-YOLO_VISION_CMD="${OP3_YOLO_VISION_CMD:-ros2 launch op3_yolo_vision yolo.launch.py}"
+YOLO_VISION_CMD="${OP3_YOLO_VISION_CMD:-ros2 launch op3_ball_detector yolo_ball_detector_openvino.launch.py}"
 LOCALIZATION_CMD="${OP3_LOCALIZATION_CMD:-ros2 launch soccer_localization localization.launch.py use_rviz:=false}"
 BALL_HEAD_TRACKING_CMD="${OP3_BALL_HEAD_TRACKING_CMD:-ros2 launch op3_ball_localization yolo_scan_only.launch.py}"
 BALL_LOCALIZER_CMD="${OP3_BALL_LOCALIZER_CMD:-ros2 launch op3_ball_localization ball_localizer.launch.py}"

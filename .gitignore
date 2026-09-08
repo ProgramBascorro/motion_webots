@@ -196,3 +196,23 @@ coverage/
 
 # Editor/tool leftovers
 .codex
+
+# =========================================
+# Bobot model YOLO, lingkungan Python, cadangan (ditambahkan 2026-09-08)
+# =========================================
+# op3_ball_detector/model/ isinya 242 MB .pt/.onnx/IR OpenVINO + frame kalibrasi.
+# Bobot dilatih di luar repo dan disalin ke robot; git bukan tempatnya.
+src/ROBOTIS-OP3-Demo/op3_ball_detector/model/
+
+# Virtualenv yang kebetulan dibuat di dalam workspace.
+.venv/
+src/.venv/
+
+# Cadangan bertanggal yang dibuat tangan saat menyetel (OP3.robot, .device,
+# studio_agent, urdf, meshes). Sengaja disimpan di disk, bukan di git.
+*.bak-2026*
+*.bak.2026*
+meshes.bak.*/
+
+# Rekaman uji detektor.
+tes_ball_*.mp4

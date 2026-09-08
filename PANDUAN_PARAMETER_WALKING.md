@@ -48,6 +48,11 @@ grep -q 'Bentuk Gait' src/bascorro_studio/web/src/App.jsx && echo "I ok"
 # J  y_offset hidup, lebar kaki sama berdiri & jalan   -> bagian 2J
 grep -q 'computeNeutralLegAngle(double \*neutral, bool with_y_offset)' \
   src/ROBOTIS-OP3/op3_walking_module/src/op3_walking_module.cpp && echo "J ok"
+# K  knob Soft start ada di msg, yaml, dan Studio       -> bagian 2K
+grep -q 'float32 soft_start_time' \
+  src/ROBOTIS-OP3-msgs/op3_walking_module_msgs/msg/WalkingParam.msg &&
+grep -q 'soft_start_time' src/ROBOTIS-OP3/op3_walking_module/config/param.yaml &&
+grep -q 'soft_start_time' src/bascorro_studio/web/src/App.jsx && echo "K ok"
 ```
 
 Untuk **G** (tiga salinan angka) tidak ada grep tunggal — bandingkan bertiga:
@@ -296,6 +301,88 @@ berbeda dengan `hip_pitch_offset` yang dikompensasi eksplisit. Efeknya melebarka
 (bukan merapatkan) sekitar 1–1,5° per pinggul dan hanya saat gait jalan. Ini
 perilaku asli OP3/DARwIn-OP, jadi dibiarkan; catat saja kalau suatu saat mengejar
 sisa sentakan lateral di detik pertama.
+
+---
+
+### K. Torsi melonjak di langkah pertama — knob `soft_start_time`
+
+**Gejala.** Begitu "start" ditekan, robot langsung melangkah dengan amplitudo dan
+tempo penuh sesuai nilai di Bascorro Studio. Arus servo melonjak di langkah
+pertama dan robot mudah oleng — paling terasa kalau `x_move_amplitude` besar atau
+`period_time` pendek.
+
+**Sebabnya.** `updateMovementParam()` menyalin `walking_param_` apa adanya ke
+variabel kerja, jadi nilai di Studio adalah nilai yang dipakai persis di langkah
+pertama. Satu-satunya pelunak yang ada dulu cuma `updateTimeParam(1.5)` di
+`startWalking()`: siklus pertama diregangkan 1,5x, lalu **balik mendadak** ke
+tempo penuh di batas fase berikutnya.
+
+**Perbaikannya: satu parameter baru, bukan perilaku yang dipaksakan.**
+`soft_start_time` (detik) ada di grup **Timing** Bascorro Studio, di
+`WalkingParam.msg`, dan di `param.yaml` (dalam ms, mengikuti `period_time` di
+berkas yang sama). Amplitudo yang benar-benar dipakai robot adalah keadaan
+tersendiri yang **mengejar** nilai di Studio dengan laju terbatas, bukan salinan
+langsung. **`0` mematikan fitur ini** dan mengembalikan perilaku lama persis.
+
+```cpp
+double WalkingModule::rampToward(double current, double target, double dt)
+{
+  const double soft = walking_param_.soft_start_time;
+  if (soft <= 0.0)
+    return target;                                   // knob mati
+
+  // mengecil ke arah nol (termasuk "stop") tidak pernah ditahan;
+  // ganti tanda tidak terhitung mengecil, jadi tetap dibatasi
+  if (fabs(target) <= fabs(current) && current * target >= 0.0)
+    return target;
+
+  const double step = fabs(target) * dt / soft;      // 0 -> target tepat soft detik
+  ...
+}
+```
+
+**Per sumbu, bukan satu pengali bersama.** Ini bagian yang paling gampang salah:
+satu pengali `ramp` yang mengalikan semua amplitudo terlihat lebih ringkas, tapi
+perilakunya keliru — menaikkan `x_move` di tengah jalan ikut **menyeret turun**
+tinggi angkat kaki, dan menambah belokan dari nol menyeret **seluruh** gait ke
+nol. Dengan pembatas per sumbu, tiap knob berdiri sendiri.
+
+**Yang terpengaruh hanya grup Timing dan Movement:**
+
+| Grup | Parameter | Ikut? |
+|---|---|---|
+| Movement | `x/y/z/angle_move_amplitude` | ya, masing-masing dibatasi lajunya |
+| Movement | `move_aim_on` | tidak — flag arah, bukan besaran |
+| Timing | `period_time` | ya, lewat `timeRampScale()` (mulai 1,5x lebih lambat) |
+| Timing | `dsp_ratio`, `step_fb_ratio` | **tidak** |
+| Init pose / Gait shape / Balance / Gain | semua | tidak disentuh |
+
+`dsp_ratio` sengaja tidak ikut: itu rasio pembagi fase, dan menaikkannya dari nol
+berarti fase dua kaki menapak hilang justru di langkah pertama — kebalikan dari
+yang dicari.
+
+**Arah aman tidak pernah ditahan.** Nilai yang diperkecil, dan "stop" yang
+menolkan amplitudo lewat `processPhase()`, berlaku seketika. Yang dibatasi hanya
+arah yang menambah beban. Ganti tanda (maju lalu mundur) tidak terhitung mengecil,
+jadi tetap dilewatkan pembatas dan melewati nol dengan mulus.
+
+**Laju maju per siklus kontrol, dibaca di batas fase.** Kemajuannya dihitung tiap
+siklus 8 ms supaya lamanya tetap `soft_start_time` berapa pun `period_time`-nya,
+tapi baru disalin ke amplitudo kerja saat `updateMovementParam()` dipanggil di
+batas fase — amplitudo tidak boleh berubah di tengah ayunan.
+
+**Jebakan yang sudah dipasang penjaganya.** `loadWalkingParam()` membaca kunci ini
+dengan `if (doc["soft_start_time"])`. Tanpa itu, `param.yaml` lama — termasuk
+hasil "save" sebelum 2026-08-18 dan salinan di robot lain — membuat **seluruh**
+pemuatan yaml gagal, dan semua parameter diam-diam balik ke fallback
+`initialize()`. `saveWalkingParam()` juga menulis kunci ini kembali; kalau lupa,
+satu kali "save" menghapusnya dari berkas.
+
+**Verifikasi di robot.** Pegang robot, isi `x_move_amplitude` sedang, tekan start.
+Langkah pertama harus jelas lebih pendek dan lebih lambat dari langkah keempat;
+tepat `soft_start_time` detik kemudian keduanya sama. Isi `0` lalu Apply — langkah
+pertama kembali penuh. Kalau tidak ada bedanya, binary-nya basi: rebuild pakai
+`--packages-above`, bukan `--packages-select`.
 
 ---
 

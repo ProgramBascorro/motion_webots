@@ -53,6 +53,9 @@ readonly M_DOCKER_RUN="docker_run"
 readonly M_DOCKER_COMPOSE_UP="docker_compose_up"
 readonly M_DOCKER_STOP="docker_stop"
 readonly M_EXIT_TMUX="exit_tmux"
+readonly M_FREE_PORT="free_port"
+readonly M_MATCH_MODE="match_mode"
+readonly M_CPU_THIEVES="cpu_thieves"
 readonly M_QUIT="quit"
 
 # Order matters (Launch picker first)
@@ -67,6 +70,9 @@ readonly MENU_ENUMS=(
   "$M_DOCKER_COMPOSE_UP"
   "$M_DOCKER_STOP"
   "$M_EXIT_TMUX"
+  "$M_FREE_PORT"
+  "$M_MATCH_MODE"
+  "$M_CPU_THIEVES"
   "$M_QUIT"
 )
 
@@ -83,6 +89,9 @@ menu_label() {
     "$M_DOCKER_COMPOSE_UP") echo "Container: start" ;;
     "$M_DOCKER_STOP")   echo "Container: stop" ;;
     "$M_EXIT_TMUX")     echo "Exit tmux session" ;;
+    "$M_FREE_PORT")     echo "Free DXL port" ;;
+    "$M_MATCH_MODE")    echo "Match mode (CPU for detector)" ;;
+    "$M_CPU_THIEVES")   echo "Who steals detector CPU" ;;
     "$M_QUIT")          echo "Quit" ;;
     *)                  echo "Unknown" ;;
   esac
@@ -101,6 +110,9 @@ menu_emoji() {
     "$M_DOCKER_COMPOSE_UP") echo "🐳" ;;
     "$M_DOCKER_STOP")   echo "🛑" ;;
     "$M_EXIT_TMUX")     echo "🧹" ;;
+    "$M_FREE_PORT")     echo "🔌" ;;
+    "$M_MATCH_MODE")    echo "🎯" ;;
+    "$M_CPU_THIEVES")   echo "🕵️" ;;
     "$M_QUIT")          echo "👋" ;;
     *)                  echo "" ;;
   esac
@@ -136,6 +148,9 @@ choice_to_enum() {
     "Container: start") echo "$M_DOCKER_COMPOSE_UP" ;;
     "Container: stop") echo "$M_DOCKER_STOP" ;;
     "Exit tmux session") echo "$M_EXIT_TMUX" ;;
+    "Free DXL port")     echo "$M_FREE_PORT" ;;
+    "Match mode (CPU for detector)") echo "$M_MATCH_MODE" ;;
+    "Who steals detector CPU") echo "$M_CPU_THIEVES" ;;
     "Quit")              echo "$M_QUIT" ;;
     *)                   echo "$M_QUIT" ;;
   esac
@@ -357,6 +372,41 @@ while true; do
     "$M_EXIT_TMUX")
       op3_tmux_main --exit
       exit $?
+      ;;
+
+    # Membereskan proses yang masih memegang port serial, tanpa mematikan
+    # container maupun sesi tmux. Sisa seperti itu tidak kelihatan di tmux tapi
+    # bikin start berikutnya gagal dengan pesan yang menuduh perangkat
+    # ("Failed to turn on the Power of DXLs!", "first bulk read fail!!").
+    "$M_FREE_PORT")
+      op3_tmux_main --free-port || true
+      ;;
+
+    # Kurung sesi desktop (Firefox/VS Code/GNOME) ke inti fisik 3,7 supaya inti
+    # 0-2 bersih untuk detektor bola.
+    #
+    # Bukan setelan kosmetik: i5-10210U ini 4 inti fisik / 8 utas, dan proses
+    # yang mendarat di inti 4,5,6 adalah HT-sibling milik YOLO -- mereka berbagi
+    # unit eksekusi. Terukur, inferensi 40,3 ms jadi 84,2 ms. `taskset` di
+    # berkas launch hanya mengatur node ROS; desktop tetap bebas berkeliaran,
+    # dan justru desktop-lah pesaing terbesarnya.
+    #
+    # Sengaja TIDAK otomatis: kalau selalu menyala, desktop terasa berat saat
+    # ngoding. Nyalakan menjelang bertanding, matikan sesudahnya.
+    # Setelan ini hilang sendiri saat reboot (`systemctl --runtime`).
+    "$M_MATCH_MODE")
+      mm_choice="$(gum choose --header "Match mode: kurung desktop ke inti 3,7 (inti 0-2 untuk detektor)" \
+        "status" "on" "off")" || mm_choice=""
+      if [[ -n "$mm_choice" ]]; then
+        op3_tmux_main --match-mode "$mm_choice" || true
+      fi
+      ;;
+
+    # Jalankan SELAMA demo berlangsung (dari terminal/tmux lain). Menjawab
+    # pertanyaan yang tidak bisa dijawab top/htop: siapa yang duduk di inti
+    # SIBLING milik detektor bola dan memperlambat inferensinya dari dalam.
+    "$M_CPU_THIEVES")
+      op3_tmux_main --cpu-thieves || true
       ;;
 
     "$M_QUIT"|*)

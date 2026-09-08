@@ -56,6 +56,16 @@ while true; do
 done
 
 echo "[wait-u2d2] port stable for ${STABLE_SECS}s -> $(readlink -f "$DEV")"
+
+# Port yang "bebas" belum tentu bebas: SDK membuka serial tanpa TIOCEXCL, jadi
+# manager kedua akan open() dengan sukses lalu berebut byte dengan proses lama
+# dan mati di "first bulk read fail!!". Tolak di sini, sebutkan pemegangnya.
+GUARD="$WS/scripts/op3_port_users.py"
+if [[ -x "$GUARD" ]] && ! "$GUARD" --quiet; then
+  echo "[wait-u2d2] batal: port masih dipegang proses lain (lihat daftar di atas)." >&2
+  exit 1
+fi
+
 echo "[wait-u2d2] starting op3_manager (robot will torque on and move to init pose)"
 
 exec ros2 run op3_manager op3_manager --ros-args \

@@ -207,10 +207,58 @@ action_docker_up() {
   exec "$script" up
 }
 
+# Bebaskan port serial tanpa mematikan container atau sesi tmux.
+#
+# Yang dibereskan: proses yang masih memegang bus tapi tidak kelihatan di tmux --
+# `ros2 run op3_action_editor executor.py` yang di-Ctrl-C, atau op3_manager yang
+# portnya sempat re-enumerate sehingga fd-nya menunjuk node terhapus. Selama sisa
+# itu hidup, start berikutnya gagal dengan pesan yang menuduh perangkat
+# ("Failed to turn on the Power of DXLs!", "first bulk read fail!!") padahal
+# servo dan OpenCR sehat: SDK membuka serial tanpa TIOCEXCL, jadi dua proses
+# memang boleh memegang port yang sama dan saling merusak paket.
+#
+# Pemindainya scripts/op3_port_users.py -- satu implementasi, dipakai juga oleh
+# doctor bagian 4, executor.py, dan health_check di bawah.
+action_free_port() {
+  # Di dalam container tidak ada perintah docker; pakai alatnya langsung.
+  if [[ -e /.dockerenv ]]; then
+    local guard="$WS/scripts/op3_port_users.py"
+    [[ -f "$guard" ]] || die "Tidak ditemukan: $guard"
+    python3 "$guard" --kill
+    return $?
+  fi
+  local script
+  script="$(op3_docker_sh)"
+  "$script" free-port
+}
+
 action_docker_down() {
   local script
   script="$(op3_docker_sh)"
   exec "$script" down
+}
+
+# Kurung sesi desktop ke inti fisik P3 (utas 3,7) supaya inti 0-2 bersih untuk
+# detektor bola. Alasannya terukur: proses yang mendarat di inti 4,5,6 adalah
+# HT-sibling milik YOLO dan berbagi unit eksekusi dengannya -- inferensi 40,3 ms
+# jadi 84,2 ms. Pesaing terbesar bukan node ROS melainkan desktop (Firefox,
+# VS Code), dan taskset di berkas launch tidak menyentuhnya.
+#
+# Didelegasikan ke op3_docker.sh seperti semua aksi docker lain; jangan
+# menyalin perintah systemctl-nya ke sini.
+action_match_mode() {
+  local script
+  script="$(op3_docker_sh)"
+  "$script" match-mode "${1:-status}"
+}
+
+# Jalankan SELAMA demo berlangsung, di terminal kedua. Menjawab pertanyaan yang
+# tidak terjawab oleh top/htop: siapa yang duduk di inti sibling milik detektor
+# bola (4,5,6) dan karena itu memperlambat inferensinya dari dalam.
+action_cpu_thieves() {
+  local script
+  script="$(op3_docker_sh)"
+  "$script" cpu-thieves "$@"
 }
 
 restart_component() {
