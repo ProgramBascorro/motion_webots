@@ -2020,11 +2020,11 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
   const recentSnapshots = snapshots.slice(0, 6);
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-6 p-2 overflow-y-auto lg:overflow-hidden bg-[#f8fafc]">
+    <div className="studio-action-editor flex flex-col lg:flex-row h-full gap-6 p-2 overflow-y-auto lg:overflow-hidden bg-[#f8fafc]">
       {/* LEFT COLUMN: Lists & YAML */}
       <div className="flex flex-col w-full lg:w-1/4 lg:min-w-[280px] gap-4 h-full">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col flex-1 overflow-hidden min-h-[300px]">
-          <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+          <div className="studio-action-toolbar p-4 border-b border-gray-100 flex justify-between items-center">
             <h2 className="text-lg font-bold font-display text-gray-800">Pages</h2>
             <div className="flex items-center gap-2">
               <button
@@ -2092,7 +2092,7 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
             ))}
           </div>
           <div className="p-2 border-t border-gray-100 bg-gray-50/50 flex-1 overflow-y-auto max-h-[40%] custom-scrollbar">
-            <div className="flex items-center justify-between mb-2 px-1">
+            <div className="studio-action-toolbar flex items-center justify-between mb-2 px-1">
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                 Steps {activePage ? `(Page ${activePage.index})` : ""}
               </div>
@@ -2301,7 +2301,7 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
       <div className="flex flex-col flex-1 gap-4 h-full lg:overflow-y-auto custom-scrollbar pb-2">
         {/* Page Settings */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-          <div className="flex justify-between items-center mb-4">
+          <div className="studio-action-toolbar flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold font-display text-gray-800">Page Configuration</h2>
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-2 text-xs font-medium text-gray-500 cursor-pointer">
@@ -2347,7 +2347,7 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
 
         {/* Step Editor */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex-1 flex flex-col min-h-[400px]">
-          <div className="flex justify-between items-center mb-4">
+          <div className="studio-action-toolbar flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold font-display text-gray-800">Step Editor <span className="text-gray-400 font-mono text-sm ml-2">{activeStepLabel !== "" ? `Step ${activeStepLabel}` : ""}</span></h2>
             <div className="flex gap-2">
               <button

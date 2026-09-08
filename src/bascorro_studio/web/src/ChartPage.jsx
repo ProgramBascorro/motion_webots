@@ -13,8 +13,8 @@ import { Settings, Trash2, Pause, Play, Plus, X, Activity } from "lucide-react";
 
 // Color palette matching the design system
 const LINE_COLORS = [
-  "#002060", // Undip Blue
-  "#F4B400", // Accent Yellow
+  "#087f82", // Undip Blue
+  "#c38a2e", // Accent Yellow
   "#ef4444", // Red
   "#10b981", // Green
   "#8b5cf6", // Violet
