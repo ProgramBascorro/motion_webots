@@ -70,14 +70,30 @@ export function validateWalkingParams(params) {
   return payload;
 }
 
+// Apply mengirim SELURUH isi kotak isian, bukan cuma field yang berbeda dari
+// baseline.
+//
+// Versi sebelumnya memulai payload dari nilai ROBOT lalu hanya menimpa field
+// yang berbeda dari baseline. Niatnya baik -- "jangan sentuh yang tidak diedit,
+// supaya penulis lain tidak terinjak" -- tapi salah begitu nilai di robot
+// BERGESER SENDIRI:
+//
+//   walking_module menolkan x/y/angle_move_amplitude tiap kali Stop. Sesudah
+//   itu draft (0,016) SAMA dengan baseline (0,016), jadi field itu dianggap
+//   "tidak diedit" dan tidak ikut dikirim -- yang dikirim justru nilai robot
+//   yang sudah 0. Di layar tertulis 0,016, robot berjalan dengan 0.
+//
+// Terukur di robot 2026-09-08: get_params melaporkan seluruh setelan JALAN
+// benar KECUALI x_move_amplitude = 0, dan mengirim struct yang sama secara utuh
+// lewat ros2 topic pub langsung membuatnya 0,016. Jadi rantai ke robot sehat;
+// yang keliru cara paketnya disusun di sini.
+//
+// baseline dan current tetap divalidasi: pemanggil memakai keduanya untuk
+// memutuskan perlu-tidaknya menerbitkan dan untuk memeriksa hasil bacaan balik.
 export function mergeWalkingEdits(draft, baseline, current) {
-  const edited = validateWalkingParams(draft);
   validateWalkingParams(baseline);
-  const payload = validateWalkingParams(current);
-  for (const key of WALKING_KEYS) {
-    if (!parameterValuesEqual(edited[key], baseline[key])) payload[key] = edited[key];
-  }
-  return validateWalkingParams(payload);
+  validateWalkingParams(current);
+  return validateWalkingParams(draft);
 }
 
 export async function applyWalkingDraft({ draft, baseline, read, publish, check, onRead, wait }) {

@@ -50,13 +50,26 @@ test("float32 readback does not leave a false dirty marker", () => {
   assert.ok(!parametersEqual({ ...expected, x_move_amplitude: 0.017 }, observed, WALKING_KEYS));
 });
 
-test("only deliberate edits override a fresh runtime snapshot", () => {
+test("Apply sends the whole draft, not just the fields that differ", () => {
   const baseline = walkingParams({ balance_enable: true, p_gain: 36 });
   const current = walkingParams({ balance_enable: false, p_gain: 16 });
   const merged = mergeWalkingEdits({ ...baseline, x_move_amplitude: "0,016" }, baseline, current);
-  assert.equal(merged.balance_enable, false);
-  assert.equal(merged.p_gain, 16);
-  assert.equal(merged.x_move_amplitude, 0.016);
+  assert.equal(merged.balance_enable, true, "yang dikirim isi kotak isian, bukan nilai robot");
+  assert.equal(merged.p_gain, 36);
+  assert.equal(merged.x_move_amplitude, 0.016, "koma desimal tetap diterima");
+});
+
+// Regresi yang terukur di robot 2026-09-08: walking_module menolkan amplitudo
+// tiap Stop, jadi nilai robot bergeser menjauh dari kotak isian TANPA operator
+// mengubah apa pun. Kalau Apply cuma mengirim selisih terhadap baseline, panjang
+// langkah tidak pernah dikembalikan dan robot berjalan dengan 0.
+test("a runtime that drifted to zero is overwritten by the draft", () => {
+  const baseline = walkingParams({ x_move_amplitude: 0.016 });
+  const draft = { ...baseline };                       // operator tidak mengubah apa pun
+  const current = walkingParams({ x_move_amplitude: 0 });   // robot dinolkan oleh Stop
+  const merged = mergeWalkingEdits(draft, baseline, current);
+  assert.equal(merged.x_move_amplitude, 0.016,
+    "panjang langkah harus dikirim ulang walaupun draft sama dengan baseline");
 });
 
 test("walking Apply waits for actual readback instead of echoing the payload", async () => {
