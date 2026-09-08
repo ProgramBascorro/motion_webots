@@ -21,25 +21,6 @@ function applyUpright(robot) {
   robot.rotation.set(-Math.PI / 2, 0, 0);
 }
 
-// PELUNCUR SIMULATOR BELUM PUNYA BACKEND, dan itu diperiksa 2026-09-08.
-// Tiga lapis hilang sekaligus:
-//
-//   1. apply_node.py cuma mengenal perintah berkas .bin (apply/export/stat/
-//      list/delete). sim_launch / sim_stop / sim_status jatuh ke cabang
-//      terakhir dan dibalas "Unknown action: sim_status" -- itulah baris merah
-//      yang selama ini muncul di panel dan terlihat seperti kerusakan.
-//   2. sim_domain_bridge.py dan sim_feedback_relay.py ADA sebagai berkas, tapi
-//      tidak terdaftar di console_scripts setup.py, jadi tidak pernah terpasang.
-//   3. keduanya juga tidak ada di bascorro_studio.launch.py.
-//
-// Selama ketiganya belum dipasang, tombolnya cuma bisa gagal. Penampil 3D-nya
-// sendiri TIDAK terpengaruh: ia menggambar /robotis/present_joint_states dari
-// robot asli dan tetap jalan.
-//
-// Untuk menghidupkannya lagi: tambahkan handler sim_* di apply_node, daftarkan
-// kedua node di setup.py + launch, lalu ubah ini jadi true.
-const SIM_BACKEND_AVAILABLE = false;
-
 export default function WalkingSimPreview({
   rosRef, rosState, isActive, onStartSimWalk, onStopSimWalk,
 }) {
@@ -138,13 +119,11 @@ export default function WalkingSimPreview({
     // double-effect-firing in dev it pushed state updates past React's
     // max-depth limit. The strip refreshes on each sim_launch/sim_stop
     // response anyway, which covers the common case.)
-    if (SIM_BACKEND_AVAILABLE) {
-      window.setTimeout(() => {
-        try {
-          requestPubRef.current?.publish(new ROSLIB.Message({ data: JSON.stringify({ action: "sim_status" }) }));
-        } catch { /* noop */ }
-      }, 400);
-    }
+    window.setTimeout(() => {
+      try {
+        requestPubRef.current?.publish(new ROSLIB.Message({ data: JSON.stringify({ action: "sim_status" }) }));
+      } catch { /* noop */ }
+    }, 400);
     return () => {
       resultSubRef.current?.unsubscribe();
       resultSubRef.current = null;
@@ -359,7 +338,7 @@ export default function WalkingSimPreview({
               haven't started the standalone sim yet. State priority:
               backendRunning > topic source so the button updates
               immediately on click. */}
-          {SIM_BACKEND_AVAILABLE && (!backendRunning ? (
+          {!backendRunning ? (
             <button
               onClick={() => sendSimAction("sim_launch")}
               disabled={!rosConnected || launchBusy}
@@ -377,7 +356,7 @@ export default function WalkingSimPreview({
             >
               <Square size={14}/> Stop Simulasi
             </button>
-          ))}
+          )}
           {/* Dedicated walk Start/Stop — only active while the standalone sim
               is up. Routes through the same /robotis/walking_command path but
               UX-wise lives next to the sim viewer so users don't reach for
@@ -411,12 +390,12 @@ export default function WalkingSimPreview({
           </button>
         </div>
       </div>
-      {SIM_BACKEND_AVAILABLE && launchStatus && (
+      {launchStatus && (
         <div className={`px-4 py-1.5 text-[11px] font-mono border-b border-gray-100 ${fallbackCmd ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
           {launchStatus}
         </div>
       )}
-      {SIM_BACKEND_AVAILABLE && liveness.length > 0 && (
+      {liveness.length > 0 && (
         <div className="px-4 py-1.5 text-[11px] font-mono border-b border-gray-100 bg-gray-50 text-gray-700 flex flex-wrap items-center gap-2">
           {liveness.map(p => {
             // A child whose actual ROS_DOMAIN_ID is anything other than 42
@@ -445,7 +424,7 @@ export default function WalkingSimPreview({
           )}
         </div>
       )}
-      {SIM_BACKEND_AVAILABLE && fallbackCmd && (
+      {fallbackCmd && (
         <div className="px-4 py-2 border-b border-gray-100 bg-amber-50 text-amber-900 text-[11px] leading-snug">
           <div className="font-bold mb-1">Auto-launch gagal. Jalankan manual di terminal:</div>
           <div className="flex items-center gap-2 bg-white border border-amber-200 rounded px-2 py-1.5 font-mono text-[11px]">

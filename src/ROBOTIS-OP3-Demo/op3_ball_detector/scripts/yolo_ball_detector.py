@@ -57,7 +57,6 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rcl_interfaces.msg import SetParametersResult
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.executors import ExternalShutdownException
 
@@ -95,18 +94,6 @@ class YoloBallDetector(Node):
             self.declare_parameter('confidence_threshold', 0.5).value)
         self.iou_threshold = float(
             self.declare_parameter('iou_threshold', 0.45).value)
-        # Kedua ambang di atas BOLEH diubah selagi node berjalan, lewat
-        # /ball_detector_node/yolo_ball_detector/set_parameters (halaman Vision
-        # di Bascorro Studio memakainya). Tanpa callback ini nilainya cuma
-        # tersimpan di parameter dan tidak pernah sampai ke inferensi -- itu
-        # keadaannya sampai 2026-09-08, dan slider di Studio memang tidak
-        # berpengaruh apa pun.
-        #
-        # Yang lain SENGAJA tidak dibuka: model_path, imgsz dan device dipakai
-        # saat memuat model, detection_rate saat membuat timer. Mengubahnya
-        # lewat parameter tidak akan berpengaruh, jadi lebih baik ditolak
-        # terang-terangan daripada diam-diam tidak berguna.
-        self.add_on_set_parameters_callback(self._on_set_parameters)
         self.imgsz = int(self.declare_parameter('imgsz', 640).value)
         # --- masukan PERSEGI PANJANG ------------------------------------------
         # Kamera 640x360, tapi imgsz persegi memaksa Ultralytics mem-padding
@@ -399,35 +386,6 @@ class YoloBallDetector(Node):
                 'Nama di gambar debug diganti jadi: %s' % self.plot_names)
 
         return model
-
-    # rclpy memanggil callback ini SEBELUM nilai barunya disimpan, jadi angkanya
-    # diambil dari daftar yang masuk. Membaca get_parameter() di sini akan
-    # mengembalikan nilai LAMA -- jebakan yang sama dengan on_set di rclcpp.
-    def _on_set_parameters(self, parameters):
-        AMBANG = {'confidence_threshold', 'iou_threshold'}
-        for parameter in parameters:
-            if parameter.name not in AMBANG:
-                continue
-            try:
-                value = float(parameter.value)
-            except (TypeError, ValueError):
-                return SetParametersResult(
-                    successful=False,
-                    reason=f'{parameter.name}: harus angka')
-            if not 0.0 < value < 1.0:
-                return SetParametersResult(
-                    successful=False,
-                    reason=f'{parameter.name}: harus di antara 0 dan 1 (eksklusif)')
-        for parameter in parameters:
-            if parameter.name == 'confidence_threshold':
-                self.confidence_threshold = float(parameter.value)
-                self.get_logger().warn(
-                    f'confidence_threshold diubah jadi {self.confidence_threshold:.2f}')
-            elif parameter.name == 'iou_threshold':
-                self.iou_threshold = float(parameter.value)
-                self.get_logger().warn(
-                    f'iou_threshold diubah jadi {self.iou_threshold:.2f}')
-        return SetParametersResult(successful=True)
 
     def _resolve_display_names(self):
         """Peta {id_kelas: nama tampilan} untuk gambar debug.
