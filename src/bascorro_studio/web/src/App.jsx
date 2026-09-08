@@ -1911,10 +1911,21 @@ export default function App() {
   };
 
   const applyWalkingWithContext = async (context, draft = walkingParams, baseline = walkingCurrentParams) => {
-    if (!baseline) throw new Error("Load parameter dari robot terlebih dahulu sebelum Apply");
+    // TIDAK perlu Load dulu.
+    //
+    // Dulu di sini ada `if (!baseline) throw "Load parameter dari robot terlebih
+    // dahulu"`. Syarat itu sudah tidak ada gunanya sejak mergeWalkingEdits()
+    // mengirim SELURUH draft: baseline tidak lagi menentukan sedikit pun isi
+    // yang diterbitkan, ia cuma ikut divalidasi. Dan applyWalkingDraft() memang
+    // membaca robot sendiri sebelum menerbitkan, lalu membaca lagi untuk
+    // memverifikasi -- jadi pembacaan yang dulu dipaksa lewat tombol Load tetap
+    // terjadi, cuma tidak lagi menghalangi.
+    //
+    // Akibatnya operator bisa memilih versi tersimpan lalu langsung Apply &
+    // Start, tanpa singgah ke tombol Load di baris PARAMETER.
     const params = await applyWalkingDraft({
       draft,
-      baseline,
+      baseline: baseline ?? draft,
       read: () => readWalkingRuntime(context),
       publish: (payload) => {
         context.check();

@@ -91,3 +91,14 @@ test("initThenEnableWalking waits for the limit write to land", () => {
     "tanpa await, \"start\" bisa terkirim sebelum profile_velocity mendarat "
     + "dan langkah pertama tetap terkekang");
 });
+
+// Syarat "Load dulu" dicabut 2026-09-09. Kalau ada yang memasangnya lagi,
+// memilih versi tersimpan lalu Apply & Start kembali ditolak mentah-mentah.
+test("Apply no longer refuses when the robot has not been read yet", () => {
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "applyWalkingWithContext"));
+  assert.doesNotMatch(badan, /if \(!baseline\)\s*throw/,
+    "baseline tidak lagi menentukan isi yang dikirim; memaksa Load cuma "
+    + "menghalangi pemakaian versi tersimpan");
+  assert.match(badan, /baseline: baseline \?\? draft/,
+    "draft dipakai sebagai baseline-nya sendiri saat belum ada pembacaan");
+});

@@ -203,3 +203,26 @@ test("apply without edits does not rewrite the operator's numbers", async () => 
   assert.equal(result.period_time, 0.77);
   assert.equal(result.y_swap_amplitude, 0.0021);
 });
+
+// 2026-09-09: operator minta bisa langsung memakai versi tersimpan tanpa harus
+// menekan Load di baris PARAMETER lebih dulu. Itu aman karena baseline sudah
+// tidak menentukan isi yang diterbitkan (mergeWalkingEdits mengirim seluruh
+// draft) dan applyWalkingDraft membaca robot sendiri sebelum menerbitkan.
+test("Apply works with no prior robot read, using the draft as its own baseline", async () => {
+  const versi = walkingParams({ x_move_amplitude: 0.016, init_pitch_offset: -0.12 });
+  const runtime = walkingParams({ x_move_amplitude: 0, init_pitch_offset: 0 });
+  const dikirim = [];
+  let dibaca = 0;
+  const hasil = await applyWalkingDraft({
+    draft: versi,
+    baseline: versi,                       // tidak ada pembacaan sebelumnya
+    read: async () => (dibaca++ === 0 ? runtime : { ...versi }),
+    publish: (payload) => dikirim.push(payload),
+    check: () => {}, onRead: () => {}, wait: async () => {},
+  });
+  assert.equal(dikirim.length, 1, "tetap menerbitkan walaupun belum pernah Load");
+  assert.equal(dikirim[0].x_move_amplitude, 0.016, "isi versi tersimpan yang dikirim");
+  assert.equal(dikirim[0].init_pitch_offset, -0.12);
+  assert.equal(hasil.x_move_amplitude, 0.016);
+  assert.ok(dibaca >= 2, "robot tetap dibaca sebelum dan sesudah menerbitkan");
+});
