@@ -36,6 +36,7 @@ import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
 import WalkingSimPreview from "./WalkingSimPreview.jsx";
+import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
   parameterValuesEqual, parametersEqual, validateWalkingParams, applyWalkingDraft,
@@ -1112,10 +1113,10 @@ const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) =>
   };
 
   return (
-    <div className={`p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md ${statusStyles[status]}`}>
+    <div className={`studio-stat-card p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md ${statusStyles[status]}`}>
       <div className="flex justify-between items-center mb-2 text-gray-500">
         <span className="text-sm font-medium">{title}</span>
-        {Icon && <Icon size={18} />}
+        {Icon && <span className="studio-stat-icon"><Icon size={18} /></span>}
       </div>
       <div>
         <span className="block text-2xl font-bold font-display text-gray-900">{value}</span>
@@ -1126,11 +1127,25 @@ const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) =>
 };
 
 const SectionHeader = ({ title, children }) => (
-  <div className="flex justify-between items-center mb-4">
+  <div className="studio-section-header flex justify-between items-center mb-4">
     <h2 className="text-lg font-bold font-display text-gray-800">{title}</h2>
     <div className="flex gap-2">{children}</div>
   </div>
 );
+
+const STUDIO_PAGE_DETAILS = {
+  dashboard: { title: "Dashboard", description: "Kondisi robot dan kontrol utama dalam satu pandangan.", group: "Monitor" },
+  charts: { title: "Charts", description: "Amati perubahan data dan bandingkan telemetri robot.", group: "Monitor" },
+  vision: { title: "Vision", description: "Pantau kamera dan hasil deteksi objek.", group: "Monitor" },
+  tuning: { title: "Tuning", description: "Sesuaikan offset sendi dan kontrol robot.", group: "Kontrol robot" },
+  walking: { title: "Walking", description: "Kelola preset, periksa parameter, dan atur langkah robot.", group: "Kontrol robot" },
+  tendangan: { title: "Tendangan", description: "Periksa posisi bola dan parameter kesiapan tendangan.", group: "Kontrol robot" },
+  demo: { title: "Demo", description: "Pilih mode dan kendalikan rangkaian demo robot.", group: "Kontrol robot" },
+  teleop: { title: "Teleop", description: "Kendali gerakan dan pemantauan input joystick.", group: "Kontrol robot" },
+  action: { title: "Action Editor", description: "Susun halaman gerakan, langkah, dan pratinjau pose.", group: "Kontrol robot" },
+  logs: { title: "Logs", description: "Telusuri peristiwa dan pesan dari sistem.", group: "Sistem" },
+  terminal: { title: "Terminal", description: "Akses terminal sistem di dalam workspace Studio.", group: "Sistem" },
+};
 
 function resolveInitialRosUrl() {
   const envDefault = computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL);
@@ -2113,21 +2128,26 @@ export default function App() {
     sendStatus(`Walking version saved: ${name}`);
   };
 
-  // Memuat versi tersimpan IKUT membaca robot dulu.
+  // Memuat versi tersimpan: versinya SELALU masuk kotak isian dulu, pembacaan
+  // robot menyusul sebagai bonus.
   //
   // Halaman ini punya DUA tombol bernama "Load": yang di baris PARAMETER
   // membaca robot, yang di baris Versi Tersimpan cuma mengisi kotak isian.
   // Operator menekan yang kedua lalu Apply, dan Apply menolak dengan "Load
   // parameter dari robot terlebih dahulu" -- pesan yang menunjuk tombol lain
-  // tanpa mengatakannya. Terjadi 2026-09-08.
+  // tanpa mengatakannya. Karena itu tombol ini sekalian membaca robot: itu yang
+  // memasang angka pembanding yang dibutuhkan Apply.
   //
-  // Sekarang tombol ini membaca robot lebih dulu (itu yang memasang angka
-  // pembanding yang dibutuhkan Apply), BARU menimpa kotak isian dengan versi
-  // yang dipilih. Urutannya penting dan tidak bisa dibalik: membaca robot
-  // sesudahnya akan membuang versi yang baru saja dimuat.
+  // URUTANNYA: isi draft DULU, baca robot belakangan. Versi pertama fungsi ini
+  // melakukan sebaliknya, dan itu SALAH -- kalau op3_manager tidak menjawab
+  // (mati, atau baru dinyalakan), pembacaannya melempar dan baris pengisi draft
+  // TIDAK PERNAH dijalankan, sehingga versi yang dipilih tidak jadi dimuat sama
+  // sekali. Operator melihatnya sebagai "gerakan yang tersimpan hilang".
   //
-  // Kalau ROS mati, versinya TETAP dimuat supaya draft bisa disiapkan luring;
-  // yang hilang cuma angka pembandingnya, dan itu dikatakan terang-terangan.
+  // Membalik urutannya aman: readWalkingRuntime() hanya menulis
+  // walkingCurrentParams (kolom CURRENT) dan TIDAK menyentuh walkingParams,
+  // jadi ia tidak bisa membuang draft yang baru saja diisi. Komentar lama di
+  // sini yang mengatakan sebaliknya keliru.
   const loadWalkingVersion = () => {
     if (walkingOperationRef.current) return;
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
@@ -2135,20 +2155,18 @@ export default function App() {
       sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
-    const isiDraft = () => {
-      setWalkingParams(normalizeWalkingParams(selected.params));
-      setWalkingVersionName(selected.name);
-      setWalkingError("");
-    };
+
+    setWalkingParams(normalizeWalkingParams(selected.params));
+    setWalkingVersionName(selected.name);
+    setWalkingError("");
+
     if (!rosConnected) {
-      isiDraft();
       sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
         + "pembacaan robot: tekan Load di baris PARAMETER sebelum Apply.", true);
       return;
     }
     runRobotOperation("walking", async (context) => {
       await readWalkingRuntime(context);
-      isiDraft();
       sendStatus(`Versi "${selected.name}" dimuat, dan parameter robot ikut dibaca. Tinggal Apply.`);
     });
   };
@@ -2543,23 +2561,25 @@ export default function App() {
           onClick={() => setSidebarOpen(false)}
         />
       )}
-      <nav className={`
-        fixed inset-y-0 left-0 z-40 w-64 bg-sidebar flex flex-col p-6 text-gray-400 transition-transform duration-300 lg:translate-x-0 lg:static lg:flex-shrink-0
+      <nav aria-label="Navigasi utama" className={`
+        studio-sidebar fixed inset-y-0 left-0 z-40 w-64 bg-sidebar flex flex-col p-6 text-gray-400 transition-transform duration-300 lg:translate-x-0 lg:static lg:flex-shrink-0
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
       `}>
-        <div className="flex items-center justify-between mb-8 px-2">
-          <div className="flex items-center gap-3">
-            <img src="/log.png" alt="Bascorro Logo" className="w-8 h-8 object-contain" />
-            <span className="font-display font-bold text-lg text-white tracking-tight">Bascorro</span>
+        <div className="studio-brand flex items-center justify-between mb-8 px-2">
+          <div className="studio-brand-identity">
+            <img src="/bascorro-logo.png" alt="EWS BASCORRO" width="211" height="75" className="studio-brand-logo" />
+            <span className="studio-brand-caption">ROBOTICS STUDIO</span>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white p-1">
+          <button aria-label="Tutup navigasi" onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white p-1">
             <X size={20} />
           </button>
         </div>
-        <div className="flex flex-col gap-2 flex-1">
+        <div className="studio-nav-links flex flex-col gap-2 flex-1">
+          <div className="studio-nav-label">Monitor <span>01</span></div>
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "dashboard" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("dashboard"); setSidebarOpen(false); }}
+            aria-current={activeTab === "dashboard" ? "page" : undefined}
           >
             <LayoutDashboard size={20} className={activeTab === "dashboard" ? "text-accent-yellow" : ""} />
             <span>Dashboard</span>
@@ -2567,6 +2587,7 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "charts" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("charts"); setSidebarOpen(false); }}
+            aria-current={activeTab === "charts" ? "page" : undefined}
           >
             <Activity size={20} className={activeTab === "charts" ? "text-accent-yellow" : ""} />
             <span>Charts</span>
@@ -2574,13 +2595,16 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "vision" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("vision"); setSidebarOpen(false); }}
+            aria-current={activeTab === "vision" ? "page" : undefined}
           >
             <Video size={20} className={activeTab === "vision" ? "text-accent-yellow" : ""} />
             <span>Vision</span>
           </button>
+          <div className="studio-nav-label">Kontrol robot <span>02</span></div>
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tuning" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("tuning"); setSidebarOpen(false); }}
+            aria-current={activeTab === "tuning" ? "page" : undefined}
           >
             <Settings size={20} className={activeTab === "tuning" ? "text-accent-yellow" : ""} />
             <span>Tuning</span>
@@ -2588,6 +2612,7 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "walking" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("walking"); setSidebarOpen(false); }}
+            aria-current={activeTab === "walking" ? "page" : undefined}
           >
             <Footprints size={20} className={activeTab === "walking" ? "text-accent-yellow" : ""} />
             <span>Walking</span>
@@ -2595,6 +2620,7 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tendangan" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("tendangan"); setSidebarOpen(false); }}
+            aria-current={activeTab === "tendangan" ? "page" : undefined}
           >
             <Crosshair size={20} className={activeTab === "tendangan" ? "text-accent-yellow" : ""} />
             <span>Tendangan</span>
@@ -2602,6 +2628,7 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "demo" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("demo"); setSidebarOpen(false); }}
+            aria-current={activeTab === "demo" ? "page" : undefined}
           >
             <PlayCircle size={20} className={activeTab === "demo" ? "text-accent-yellow" : ""} />
             <span>Demo</span>
@@ -2609,6 +2636,7 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "teleop" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("teleop"); setSidebarOpen(false); }}
+            aria-current={activeTab === "teleop" ? "page" : undefined}
           >
             <Gamepad2 size={20} className={activeTab === "teleop" ? "text-accent-yellow" : ""} />
             <span>Teleop</span>
@@ -2616,13 +2644,16 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "action" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("action"); setSidebarOpen(false); }}
+            aria-current={activeTab === "action" ? "page" : undefined}
           >
             <BicepsFlexed size={20} className={activeTab === "action" ? "text-accent-yellow" : ""} />
             <span>Action</span>
           </button>
+          <div className="studio-nav-label">Sistem <span>03</span></div>
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "logs" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("logs"); setSidebarOpen(false); }}
+            aria-current={activeTab === "logs" ? "page" : undefined}
           >
             <ScrollText size={20} className={activeTab === "logs" ? "text-accent-yellow" : ""} />
             <span>Logs</span>
@@ -2630,12 +2661,13 @@ export default function App() {
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "terminal" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("terminal"); setSidebarOpen(false); }}
+            aria-current={activeTab === "terminal" ? "page" : undefined}
           >
             <Terminal size={20} className={activeTab === "terminal" ? "text-accent-yellow" : ""} />
             <span>Terminal</span>
           </button>
         </div>
-        <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
+        <div className="studio-connection mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
           <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
             ROS Bridge
           </label>
@@ -2662,7 +2694,7 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div className="pt-6 border-t border-white/10">
+        <div className="studio-sidebar-status pt-6 border-t border-white/10">
           <div className={`flex items-center gap-2 px-2 text-sm font-medium ${rosState === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
             <div className={`w-2 h-2 rounded-full ${rosState === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`}></div>
             <span>{rosState === "connected" ? "System Online" : "Disconnected"}</span>
@@ -2711,11 +2743,11 @@ export default function App() {
       <div className="h-full p-4 md:p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto flex flex-col gap-5">
           {/* HEADER CARD — status, workflow hint, action buttons grouped by intent */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="studio-control-panel bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             {/* Title strip */}
             <div className="px-5 pt-5 pb-3 border-b border-gray-100">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-bold font-display text-gray-900">Walking</h2>
+                <h2 className="studio-control-title text-lg font-bold font-display text-gray-900"><Footprints size={20} aria-hidden="true" /> Walking</h2>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`} title={walkingDirty ? "Ada perubahan yang belum di-Apply" : "Cocok dengan pembacaan terakhir, bukan pemantauan runtime terus-menerus"}>
                   {!walkingLoaded ? "Belum dibaca" : walkingDirty ? "Belum di-Apply" : "Cocok saat dibaca"}
                 </span>
@@ -3136,7 +3168,7 @@ export default function App() {
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-5 pt-5 pb-3 border-b border-gray-100">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-bold font-display text-gray-900">Jarak Tendangan</h2>
+                <h2 className="studio-control-title text-lg font-bold font-display text-gray-900"><Crosshair size={20} aria-hidden="true" /> Jarak Tendangan</h2>
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${kickDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}
                   title={kickDirty ? "Ada perubahan yang belum dikirim ke robot" : "Cocok dengan pembacaan terakhir, bukan pemantauan terus-menerus"}
@@ -4003,10 +4035,20 @@ export default function App() {
   };
 
   const renderDashboard = () => (
-    <div className="flex flex-col lg:grid lg:grid-cols-[3fr_1fr] gap-6 h-full p-4 md:p-8 overflow-y-auto">
-      <div className="flex flex-col gap-6">
+    <div className="studio-dashboard flex flex-col lg:grid lg:grid-cols-[3fr_1fr] gap-6 h-full p-4 md:p-8 overflow-y-auto">
+      <div className="studio-dashboard-primary flex flex-col gap-6">
+        <section className="studio-overview" aria-label="Bascorro control room">
+          <div className="studio-overview-copy">
+            <span className="studio-eyebrow"><span /> BASCORRO CONTROL ROOM</span>
+            <h2>Seluruh kendali.<br /><span>Satu workspace.</span></h2>
+            <p>Pantau kondisi, atur gerakan, dan kenali setiap langkah robot Anda.</p>
+            <div className="studio-overview-tags"><span><Cpu size={13} /> ROBOTIS OP3</span><span><Activity size={13} /> Motion &amp; vision</span></div>
+          </div>
+          <RobotBlueprint />
+        </section>
         {/* Safety & Quick Actions */}
-        <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="studio-quick-actions flex flex-wrap gap-4 items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+          <div className="studio-toolbar-caption"><span>Kontrol utama</span><span>Pose, gerakan &amp; torque</span></div>
           <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-600 hover:text-white transition-all shadow-sm" onClick={handleInitPose}>
             <Settings size={18} /> Init Pose
           </button>
@@ -4046,7 +4088,7 @@ export default function App() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="studio-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Battery"
             icon={Battery}
@@ -4096,7 +4138,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
+      <div className="studio-dashboard-secondary flex flex-col gap-6">
         {/* IMU Card */}
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="IMU Orientation" />
@@ -4455,24 +4497,34 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden">
+    <div className="studio-shell flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden">
       {renderSidebar()}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#f8fafc]">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-20">
-          <div className="flex items-center gap-4">
+      <main className="studio-workspace flex-1 flex flex-col min-w-0 bg-[#f8fafc]">
+        <header className="studio-topbar bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-20">
+          <div className="studio-page-heading flex items-center gap-4">
             <button 
               onClick={() => setSidebarOpen(true)}
+              aria-label="Buka navigasi"
               className="lg:hidden p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <Menu size={24} />
             </button>
-            <h1 className="text-xl font-bold font-display text-gray-900 capitalize tracking-tight">{activeTab}</h1>
+            <div className="min-w-0">
+              <div className="studio-breadcrumb">Studio <span>/</span> {STUDIO_PAGE_DETAILS[activeTab]?.group}</div>
+              <h1 className="text-xl font-bold font-display text-gray-900 tracking-tight">{STUDIO_PAGE_DETAILS[activeTab]?.title || activeTab}</h1>
+              <p className="studio-page-description">{STUDIO_PAGE_DETAILS[activeTab]?.description}</p>
+            </div>
           </div>
-          <div className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${studioError ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"} ${!studioStatus && "opacity-0"}`}>
-            {studioStatus || "Ready"}
+          <div className="studio-topbar-status">
+            <div className={`studio-connection-badge ${rosState === "connected" ? "is-connected" : "is-disconnected"}`}>
+              <span /><Wifi size={14} /><span>{rosState === "connected" ? "Robot terhubung" : "Belum terhubung"}</span>
+            </div>
+            <div role="status" aria-live="polite" className={`studio-notice px-4 py-1.5 rounded-full text-sm font-medium transition-all ${studioError ? "bg-red-50 text-red-600 border border-red-100" : "bg-green-50 text-green-600 border border-green-100"} ${!studioStatus && "opacity-0"}`}>
+              {studioStatus || "Ready"}
+            </div>
           </div>
         </header>
-        <div className="flex-1 overflow-hidden relative">
+        <div className="studio-content flex-1 overflow-hidden relative" data-studio-page={activeTab}>
           <div className={activeTab === "dashboard" ? "h-full" : "hidden"}>
             {renderDashboard()}
           </div>
