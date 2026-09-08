@@ -64,6 +64,26 @@ class HeadTrackingNode(Node):
         self._scan_tilt_down_rad = float(
             self.declare_parameter("scan_tilt_down_rad", -0.35).value
         )
+        # Lebar baris BAWAH sebagai pecahan scan_pan_rad. 1,0 = sama lebar dengan
+        # baris depan; 0,7 (nilai lama) mempersempitnya supaya kamera melihat di
+        # antara kedua kaki.
+        self._scan_pan_down_ratio = float(
+            self.declare_parameter("scan_pan_down_ratio", 1.0).value
+        )
+        # Sudut tunduk untuk titik sapuan yang ada di UJUNG pan (+-75 deg).
+        # Sengaja lebih dangkal daripada scan_tilt_down_rad: menunduk dalam
+        # SAMBIL menoleh jauh membuat bahu robot masuk ke bingkai. Tunduk yang
+        # dalam hanya dipakai di titik depan (pan 0), yang tidak punya bahu di
+        # jalur pandangnya.
+        self._scan_tilt_down_side_rad = float(
+            self.declare_parameter("scan_tilt_down_side_rad", 0.1745).value
+        )
+        # Sudut tilt pose istirahat sesudah perintah "stop". Dipisah dari
+        # scan_tilt_forward_rad: sejak sapuan diperluas ke atas, memakai sudut
+        # sapuan di sini akan membuat kepala mendongak tiap kali dihentikan.
+        self._scan_neutral_tilt_rad = float(
+            self.declare_parameter("scan_neutral_tilt_rad", -0.12).value
+        )
         self._head_enable_retry_sec = float(
             self.declare_parameter("head_enable_retry_sec", 1.5).value
         )
@@ -172,17 +192,32 @@ class HeadTrackingNode(Node):
         self._head_owner: Optional[str] = None
         self._head_lost_since: Optional[float] = None
 
-        # Scan sweep: forward-left, forward-right, down-right, down-left.
-        # Down positions use slightly narrower pan so the camera looks between
-        # the feet — helps find balls rolling up close.
+        # Pola sapuan, searah keliling dan DIAWALI MENUNDUK KE DEPAN (pan 0).
+        # Titik depan itu satu-satunya yang memakai tunduk penuh: di sana tidak
+        # ada bahu yang menghalangi. Begitu kepala menoleh ke ujung, tunduknya
+        # dangkal (scan_tilt_down_side_rad) supaya bahu tidak masuk bingkai.
+        #
+        #   1. (  0, tunduk dalam)  <- awal, melihat lantai tepat di depan
+        #   2. (-75, tunduk dangkal)
+        #   3. (-75, menengadah)
+        #   4. (+75, menengadah)
+        #   5. (+75, tunduk dangkal)  -> balik ke 1
+        #
+        # Urutannya BUKAN sekadar selera: sasaran pan +-75 harus bertahan dua
+        # langkah berturut-turut, kalau tidak kepala diperintah pergi sebelum
+        # sampai dan sapuannya tidak pernah selebar yang tertulis. Lihat tabel
+        # waktu di head_tracking.yaml.
         p = self._scan_pan_rad
+        pd = p * self._scan_pan_down_ratio
         fw = self._scan_tilt_forward_rad
         dn = self._scan_tilt_down_rad
+        dns = self._scan_tilt_down_side_rad
         self._scan_positions = [
+            (0.0, dn),
+            (-pd, dns),
             (-p, fw),
             (+p, fw),
-            (+p * 0.7, dn),
-            (-p * 0.7, dn),
+            (+pd, dns),
         ]
 
         self.create_timer(1.0 / self._control_rate, self._control_loop)
@@ -197,6 +232,24 @@ class HeadTrackingNode(Node):
             f"  PID gains: P={self._p_gain:.3f}, I={self._i_gain:.3f}, D={self._d_gain:.3f}"
         )
         self.get_logger().info(f"  Scan enabled: {self._scan_enabled}")
+        self.get_logger().info(
+            "  Sapuan: pan +-%.1f deg (total %.0f deg, baris bawah %.0f%%), "
+            "tilt depan %+.1f deg / tunduk %+.1f deg (di ujung pan %+.1f deg), "
+            "istirahat %+.1f deg, periode %.1f s, satu putaran %.1f s"
+            % (math.degrees(self._scan_pan_rad), 2 * math.degrees(self._scan_pan_rad),
+               self._scan_pan_down_ratio * 100.0,
+               math.degrees(self._scan_tilt_forward_rad),
+               math.degrees(self._scan_tilt_down_rad),
+               math.degrees(self._scan_tilt_down_side_rad),
+               math.degrees(self._scan_neutral_tilt_rad),
+               self._scan_period_sec,
+               len(self._scan_positions) * self._scan_period_sec)
+        )
+        self.get_logger().info(
+            "  Titik sapuan (mulai dari menunduk ke depan): %s"
+            % " -> ".join("(%+.0f,%+.0f)" % (math.degrees(a), math.degrees(b))
+                          for a, b in self._scan_positions)
+        )
 
     def _tracker_command_callback(self, msg: String) -> None:
         cmd = msg.data.strip().lower()
@@ -223,7 +276,7 @@ class HeadTrackingNode(Node):
             # executing the last SCAN target after the stop.
             neutral = JointState()
             neutral.name = [self._head_pan_joint, self._head_tilt_joint]
-            neutral.position = [0.0, self._scan_tilt_forward_rad]
+            neutral.position = [0.0, self._scan_neutral_tilt_rad]
             neutral.header.stamp = self.get_clock().now().to_msg()
             self._head_abs_pub.publish(neutral)
             self.get_logger().info("[CMD] deactivated by stop command")

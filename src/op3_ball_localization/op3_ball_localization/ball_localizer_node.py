@@ -278,11 +278,13 @@ class BallLocalizer(Node):
         self._kick_enable = bool(
             self.declare_parameter("kick_enable", True).value
         )
+        # Default halaman ALPHONSE.bin, disamakan dengan op_demo.h. Nilai di
+        # config/ball_localizer.yaml menimpa ini; keduanya harus tetap seiring.
         self._kick_left_page = int(
-            self.declare_parameter("kick_left_page", 120).value
+            self.declare_parameter("kick_left_page", 104).value
         )
         self._kick_right_page = int(
-            self.declare_parameter("kick_right_page", 121).value
+            self.declare_parameter("kick_right_page", 105).value
         )
         self._kick_bearing_deadzone = float(
             self.declare_parameter("kick_bearing_deadzone", 0.08).value
@@ -306,10 +308,10 @@ class BallLocalizer(Node):
             self.declare_parameter("getup_enable", True).value
         )
         self._getup_front_page = int(
-            self.declare_parameter("getup_front_page", 122).value
+            self.declare_parameter("getup_front_page", 85).value
         )
         self._getup_back_page = int(
-            self.declare_parameter("getup_back_page", 123).value
+            self.declare_parameter("getup_back_page", 86).value
         )
         self._getup_apply_mode_delay_sec = float(
             self.declare_parameter("getup_apply_mode_delay_sec", 0.2).value

@@ -27,6 +27,25 @@ head_tracking_node:
     # terasa terlalu lama mematung sesudah bolanya benar-benar pergi.
     lock_hold_sec: 2.0
 
+    # POLA SAPUAN, searah keliling dan DIAWALI MENUNDUK KE DEPAN (permintaan
+    # operator 2026-09-04):
+    #
+    #   1. (pan   0, tilt +25,2)  <- awal: lantai tepat di depan kaki
+    #   2. (pan -55, tilt +10,0)
+    #   3. (pan -55, tilt +10,0)  <- sasaran SAMA: kepala DIAM di sini
+    #   4. (pan +55, tilt +10,0)
+    #   5. (pan +55, tilt +10,0)  <- sasaran SAMA -> balik ke 1
+    #
+    # Urutan ini BUKAN sekadar selera. Sasaran pan +-55 harus bertahan DUA
+    # langkah berturut-turut (titik 2-3 dan 4-5), kalau tidak kepala diperintah
+    # pergi sebelum sampai -- lihat tabel waktu di scan_period_sec.
+    #
+    # 2026-09-08: titik 3 dan 4 DULU menengadah (-26,9 deg) dan itu yang bikin
+    # bola "tidak ke-detect-detect" -- lihat scan_tilt_forward_rad. Sekarang
+    # keduanya memakai sudut yang sama dengan tetangganya, jadi langkah itu
+    # tidak menggerakkan kepala sama sekali: jadi waktu DIAM, dan frame yang
+    # diam itulah yang paling mudah dikenali YOLO.
+    #
     # When no ball is seen, sweep the head through forward + downward positions.
     # CATATAN: sejak 2026-08-25 baris DEPAN memang menengadah sedikit di atas
     # cakrawala (-6,9 deg), atas permintaan lapangan. Aslinya sudut menengadah
@@ -44,8 +63,91 @@ head_tracking_node:
     # Jadi +16 % laju rata-rata, +17 % puncak, satu putaran penuh 7,2 -> 6,4 s,
     # dan jangkauannya justru melebar. Puncak 65,6 deg/s masih di bawah ~74
     # deg/s, titik saat gambar mulai buram buat YOLO.
-    scan_period_sec: 1.6
-    scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
+    #
+    # 2026-09-04: 1,6 -> 2,2 s, DIPAKSA oleh pelebaran pan di bawah. Kepala
+    # tidak bisa menempuh 150 derajat dalam waktu yang lama:
+    #   moving_time = MAX(1,0 ; |delta| / angle_unit) = 150/35 = 4,29 s
+    # sementara satu sasaran pan bertahan dua langkah sapuan, yaitu 2 x periode.
+    # Dengan 1,6 s cuma tersedia 3,20 s -- kepala DIPERINTAH ke sasaran
+    # berikutnya sebelum sampai, jadi sapuannya tidak pernah benar-benar
+    # menyentuh +-75 dan lebarnya cuma sekitar 124 derajat. Dengan 2,2 s
+    # tersedia 4,40 s dan sasarannya tercapai.
+    #
+    #   periode  tersedia  butuh   sampai?  diam   1 putaran (5 titik)
+    #    1,6 s    3,20 s   4,29 s  TIDAK      0 %    8,0 s   <- sebelumnya
+    #    2,2 s    4,40 s   4,29 s  ya         3 %   11,0 s   <- dipakai
+    #    2,6 s    5,20 s   4,29 s  ya        18 %   13,0 s
+    #    3,0 s    6,00 s   4,29 s  ya        29 %   15,0 s
+    #
+    # Dipilih yang paling cepat yang masih SAMPAI. Kalau ternyata YOLO sering
+    # kehilangan bola karena kepala nyaris tidak pernah berhenti, naikkan ke
+    # 2,6 atau 3,0 -- itu menukar kecepatan putaran dengan waktu diam.
+    #
+    # angle_unit TIDAK perlu dinaikkan: puncak laju min-jerk = 1,875 x
+    # angle_unit = 65,6 deg/s, dan angka itu TIDAK bergantung pada jarak
+    # tempuh. Jadi sapuan yang lebih lebar tidak membuat gambar lebih buram --
+    # ia cuma butuh waktu lebih lama. Menaikkan angle_unit justru mendekatkan
+    # puncaknya ke langit-langit buram ~74 deg/s.
+    #
+    # 2026-09-08: 2,2 -> 1,7 s bersama penyempitan pan 75 -> 55 deg, atas
+    # laporan operator "terlalu lama, malah tidak ke-detect-detect".
+    #
+    # angle_unit SENGAJA TIDAK dinaikkan, jadi laju puncak kepala TETAP
+    # 65,6 deg/s -- ketajaman gambarnya sama persis seperti sebelumnya. Yang
+    # dipercepat cuma seberapa sering satu titik ditengok ulang, dan itu
+    # didapat dari jarak tempuh yang lebih pendek, bukan dari kepala yang
+    # digeber. Menaikkan angle_unit justru mendekatkan puncaknya ke ~74 deg/s,
+    # titik saat gambar mulai buram buat YOLO.
+    #
+    # Syarat yang harus dipenuhi periode baru, dua-duanya:
+    #   a. lintasan terpanjang (110 deg, titik 3->4) dapat DUA periode:
+    #      2 x 1,7 = 3,40 s >= 110/35 = 3,14 s  ya
+    #   b. satu putaran cukup untuk semua geraknya:
+    #      5 x 1,7 = 8,50 s >= 1,57 + 0 + 3,14 + 0 + 1,57 = 6,29 s  ya
+    #
+    # Hasilnya, dibanding setelan lama:
+    #                              lama (75 deg, 2,2 s)   baru (55 deg, 1,7 s)
+    #   satu putaran penuh              11,0 s                 8,5 s
+    #   waktu melihat LANTAI             ~61 %                  100 %
+    #   waktu kepala DIAM (tajam)          3 %                   26 %
+    #   laju puncak kepala              65,6 deg/s            65,6 deg/s
+    #
+    # Kalau bolanya masih sering lewat, percepat lagi dengan MENYEMPITKAN pan,
+    # bukan dengan memperpendek periode sendirian -- periode harus selalu
+    # >= pan_deg/35 supaya syarat (a) tetap terpenuhi:
+    #   pan +-50 -> periode 1,55 s -> putaran 7,8 s
+    #   pan +-45 -> periode 1,40 s -> putaran 7,0 s
+    scan_period_sec: 1.7
+    # LEBAR SAPUAN MENDATAR. 0,7 rad (40 deg) -> 1,309 rad (75 deg) atas
+    # permintaan operator 2026-09-04: sapuan kiri-kanan sekarang 75 deg ke kiri
+    # dan 75 deg ke kanan dengan titik tengah 0, jadi satu putaran penuh
+    # menyapu 150 derajat.
+    #
+    # Batas sendi head_pan di head_control_module +-85 deg, jadi 75 masih di
+    # dalam dengan sisa 10 deg. Jangan naikkan sampai 85: modul akan menjepit
+    # perintahnya diam-diam dan sudut sapuan jadi tidak seperti yang tertulis.
+    #
+    # 2026-09-08: 1,309 rad (75 deg) -> 0,9599 rad (55 deg), jadi satu putaran
+    # menyapu 110 derajat, bukan 150.
+    #
+    # Alasannya bukan sekadar mengejar waktu. Sapuan ini cuma dipakai saat bola
+    # TIDAK terlihat, dan di keadaan itu BADAN robot sedang berputar di tempat
+    # memakai preset MENCARI CELAH. Jadi arah pandang yang lebar sudah
+    # disediakan badannya; kepala yang ikut menyapu 150 derajat di atas badan
+    # yang berputar cuma menambah waktu tempuh tanpa menambah cakupan.
+    #
+    # Batas sendi head_pan di head_control_module +-85 deg, jadi 55 masih jauh
+    # di dalam. Kembalikan ke 1.309 kalau memang mau 150 derajat lagi -- tapi
+    # naikkan scan_period_sec ke 2,2 barengan, kalau tidak kepala diperintah
+    # pergi sebelum sampai dan sapuannya justru menyempit sendiri jadi ~124 deg.
+    scan_pan_rad: 0.9599           # pan amplitude at extremes (55 deg)
+
+    # Baris BAWAH dulu sengaja lebih sempit (0,7 x lebar) supaya kamera melihat
+    # di antara kedua kaki. Sejak 2026-09-04 dibuat 1,0 supaya sapuannya
+    # benar-benar 150 derajat penuh seperti yang diminta, bukan 105 derajat di
+    # baris bawah. Turunkan lagi ke 0.7 kalau bola dekat kaki jadi sering
+    # terlewat.
+    scan_pan_down_ratio: 1.0
     # NOTE on this robot the head_tilt sign for the absolute scan command is
     # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
     # Kedua sudut ini DINAIKKAN tiga kali (2026-08-25) karena kepala masih
@@ -62,22 +164,87 @@ head_tracking_node:
     #   depan  +14,3 deg      1,6 m           0,52 m   <- asli
     #   depan   +6,9 deg      3,3 m           0,74 m
     #   depan   +2,9 deg      7,9 m           0,88 m
-    #   depan   -6,9 deg      (di atas        1,53 m   <- sekarang
+    #   depan   -6,9 deg      (di atas        1,53 m   <- s/d 2026-09-03
     #                          cakrawala)
     #   bawah  +31,5 deg      0,65 m          0,30 m   <- asli, itu kakinya
     #   bawah  +22,9 deg      0,95 m          0,41 m
     #   bawah  +14,9 deg      1,50 m          0,54 m
-    #   bawah   +5,2 deg      4,40 m          0,79 m   <- sekarang
+    #   bawah   +5,2 deg      4,40 m          0,79 m   <- s/d 2026-09-03
     #
-    # Tebusannya, dan ini perlu diketahui sebelum bertanding: lantai terdekat
-    # yang masih terlihat SAAT MENYAPU bergeser 0,54 -> 0,79 m, dan baris depan
-    # sekarang menengadah sehingga separuh atas bingkainya berisi dinding, bukan
-    # lapangan. Bola yang menggelinding sampai ke dekat kaki tidak akan ketemu
-    # lewat sapuan -- ia baru ketemu kalau kepala kebetulan sedang melacaknya.
-    # Kalau itu jadi masalah, turunkan LAGI scan_tilt_down_rad saja (baris
-    # bawahlah yang bertugas melihat dekat); baris depan tidak usah ikut.
-    scan_tilt_forward_rad: -0.12   # forward tilt (~-7°, sedikit menengadah)
-    scan_tilt_down_rad: 0.09       # down tilt (~+5°, lantai mulai ~0,79 m)
+    # Keluhan lama yang tertulis di sini -- lantai terdekat saat menyapu cuma
+    # 0,79 m, sehingga bola yang menggelinding sampai dekat kaki tidak pernah
+    # ketemu lewat sapuan -- SUDAH SELESAI oleh pelebaran 2026-09-04 di bawah:
+    # baris bawah sekarang mulai dari 0,38 m.
+    #
+    # 2026-09-04: KEDUA baris DIPERLUAS 20 derajat ke arahnya masing-masing atas
+    # permintaan operator -- baris depan 20 deg lebih MENENGADAH, baris bawah
+    # 20 deg lebih MENUNDUK. Rentang tegak sapuan jadi 12,1 -> 52,1 derajat.
+    #
+    #   depan  -6,9 -> -26,9 deg   (-0,12 -> -0,4691 rad)
+    #   bawah  +5,2 -> +25,2 deg   ( 0,09 ->  0,4391 rad)
+    #
+    # Batas sendi head_tilt -30 (mendongak) .. +75 (menunduk), jadi -26,9 masih
+    # muat dengan sisa 3,1 derajat saja -- JANGAN diperluas lagi ke atas tanpa
+    # menaikkan head_tilt_min_deg, nanti dijepit diam-diam oleh modul.
+    #
+    # Yang berubah di lapangan, dengan kamera ~40 cm dan setengah-FOV 21,6 deg:
+    #   baris DEPAN  (-26,9): seluruh bingkai di ATAS cakrawala -- baris ini
+    #                         tidak lagi melihat lantai sama sekali.
+    #   baris BAWAH  (+25,2): lantai 0,38 m .. 6,4 m, pusat 0,85 m.
+    # Jadi sekarang baris BAWAH yang memikul seluruh pencarian bola di lantai,
+    # dan jangkauannya justru jauh lebih lengkap daripada sebelumnya (dulu
+    # 0,79 m ke jauh, sekarang mulai 0,38 m -- bola di dekat kaki ikut ketemu).
+    #
+    # 2026-09-08: -0,4691 (-26,9 deg, MENENGADAH) -> 0,1745 (+10,0 deg,
+    # menunduk). Ini akar keluhan operator "bola tidak ke-detect-detect".
+    #
+    # Sudut ini dipakai titik 3 dan 4, yaitu KEDUA ujung pan, dan lintasan
+    # antara keduanya adalah gerak TERPANJANG dalam satu putaran (dulu 150 deg,
+    # 4,29 detik dari total 11,0 detik). Dengan tilt -26,9 deg dan setengah-FOV
+    # tegak 21,6 deg, seluruh bingkai berada 5,3 sampai 48,5 derajat DI ATAS
+    # cakrawala: lantai tidak pernah masuk bingkai sama sekali.
+    #
+    # Artinya 39 % dari setiap putaran pencarian dihabiskan menyapu LANGIT,
+    # sementara bolanya di lantai. Itu bukan dugaan, itu konsekuensi langsung
+    # dari angka yang sudah tertulis di komentar di bawah ini sejak 2026-09-04
+    # ("baris ini tidak lagi melihat lantai sama sekali").
+    #
+    # Sekarang nilainya disamakan dengan scan_tilt_down_side_rad, sehingga:
+    #   - kedua ujung pan melihat LANTAI (0,85 m sampai cakrawala);
+    #   - langkah 2->3 dan 4->5 tidak menggerakkan kepala sama sekali, jadi
+    #     berubah jadi waktu DIAM 26 % per putaran -- frame diam jauh lebih
+    #     mudah dikenali YOLO daripada frame yang di-blur gerakan.
+    #
+    # Isi angka yang BERBEDA dari scan_tilt_down_side_rad kalau mau dua baris
+    # tegak di ujung pan lagi. Ongkosnya: tiap perbedaan sudut menambah dua
+    # gerak lagi, masing-masing kena lantai 1,0 detik dari head_control_module,
+    # jadi waktu diamnya habis dan satu putaran kembali memanjang ~2 detik.
+    # JANGAN mengisinya lebih menunduk daripada +10 deg: di ujung pan, tunduk
+    # dalam membuat BAHU robot masuk bingkai (itu sebabnya ujung dipisah dari
+    # titik depan pada 2026-09-04).
+    scan_tilt_forward_rad: 0.1745    # ujung pan ikut menunduk (+10,0 deg)
+    scan_tilt_down_rad: 0.4391       # down tilt (+25,2 deg, lantai 0,38..6,4 m)
+
+    # TUNDUK DI UJUNG PAN, dipisah 2026-09-04 (kedua) atas laporan operator:
+    # menunduk +25,2 deg SAMBIL menoleh +-75 deg membuat BAHU robot masuk ke
+    # bingkai. Bahunya cuma menghalangi kalau kepala menoleh jauh, jadi yang
+    # dikurangi hanya titik ujung -- tunduk penuh tetap dipakai di titik DEPAN
+    # (pan 0), yang jalur pandangnya bebas.
+    #
+    #   titik depan  (pan   0) : +25,2 deg  <- tetap, lantai mulai 0,38 m
+    #   titik ujung  (pan +-75): +10,0 deg  <- turun 15,2 deg dari itu
+    #
+    # +10,0 deg masih 4,8 deg lebih menunduk daripada nilai lama sebelum
+    # pelebaran (+5,2 deg), yang dulu dipakai berbulan-bulan pada pan +-40 deg
+    # tanpa pernah kena bahu. Kalau bahunya MASIH kelihatan, turunkan lagi ke
+    # 0.09 (+5,2 deg) -- itu angka yang sudah terbukti aman.
+    scan_tilt_down_side_rad: 0.1745  # +10,0 deg
+
+    # Pose istirahat sesudah perintah "stop". SENGAJA tidak ikut diperluas:
+    # kalau ia memakai scan_tilt_forward_rad, kepala akan mendongak 27 derajat
+    # tiap kali pelacakan dihentikan. Ini menjaganya tetap di sudut depan yang
+    # lama.
+    scan_neutral_tilt_rad: -0.12
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2

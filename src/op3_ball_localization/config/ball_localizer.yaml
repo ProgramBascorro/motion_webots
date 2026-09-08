@@ -78,8 +78,10 @@ op3_ball_localizer:
     head_track_tilt_smoothing: 0.2
     head_track_max_step: 0.4
     kick_enable: true
-    kick_left_page: 120
-    kick_right_page: 121
+    # Nomor halaman ALPHONSE.bin. Sumber utamanya op3_demo/include/op3_demo/op_demo.h
+    # (LeftKick/RightKick); disalin ke sini karena node ini tidak meng-include-nya.
+    kick_left_page: 104
+    kick_right_page: 105
     kick_bearing_deadzone: 0.08
     kick_center_prefer: right
     kick_hold_still_sec: 0.4
@@ -87,8 +89,9 @@ op3_ball_localizer:
     kick_timeout_sec: 5.0
     kick_cooldown_sec: 1.0
     getup_enable: true
-    getup_front_page: 122
-    getup_back_page: 123
+    # Sumber utamanya op_demo.h (GetUpFront/GetUpBack).
+    getup_front_page: 85
+    getup_back_page: 86
     getup_apply_mode_delay_sec: 0.2
     getup_timeout_sec: 6.0
     getup_cooldown_sec: 2.0
