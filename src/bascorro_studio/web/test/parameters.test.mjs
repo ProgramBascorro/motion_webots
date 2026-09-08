@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  WALKING_KEYS, WALKING_BOOL_FIELDS, parseWalkingNumber, validateWalkingParams,
-  parametersEqual, mergeWalkingEdits, applyWalkingDraft,
+  WALKING_KEYS, WALKING_BOOL_FIELDS, WALKING_INT_FIELDS, parseWalkingNumber,
+  validateWalkingParams, parametersEqual, mergeWalkingEdits, applyWalkingDraft,
+  snapFloat32, snapWalkingRuntime,
 } from "../src/walkingParams.js";
 import {
   KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
@@ -154,4 +155,51 @@ test("kick writes preserve declared double/integer types", () => {
   assert.deepEqual(parameters.find(({ name }) => name === "kick_radius_ready_enable").value,
     { type: 3, double_value: KICK_DEFAULT_PARAMS.kick_radius_ready_enable });
   assert.throws(() => makeKickParameters(KICK_DEFAULT_PARAMS, { ...types, kick_distance: 2 }));
+});
+
+// WalkingParam bertipe float32. Yang dikirim 0.028 kembali sebagai
+// 0.02800000086426735, dan applyWalkingDraft() menuliskan hasil baca ulang itu
+// kembali ke kotak isian -- jadi tiap Apply membuat setelan terlihat berubah
+// sendiri. Yang dirapikan hanya penulisannya; float32-nya harus tetap sama.
+test("float32 read-back is snapped for display without changing the value", () => {
+  const asFloat32 = (value) => Math.fround(value);
+  for (const typed of [-0.03, 0.028, 0.0408, -0.12, 0.77, 0.4, 0.05, 0.016, 0.037,
+                       0.35, 0.7, 0.9, 0.0021, 0.14, 0]) {
+    const readBack = asFloat32(typed);
+    const snapped = snapFloat32(readBack);
+    assert.equal(snapped, typed, `${typed} seharusnya kembali rapi`);
+    assert.equal(Math.fround(snapped), readBack, `${typed} tidak boleh berubah nilainya`);
+  }
+});
+
+test("snapWalkingRuntime leaves booleans and integer gains alone", () => {
+  const runtime = walkingParams({
+    init_x_offset: Math.fround(-0.03), period_time: Math.fround(0.77),
+    balance_enable: true, move_aim_on: false, p_gain: 36, i_gain: 0, d_gain: 0,
+  });
+  const snapped = snapWalkingRuntime(runtime);
+  assert.equal(snapped.init_x_offset, -0.03);
+  assert.equal(snapped.period_time, 0.77);
+  assert.equal(snapped.balance_enable, true);
+  assert.equal(snapped.move_aim_on, false);
+  for (const key of WALKING_INT_FIELDS) assert.equal(snapped[key], runtime[key]);
+  assert.deepEqual(Object.keys(snapped).sort(), Object.keys(runtime).sort());
+});
+
+// Yang sebenarnya dikeluhkan operator: Apply mengembalikan hasil BACA ULANG, dan
+// itu yang mendarat di kotak isian. Sesudah dirapikan, Apply tanpa perubahan
+// apa pun harus mengembalikan angka yang sama persis dengan yang diketik.
+test("apply without edits does not rewrite the operator's numbers", async () => {
+  const typed = walkingParams({ init_x_offset: -0.03, period_time: 0.77, y_swap_amplitude: 0.0021 });
+  const robot = () => snapWalkingRuntime(Object.fromEntries(
+    Object.entries(typed).map(([key, value]) =>
+      [key, typeof value === "number" && !WALKING_INT_FIELDS.has(key) ? Math.fround(value) : value])));
+  const result = await applyWalkingDraft({
+    draft: typed, baseline: typed, read: async () => robot(),
+    publish: () => assert.fail("tidak ada yang berubah, seharusnya tidak menerbitkan apa pun"),
+    check: () => {}, onRead: () => {}, wait: async () => {},
+  });
+  assert.equal(result.init_x_offset, -0.03);
+  assert.equal(result.period_time, 0.77);
+  assert.equal(result.y_swap_amplitude, 0.0021);
 });

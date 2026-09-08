@@ -40,6 +40,7 @@ import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
   parameterValuesEqual, parametersEqual, validateWalkingParams, applyWalkingDraft,
+  snapWalkingRuntime,
 } from "./walkingParams.js";
 import {
   KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
@@ -1843,7 +1844,10 @@ export default function App() {
 
   const readWalkingRuntime = async (context) => {
     const result = await context.call(walkingGetServiceRef.current, { get_param: true });
-    const params = validateWalkingParams(result?.parameters);
+    // Dirapikan di SATU tempat: semua jalur baca walking lewat sini, dan hasilnya
+    // masuk ke kotak isian lewat applyWalkingDraft(). Tanpa ini tiap Apply
+    // menuliskan angka float32 yang sudah berubah jadi double panjang ke layar.
+    const params = snapWalkingRuntime(validateWalkingParams(result?.parameters));
     setWalkingCurrentParams(params);
     setWalkingLoaded(true);
     return params;
@@ -2156,17 +2160,47 @@ export default function App() {
     sendStatus(`Walking version saved: ${name}`);
   };
 
+  // Memuat versi tersimpan: versinya SELALU masuk kotak isian dulu, pembacaan
+  // robot menyusul sebagai bonus.
+  //
+  // Halaman ini punya DUA tombol bernama "Load": yang di baris PARAMETER
+  // membaca robot, yang di baris Versi Tersimpan cuma mengisi kotak isian.
+  // Operator menekan yang kedua lalu Apply, dan Apply menolak dengan "Load
+  // parameter dari robot terlebih dahulu" -- pesan yang menunjuk tombol lain
+  // tanpa mengatakannya. Karena itu tombol ini sekalian membaca robot: itu yang
+  // memasang angka pembanding yang dibutuhkan Apply.
+  //
+  // URUTANNYA: isi draft DULU, baca robot belakangan. Versi pertama fungsi ini
+  // melakukan sebaliknya, dan itu SALAH -- kalau op3_manager tidak menjawab
+  // (mati, atau baru dinyalakan), pembacaannya melempar dan baris pengisi draft
+  // TIDAK PERNAH dijalankan, sehingga versi yang dipilih tidak jadi dimuat sama
+  // sekali. Operator melihatnya sebagai "gerakan yang tersimpan hilang".
+  //
+  // Membalik urutannya aman: readWalkingRuntime() hanya menulis
+  // walkingCurrentParams (kolom CURRENT) dan TIDAK menyentuh walkingParams,
+  // jadi ia tidak bisa membuang draft yang baru saja diisi. Komentar lama di
+  // sini yang mengatakan sebaliknya keliru.
   const loadWalkingVersion = () => {
     if (walkingOperationRef.current) return;
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     if (!selected) {
-      sendStatus("Select a walking version first", true);
+      sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
+
     setWalkingParams(normalizeWalkingParams(selected.params));
     setWalkingVersionName(selected.name);
     setWalkingError("");
-    sendStatus(`Walking version loaded: ${selected.name}`);
+
+    if (!rosConnected) {
+      sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
+        + "pembacaan robot: tekan Load di baris PARAMETER sebelum Apply.", true);
+      return;
+    }
+    runRobotOperation("walking", async (context) => {
+      await readWalkingRuntime(context);
+      sendStatus(`Versi "${selected.name}" dimuat, dan parameter robot ikut dibaca. Tinggal Apply.`);
+    });
   };
 
   const deleteWalkingVersion = () => {
@@ -2886,7 +2920,7 @@ export default function App() {
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
                 Tersimpan di browser
               </span>
-              <span className="text-[10px] text-gray-400">Load Version mengisi UI — tetap perlu Apply untuk kirim ke robot</span>
+              <span className="text-[10px] text-gray-400">Muat versi mengisi kotak isian (dan ikut membaca robot) — tetap perlu Apply untuk kirim</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
               <input
@@ -2923,10 +2957,10 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
                 onClick={loadWalkingVersion}
-                disabled={!selectedWalkingVersion}
-                title="Isi UI dengan parameter dari versi terpilih"
+                disabled={!selectedWalkingVersion || walkingBusy}
+                title="Baca parameter robot, lalu isi kotak isian dengan versi terpilih"
               >
-                Load
+                <RefreshCw size={14} /> Muat versi
               </button>
               <button
                 className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}

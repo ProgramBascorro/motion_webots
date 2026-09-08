@@ -33,6 +33,42 @@ export const WALKING_KEYS = [
   "p_gain", "i_gain", "d_gain",
 ];
 
+// WalkingParam.msg memakai float32; JavaScript memakai float64. Jadi nilai yang
+// DIKIRIM sebagai 0.028 KEMBALI sebagai 0.02800000086426735 -- bukan angka yang
+// berbeda, cuma double terdekat dari float32 yang sama.
+//
+// Itu tidak berbahaya sampai angka tersebut ditulis kembali ke kotak isian, dan
+// applyWalkingDraft() memang melakukannya (ia mengembalikan hasil BACA ULANG,
+// bukan draft operator). Akibatnya tiap kali Apply ditekan, 16 dari 29 field
+// berubah jadi angka 17 digit di layar dan terlihat seperti setelan yang
+// berubah sendiri: -0.03 jadi -0.029999999329447746, 0.77 jadi 0.7699999809265137.
+//
+// Dibulatkan ke desimal TERPENDEK yang masih memetakan ke float32 yang sama.
+// Tidak ada satu bit pun nilai robot yang berubah -- yang dirapikan hanya
+// penulisannya kembali ke double.
+export function snapFloat32(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  const target = Math.fround(numeric);
+  for (let digits = 1; digits <= 9; digits += 1) {
+    const candidate = Number(numeric.toPrecision(digits));
+    if (Math.fround(candidate) === target) return candidate;
+  }
+  return numeric;
+}
+
+// Dipakai pada apa pun yang DIBACA dari walking_module, bukan pada draft
+// operator: yang diketik operator sudah rapi, dan membulatkannya justru bisa
+// mengubah maksudnya.
+export function snapWalkingRuntime(params) {
+  const snapped = { ...params };
+  for (const key of WALKING_KEYS) {
+    if (WALKING_BOOL_FIELDS.has(key) || WALKING_INT_FIELDS.has(key)) continue;
+    snapped[key] = snapFloat32(snapped[key]);
+  }
+  return snapped;
+}
+
 export function parameterValuesEqual(left, right) {
   if (typeof left === "boolean" || typeof right === "boolean") return left === right;
   const leftNumber = parseWalkingNumber(left, NaN);
