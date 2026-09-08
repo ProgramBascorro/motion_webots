@@ -38,34 +38,34 @@ via_pose :
 
 # target pose [deg]
 #
-# DIBUAT OTOMATIS oleh scripts/sync_ini_pose_from_page2.py.
-# Sumber: halaman 2 (WALKING_READY) step[0] dari
-#   src/ROBOTIS-OP3/op3_action_module/data/ALPHONSE.bin
-#
-# JANGAN disunting tangan. Tiap kali halaman 2 di-teach ulang di action
-# editor, jalankan ulang skrip itu -- kalau tidak, tombol INIT (base_module)
-# dan boot demo (action_module) akan berdiri di pose yang berbeda.
-#
-# Konversi: derajat = (raw - 2048) * 360 / 4096.
+# Retuned 2026-07-01 to mirror WALKING_READY (action page 2 step[0] of
+# ALPHONSE.bin) so base_module's boot INIT lands in the same splayed
+# standing stance as action_module WALKING_READY. Values are converted
+# from raw DXL positions via (raw - 2048) * 360 / 4096. Key changes vs the
+# original ROBOTIS defaults:
+#   - hip_roll (ID 9/10):   splayed  +3.52° / -6.86°  (spread 10.4°)
+#   - shoulder/elbow: arms rest lower, matching WALKING_READY's relaxed pose.
+# Head, knee, ankle_pitch stayed at ROBOTIS defaults (already matched
+# WALKING_READY joint-for-joint).
 
 tar_pose :
-  1  : 17.841797      # r_sho_pitch  (raw 2251)
-  2  : -18.632812     # l_sho_pitch  (raw 1836)
-  3  : -11.865234     # r_sho_roll   (raw 1913)
-  4  : 13.359375      # l_sho_roll   (raw 2200)
-  5  : 72.597656      # r_el         (raw 2874)
-  6  : -74.707031     # l_el         (raw 1198)
-  7  : -1.054688      # r_hip_yaw    (raw 2036)
-  8  : -2.021484      # l_hip_yaw    (raw 2025)
-  9  : 3.076172       # r_hip_roll   (raw 2083)
-  10 : -7.382812      # l_hip_roll   (raw 1964)
-  11 : 54.667969      # r_hip_pitch  (raw 2670)
-  12 : -56.162109     # l_hip_pitch  (raw 1409)
-  13 : -69.697266     # r_knee       (raw 1255)
-  14 : 69.257812      # l_knee       (raw 2836)
-  15 : -23.730469     # r_ank_pitch  (raw 1778)
-  16 : 22.851562      # l_ank_pitch  (raw 2308)
-  17 : 0.351562       # r_ank_roll   (raw 2052)
-  18 : -0.791016      # l_ank_roll   (raw 2039)
-  19 : -0.703125      # head_pan     (raw 2040)
-  20 : -29.355469     # head_tilt    (raw 1714)
+  1 : 7.646484         # r_sho_pitch   (raw 2135)
+  2 : -13.007812       # l_sho_pitch   (raw 1900)
+  3 : -13.095703       # r_sho_roll    (raw 1899)
+  4 : 15.908203        # l_sho_roll    (raw 2229)
+  5 : 167.607422       # r_el          (raw 3955)
+  6 : -172.177734      # l_el          (raw   89 = -172° after wrap)
+  7 : -0.263672        # r_hip_yaw     (raw 2045)
+  8 : -0.263672        # l_hip_yaw     (raw 2045)
+  9 : 3.515625         # r_hip_roll    (raw 2088) — splayed
+  10 : -6.855469       # l_hip_roll    (raw 1970) — splayed
+  11 : 37.001953       # r_hip_pitch   (raw 2469)
+  12 : -40.781250      # l_hip_pitch   (raw 1584)
+  13 : -59.501953      # r_knee        (raw 1371)
+  14 : 59.589844       # l_knee        (raw 2726)
+  15 : -28.300781      # r_ank_pitch   (raw 1726)
+  16 : 29.003906       # l_ank_pitch   (raw 2378)
+  17 : 1.142578        # r_ank_roll    (raw 2061)
+  18 : 0.0             # l_ank_roll    (raw 2048)
+  19 : 0.087891        # head_pan      (raw 2049)
+  20 : -10.634766      # head_tilt     (raw 1927)
