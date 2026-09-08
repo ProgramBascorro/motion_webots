@@ -121,7 +121,27 @@ jalan:
   period_time: 0.77
   dsp_ratio: 0.4
   step_fb_ratio: 0.25
-  soft_start_time: 0.05
+  # 2026-09-09: 0.05 -> 0.9 atas permintaan operator, "z dan x-nya harus
+  # bertahap". SENGAJA BEDA dengan versi tersimpan Studio -- jangan dianggap
+  # kesalahan sinkronisasi.
+  #
+  # Knob ini mengatur berapa lama x, y, z dan angle merambat dari nol ke nilai
+  # penuh (rampToward di op3_walking_module), sekaligus tempo awal lewat
+  # timeRampScale(). Dengan 0.05 detik ramp-nya selesai dalam 50 ms, jauh
+  # SEBELUM gait mengambil amplitudo pertama kali di batas fase (~0,29 s), jadi
+  # tidak ada yang bertahap sama sekali -- bukan cuma z, x juga. Yang tampak
+  # bertahap pada x itu potongan setengah langkah pertama
+  # (previous_x_move_amplitude_), mekanisme yang lain.
+  #
+  # Terukur di robot, tinggi angkat kaki per ayunan (penuh 54,4 mm):
+  #   0,05 s   8,6  54,4  54,4  54,4     -> langsung penuh
+  #   0,5  s   4,6  45,6  54,4            -> penuh ~1,4 s
+  #   0,9  s  35,6  49,2  54,4            -> penuh ~1,7 s   <-- dipakai
+  #   1,5  s  22,2  35,0  51,3  54,4      -> penuh ~2,3 s
+  #
+  # Lima preset lain SENGAJA tidak ikut dinaikkan: geser/putar itu gerakan
+  # pendek satu dua langkah, ramp sepanjang ini akan menelan seluruh gerakannya.
+  soft_start_time: 0.9
 
   x_move_amplitude: 0.016
   y_move_amplitude: 0.0

@@ -51,6 +51,19 @@ PETA = [
     ("geser_kanan", "KANAN MIN NEW"),
 ]
 
+# Field yang SENGAJA berbeda dari versi tersimpan Studio. Skrip ini melewatinya
+# dan menjelaskan alasannya, alih-alih diam-diam menimpanya balik.
+#
+# Kalau operator memang mau salah satunya kembali mengikuti Studio, hapus
+# barisnya dari sini -- jangan dipaksa lewat --izinkan-mustahil, itu untuk hal
+# lain (preset di luar jangkauan kaki).
+DISENGAJA_BEDA = {
+    ("jalan", "soft_start_time"):
+        "0.9 dipasang 2026-09-09 supaya x dan z naik BERTAHAP. Nilai Studio "
+        "(0.05) membuat ramp selesai dalam 50 ms, jauh sebelum gait mengambil "
+        "amplitudo pertama kali (~0,29 s), jadi tidak ada yang bertahap.",
+}
+
 # op3_kinematics_dynamics: panjang tautan kaki kanan
 PAHA_M, BETIS_M = 0.11015, 0.110
 JANGKAUAN_M = PAHA_M + BETIS_M
@@ -182,11 +195,17 @@ def main() -> int:
         beda = [(k, y.get(k), s[k]) for k in sorted(s)
                 if k not in y or norm(y[k]) != norm(s[k])]
 
+        dilewati = [(k, a, b) for k, a, b in beda if (sec, k) in DISENGAJA_BEDA]
+        beda = [(k, a, b) for k, a, b in beda if (sec, k) not in DISENGAJA_BEDA]
+
         ok, butuh = terjangkau(s)
         tanda = "" if ok else f"  <- DI LUAR JANGKAUAN: butuh {butuh*1000:.1f} mm dari {JANGKAUAN_M*1000:.1f} mm"
         print(f"{sec:16} {len(beda)} beda{tanda}")
         for k, a, b in beda:
             print(f"    {k:30} {str(a):>10} -> {b}")
+        for k, a, b in dilewati:
+            print(f"    {k:30} {str(a):>10} -- DIPERTAHANKAN (Studio: {b})")
+            print(f"      {DISENGAJA_BEDA[(sec, k)]}")
         if not ok and not args.izinkan_mustahil:
             if beda:
                 ditolak.append(sec)
