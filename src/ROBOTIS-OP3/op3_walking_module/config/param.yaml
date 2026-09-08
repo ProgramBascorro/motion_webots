@@ -1,60 +1,85 @@
-# Init Pose offsets: the neutral stance the gait oscillation is built around.
-# Derived by scripts/walking_ready_fk.py --yaml <export of page 2> on 2026-08-11.
-# The values before that (0.0030 / 0.0320 / 0.0380) came from the script's built-in
-# snapshot, which still held Robot 0's calibration -- not this robot's page 2 -- so
-# walking_module's IK neutral pose did not match the stance the robot boots into.
-# Re-run that script whenever page 2 (WALKING_READY) is re-taught.
+# DIKEMBALIKAN 2026-09-06 ke isi 3 September 2026 (akhir hari, WIB), atas
+# permintaan operator: "batalkan semua perubahan yang telah terjadi setelah
+# tanggal 3 September".
 #
-# Since 2026-08-14 these offsets are also visible while STANDING: with walking_module
-# enabled but not started, the legs track the neutral stance of whatever offsets are
-# current, rate limited to 25 deg/s. So publishing on /robotis/walking/set_params (the
-# Apply button in Bascorro Studio) moves the robot right away, no "start" needed. Right
-# after the capture the tracked pose equals the captured one exactly, so enabling the
-# module still causes no jump.
+# Isinya = preset Bascorro Studio "dari ketua" (tersimpan 2026-08-18, disalin
+# ke sini 2026-08-22). Itulah keadaan berkas ini sepanjang 22 Agustus sampai
+# 3 September.
 #
-# y_offset is the single knob for foot separation. computeNeutralLegAngle() leaves it
-# out of the pose used to derive walking_bias_ -- anything present in both the bias and
-# the gait cancels, which is why the FK-derived 0.0205 that used to sit here never did
-# anything -- but it DOES put it into the pose the legs track while standing. So the
-# stance is exactly as wide standing as it is walking: "start" and "stop" no longer pull
-# the feet toward the centreline, and Apply widens the stance right away (rate limited
-# to 25 deg/s) instead of hiding the change until the first step.
+# TIGA SAKLAR DICABUT, kunci di sini MAUPUN kodenya di op3_walking_module:
 #
-# The 0.010 below is a starting point, not an FK-derived number: this robot's page 2
-# already stands splayed (hip_roll spread ~10.4 deg) and walking_bias_ keeps that, so
-# this is *extra* gap on top of it -- roughly y_offset + 6 mm between the feet. Tune it
-# from Bascorro Studio (Walking -> Init Pose -> Y offset) with the robot standing and
-# walking_module enabled; 0 restores the pre-2026-08-17 stance exactly.
+#   walking_bias_enable     (dipasang 2026-09-04)
+#   soft_start_enable       (dipasang 2026-09-06)
+#   first_step_half_enable  (dipasang 2026-09-06)
 #
-# Units here are NOT the units the WalkingParam message carries, which is what
-# Bascorro Studio's Walking tab shows: period_time is ms here / seconds there, and
-# roll/pitch/yaw/hip_pitch/pelvis are degrees here / radians there. foot_height,
-# swing_right_left and swing_top_down are z_move_amplitude, y_swap_amplitude and
-# z_swap_amplitude there. Keep WALKING_DEFAULT_PARAMS in App.jsx and the fallbacks in
-# WalkingModule::initialize() in step with this file -- they are what the operator sees
-# before the first Load, and period_time was left at 750 ms in both of them for a while
-# after this file went to 500.
+# Ikut dicabut: seluruh perbaikan soft start 5-6 September (softStartActive(),
+# pelepasan ramp saat Apply, penjagaan di timeRampScale/startWalking), dan
+# checkPoseReference()/restorePoseReference() di op3_demo/ball_follower.
+# Jadi walking_module dan ball_follower kembali ke perilaku 3 September:
+# walking_bias_ selalu hidup, soft start apa adanya, langkah pertama dipotong
+# setengah, dan tidak ada snapshot acuan pose antar run.
+#
+# YANG DIBATALKAN DIBANDING KEADAAN 6 SEPTEMBER:
+#   x_offset          -0.02   (sempat -0.03)
+#   pitch_offset      -4.0107 (sempat -6.8755)
+#   hip_pitch_offset   7.9985 (sempat  8.0214)
+#   period_time        800    (sempat  770)
+#   dsp_ratio          0.58   (sempat  0.4)
+#   step_fb_ratio      0.2    (sempat  0.25)
+#   soft_start_time    2000   (sempat  50)
+#   swing_right_left  -0.002  (sempat  0.0021)
+#   swing_top_down     0.006  (sempat  0)
+#   pelvis_offset      3.0023 (sempat  2.8648)
+#   p_gain             36     (sempat  16)
+#
+# AKIBAT YANG PERLU DIINGAT. Berkas ini adalah TITIK ACUAN perekaman
+# walking_bias_, bukan salinan preset:
+#
+#     pose robot = page 2 + [ neutral(preset yang hidup) - neutral(berkas ini) ]
+#
+# Karena isinya kembali berbeda dengan preset JALAN KE SURGA, init pose preset
+# itu terasa lagi di robot: x -10,0 mm, pitch -2,8648 deg, hip_pitch +0,0229
+# deg terhadap pose page 2. Itu memang keadaan 3 September.
+#
+# SATUANNYA BEDA dengan Bascorro Studio: di sini DERAJAT dan MILIDETIK, di sana
+# radian dan detik. loadWalkingParam() yang mengalikan DEGREE2RADIAN dan 0,001.
+# Nama kuncinya juga beda: foot_height / swing_right_left / swing_top_down =
+# z_move_amplitude / y_swap_amplitude / z_swap_amplitude, dan
+# step_forward_back_ratio = step_fb_ratio.
+#
+# walking_module membaca berkas ini SEKALI saat boot, jadi sesudah diubah
+# op3_manager harus dijalankan ulang. Demo menimpa x/y/angle move amplitude di
+# atasnya lewat preset dan ramp-nya sendiri.
+#
+# Jaga WALKING_DEFAULT_PARAMS di bascorro_studio/web/src/App.jsx tetap seirama
+# dengan berkas ini -- itu yang dilihat operator sebelum menekan Load.
 #
 # NOTE: sending "save" on /robotis/walking/command rewrites this file and drops comments.
-x_offset: 0.0046
-y_offset: 0.010
+x_offset: -0.02
+y_offset: 0.028
 z_offset: 0.0408
 roll_offset: 0
-pitch_offset: 3.9992452331112465
+pitch_offset: -4.010704565915763
 yaw_offset: 0
 hip_pitch_offset: 7.9984904662224929
-period_time: 500
-dsp_ratio: 0.349999994
-step_forward_back_ratio: 0.25
-foot_height: 0.0399999991
-swing_right_left: 0.0199999996
-swing_top_down: 0.00600000005
+period_time: 800
+dsp_ratio: 0.58
+step_forward_back_ratio: 0.2
+soft_start_time: 2000
+foot_height: 0.037
+swing_right_left: -0.002
+swing_top_down: 0.006
 pelvis_offset: 3.0022988690251378
-arm_swing_gain: 1.5
-balance_hip_roll_gain: 0.349999994
-balance_knee_gain: 0.400000006
-balance_ankle_roll_gain: 0.699999988
-balance_ankle_pitch_gain: 0.899999976
-p_gain: 32
+arm_swing_gain: 0
+# Balance (IMU) mati di preset "dari ketua". Kunci ini dipasang 2026-08-22
+# (sebelum 3 September, jadi TETAP): sebelumnya balance_enable tidak pernah
+# dibaca dari yaml sama sekali, jadi mematikannya lewat Studio selalu kembali
+# menyala pada Apply berikutnya.
+balance_enable: false
+balance_hip_roll_gain: 0.35
+balance_knee_gain: 0.4
+balance_ankle_roll_gain: 0.7
+balance_ankle_pitch_gain: 0.9
+p_gain: 36
 i_gain: 0
 d_gain: 0

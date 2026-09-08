@@ -17,6 +17,8 @@
 /* Author: SCH, Jay Song, Kayman */
 
 #include <iostream>
+#include <cmath>
+
 #include "op3_kinematics_dynamics/op3_kinematics_dynamics.h"
 
 namespace robotis_op
@@ -1003,10 +1005,36 @@ bool OP3KinematicsDynamics::calcInverseKinematicsForLeg(double *out, double x, d
   Eigen::Vector3d p03 = robotis_framework::getRotationZ(*(out + 0))*robotis_framework::getTransitionXYZ(hip_pitch_offset_m_, 0, 0);
   Eigen::Vector3d p36 = p06 - p03;
   
-  *(out + 3) = -acos((thigh_length_m_*thigh_length_m_ + calf_length_m_*calf_length_m_ - p36.norm()*p36.norm())/(2*thigh_length_m_*calf_length_m_)) + EIGEN_PI;
+  //
+  // PENJAGA NaN, dikembalikan 2026-09-08. Versi ROBOTIS di bawah (yang
+  // dikomentari) memang punya "if (std::isnan(arc_cos)) return false", tapi
+  // penulisan ulang yang aktif ini menghilangkannya. Akibatnya fungsi ini
+  // SELALU melapor berhasil, termasuk saat kaki diminta ke tempat yang tidak
+  // terjangkau: acos di luar [-1,1] mengembalikan NaN, dan NaN itu diteruskan
+  // ke pemanggil sebagai "sukses".
+  //
+  // Jejaknya sangat khas dan sempat membingungkan: yang dilaporkan
+  // walking_module adalah "IK produced non-finite leg_angle[2]", BUKAN indeks 0
+  // atau 1. Sebabnya getRotationY(NaN) menyisakan kolom tengahnya utuh
+  // ([0,1,0]), sehingga out[1] yang cuma memakai kolom itu tetap berhingga,
+  // dan out[2] jadi NaN pertama yang terlihat.
+  //
+  // Batas jangkauannya paha + betis. Yang menentukan sisa jangkauan saat
+  // berjalan adalah init_z_offset (dalamnya jongkok): pada 0 mm kaki sudah
+  // lurus penuh dan SATU langkah maju 16 mm saja sudah melewatinya.
+  const double knee_cos = (thigh_length_m_*thigh_length_m_ + calf_length_m_*calf_length_m_
+                           - p36.norm()*p36.norm()) / (2*thigh_length_m_*calf_length_m_);
+  if (std::isfinite(knee_cos) == false || knee_cos < -1.0 || knee_cos > 1.0)
+    return false;
+
+  *(out + 3) = -acos(knee_cos) + EIGEN_PI;
 
   //calc q5
-  double alpha = asin(thigh_length_m_*sin(EIGEN_PI - *(out + 3))/p36.norm());
+  const double alpha_sin = thigh_length_m_*sin(EIGEN_PI - *(out + 3))/p36.norm();
+  if (std::isfinite(alpha_sin) == false || alpha_sin < -1.0 || alpha_sin > 1.0)
+    return false;
+
+  double alpha = asin(alpha_sin);
   Eigen::Vector3d p63 = -R06.transpose()*p36;
   *(out + 4) = -atan2(p63(0), getSign(p63(2))*sqrt(p63(1)*p63(1) + p63(2)*p63(2))) - alpha;
 
