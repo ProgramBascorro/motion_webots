@@ -4,16 +4,19 @@ motion:
 #  0 : .
   4 : Thank you
   15 : Sit downn
-  1 : Stand up
-  9 : Walk Ready
   23 : Yes Go
   27 : Oops
-# soccer
-  80 : Init pose
-  122 : Get up(Front)
-  123 : Get up(Back)
-  121 : Right Kick
-  120 : Left Kick
+# soccer -- nomor halaman ALPHONSE.bin, disamakan dengan op3_demo/include/op3_demo/op_demo.h
+#
+# "Stand up" bawaan OP3 dulu ada di halaman 1 dan sudah dibuang dari daftar ini:
+# di .bin robot ini halaman 1 adalah Init pose, jadi dua entri dengan kunci 1
+# akan bentrok (YAML memakai kunci yang belakangan).
+  1 : Init pose
+  2 : Walk Ready
+  85 : Get up(Front)
+  86 : Get up(Back)
+  105 : Right Kick
+  104 : Left Kick
   60 : Keeper Ready
   61 : Defence to Right
   62 : Defence to Left

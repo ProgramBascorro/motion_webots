@@ -7,6 +7,7 @@ from launch.actions import (
 )
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
@@ -37,6 +38,15 @@ def generate_launch_description():
             default_value=sub_controller_device_default,
             description='Serial device path for the OpenCR sub-controller (ID 200)'
         ),
+        # >0 = mainkan halaman itu saat boot (default 2 = WALKING_READY),
+        # 0  = jalur lama ini_pose lewat base_module,
+        # <0 = lewati, karena ada node lain yang mengurus init pose.
+        # demo.launch.xml mengoper -1: demo_node memainkan page 2 sendiri.
+        DeclareLaunchArgument(
+            'boot_init_page',
+            default_value='2',
+            description='Action page played at boot; 0 = ini_pose path, negative = skip'
+        ),
         SetEnvironmentVariable('OP3_ACTION_FILE', action_file_path_default),
         Node(
             package='op3_manager',
@@ -58,7 +68,13 @@ def generate_launch_description():
                 'robot_file_path': robot_file_path_default,
                 'init_file_path': init_file_path_default,
                 'device_name': LaunchConfiguration('device_name'),
-                'sub_controller_device': LaunchConfiguration('sub_controller_device')
+                'sub_controller_device': LaunchConfiguration('sub_controller_device'),
+                # ParameterValue dengan value_type=int wajib: LaunchConfiguration
+                # selalu menghasilkan string, dan node mendeklarasikannya sebagai
+                # int (op3_manager.cpp), jadi tanpa konversi ini manager langsung
+                # mati dengan InvalidParameterTypeException saat start.
+                'boot_init_page': ParameterValue(
+                    LaunchConfiguration('boot_init_page'), value_type=int)
             }]
         )
         # Node(

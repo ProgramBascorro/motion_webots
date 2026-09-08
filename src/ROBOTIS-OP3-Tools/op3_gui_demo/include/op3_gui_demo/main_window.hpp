@@ -114,15 +114,21 @@ Q_OBJECT
   void setHeadAngle();
 
  private:
+  // Disamakan dengan op3_demo/include/op3_demo/op_demo.h -- itu sumber utamanya.
+  // Berkas ini menyalin angkanya karena op3_gui_demo tidak bergantung pada
+  // op3_demo; kalau nomor halaman di ALPHONSE.bin berubah, ubah keduanya.
+  //
+  // Ceremony dulu 85, dan 85 sekarang GetUpFront: tombol Ceremony akan memainkan
+  // gerakan bangun kalau dibiarkan. Diikutkan ke nilai op_demo.h (17).
   enum Motion_Index
   {
     InitPose = 1,
-    WalkingReady = 9,
-    GetUpFront = 122,
-    GetUpBack = 123,
-    RightKick = 121,
-    LeftKick = 120,
-    Ceremony = 85,
+    WalkingReady = 2,
+    GetUpFront = 85,
+    GetUpBack = 86,
+    RightKick = 105,
+    LeftKick = 104,
+    Ceremony = 17,
   };
 
   void setUserShortcut();

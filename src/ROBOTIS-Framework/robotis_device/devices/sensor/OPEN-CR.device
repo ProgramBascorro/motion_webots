@@ -9,6 +9,10 @@ device_type = sensor
    3   | ID                       | 1      | RW     | EEPROM | 0             | 252         | N
    4   | baudrate                 | 1      | RW     | EEPROM | 0             | 252         | N
    5   | return_delay_time        | 1      | RW     | EEPROM | 0             | 254         | N
+   6   | mag_x_offset             | 2      | RW     | EEPROM | -32768        | 32767       | Y
+   8   | mag_y_offset             | 2      | RW     | EEPROM | -32768        | 32767       | Y
+   10  | mag_z_offset             | 2      | RW     | EEPROM | -32768        | 32767       | Y
+   12  | mag_cali_valid           | 1      | RW     | EEPROM | 0             | 255         | N
    16  | status_return_level      | 1      | RW     | EEPROM | 0             | 2           | N
    24  | dynamixel_power          | 1      | RW     | RAM    | 0             | 1           | N
    25  | LED                      | 1      | RW     | RAM    | 0             | 7           | N
@@ -24,7 +28,20 @@ device_type = sensor
    42  | acc_z                    | 2      | R      | RAM    | -32768        | 32768       | Y
    44  | roll                     | 2      | R      | RAM    | 0             | 4096        | N
    46  | pitch                    | 2      | R      | RAM    | 0             | 4096        | N
-   48  | yaw                      | 2      | R      | RAM    | 0             | 4096        | N
+   48  | yaw                      | 2      | R      | RAM    | -1800         | 1800        | Y
    50  | imu_control              | 1      | RW     | RAM    | 0             | 255         | N
-   
-   
+   51  | mag_x                    | 2      | R      | RAM    | -32768        | 32767       | Y
+   53  | mag_y                    | 2      | R      | RAM    | -32768        | 32767       | Y
+   55  | mag_z                    | 2      | R      | RAM    | -32768        | 32767       | Y
+   57  | mag_heading              | 2      | R      | RAM    | 0             | 3600        | N
+   59  | yaw_gyro                 | 2      | R      | RAM    | -32768        | 32767       | Y
+   61  | mag_status               | 1      | R      | RAM    | 0             | 3           | N
+
+# Catatan:
+#   yaw         : -1800..1800 = -180.0..180.0 derajat (0.1 deg, format sama dengan roll & pitch)
+#                 magnetometer, 0 derajat = arah badan robot saat OpenCR dinyalakan
+#   mag_heading : 0..3600 = arah kompas absolut, TANPA referensi nyala-awal
+#   yaw_gyro    : yaw lama hasil fusi gyro (0.1 derajat, bisa negatif), untuk pembanding
+#   mag_status  : 0 = tidak ada magnetometer, 1 = settling, 2 = OK, 3 = sedang kalibrasi
+#   imu_control : bit0-2 kalibrasi offset roll/pitch/yaw, bit3 kalibrasi gyro,
+#                 bit4 kalibrasi hard-iron magnetometer, bit5 jadikan arah sekarang = 0 derajat

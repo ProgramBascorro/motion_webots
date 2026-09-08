@@ -33,9 +33,39 @@ def ensure_action_file(action_file_path: str, default_path: str) -> None:
     os.makedirs(os.path.dirname(action_file_path), exist_ok=True)
     shutil.copyfile(default_path, action_file_path)
 
+def port_guard() -> bool:
+    """False kalau ada proses lain yang masih memegang port robot.
+
+    Tanpa ini, start kedua tetap "berhasil" membuka port (SDK tidak memakai
+    TIOCEXCL) lalu mati dengan pesan yang menuduh perangkat -- 2026-08-18:
+    empat percobaan berturut-turut kandas di "Failed to turn on the Power of
+    DXLs!" padahal OpenCR sehat; yang salah cuma satu editor lama yang masih
+    hidup. Alat pemeriksanya dipakai bersama launcher lain, lihat
+    scripts/op3_port_users.py.
+    """
+    candidates = []
+    ws = os.environ.get('OP3_WS', '').strip()
+    if ws:
+        candidates.append(os.path.join(ws, 'scripts/op3_port_users.py'))
+    # --symlink-install membuat __file__ menunjuk ke pohon sumber, jadi naik dari
+    # sini sampai ketemu scripts/ milik workspace.
+    here = os.path.dirname(os.path.realpath(__file__))
+    while here != os.path.sep:
+        candidates.append(os.path.join(here, 'scripts/op3_port_users.py'))
+        here = os.path.dirname(here)
+    candidates.append('/ros2_ws/scripts/op3_port_users.py')
+    for guard in candidates:
+        if os.path.isfile(guard):
+            return subprocess.run([sys.executable, guard, '--quiet']).returncode == 0
+    return True  # alat tidak ketemu -- jangan halangi start
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = ActionEditorExecutor()
+
+    if not port_guard():
+        return 1
 
     # Define your package and executable
     package = "op3_action_editor"
@@ -119,4 +149,7 @@ def main(args=None):
     rclpy.shutdown()
 
 if __name__ == '__main__':
-    main()
+    # main() sudah lama mengembalikan 1 untuk kegagalan (berkas aksi hilang, port
+    # dipegang proses lain) tapi nilainya dibuang, jadi shell selalu melihat 0 dan
+    # launcher tidak bisa membedakan gagal dari sukses.
+    sys.exit(main())

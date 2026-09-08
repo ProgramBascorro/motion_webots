@@ -50,10 +50,10 @@ op3_joy_teleop:
     turn_max_yaw: 0.25
 
     enable_kicks: true
-    # left_kick_page: 120
-    # right_kick_page: 121
+    # Nomor halaman ALPHONSE.bin. Sumber utamanya op3_demo/include/op3_demo/op_demo.h
+    # (LeftKick/RightKick). Nilai bawaan OP3 dulu 120/121.
     left_kick_page: 104
-    right_kick_page: 218
+    right_kick_page: 105
 
     kick_mode_button: 4
     kick_mode_longpress_sec: 0.5
@@ -65,8 +65,7 @@ op3_joy_teleop:
     kick_cooldown_sec: 1.0
     enable_getups: true
     
-    # getup_front_page: 122
-    # getup_back_page: 123
+    # Sumber utamanya op_demo.h (GetUpFront/GetUpBack). Bawaan OP3 dulu 122/123.
     getup_front_page: 85
     getup_back_page: 86
 

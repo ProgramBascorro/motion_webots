@@ -125,8 +125,10 @@ class Op3JoyTeleop(Node):
         )
 
         self._enable_kicks = bool(self.declare_parameter("enable_kicks", True).value)
-        self._left_kick_page = int(self.declare_parameter("left_kick_page", 120).value)
-        self._right_kick_page = int(self.declare_parameter("right_kick_page", 121).value)
+        # Default halaman ALPHONSE.bin, disamakan dengan op_demo.h. Nilai di
+        # config/op3_joy_teleop.yaml menimpa ini; keduanya harus tetap seiring.
+        self._left_kick_page = int(self.declare_parameter("left_kick_page", 104).value)
+        self._right_kick_page = int(self.declare_parameter("right_kick_page", 105).value)
         self._kick_mode_button = int(
             self.declare_parameter("kick_mode_button", 4).value
         )
@@ -153,10 +155,10 @@ class Op3JoyTeleop(Node):
         )
         self._enable_getups = bool(self.declare_parameter("enable_getups", True).value)
         self._getup_front_page = int(
-            self.declare_parameter("getup_front_page", 122).value
+            self.declare_parameter("getup_front_page", 85).value
         )
         self._getup_back_page = int(
-            self.declare_parameter("getup_back_page", 123).value
+            self.declare_parameter("getup_back_page", 86).value
         )
         self._getup_mode_button = int(
             self.declare_parameter("getup_mode_button", 1).value

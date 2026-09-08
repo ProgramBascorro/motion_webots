@@ -84,7 +84,13 @@ class HeadControlModule : public robotis_framework::MotionModule, public robotis
 
   int control_cycle_msec_;
   std::thread queue_thread_;
-  std::thread *tra_gene_thread_;
+  // tra_gene_thread_ dihapus 2026-08-22. Dulu tiap perintah kepala melakukan
+  // `tra_gene_thread_ = new std::thread(...)` lalu detach, dan pointer lamanya
+  // ditimpa tanpa pernah di-delete -- satu objek std::thread bocor per perintah.
+  // Saat pelacakan bola itu puluhan per detik. Anggota ini tidak pernah dibaca
+  // di mana pun (cuma di-assign lalu di-detach), bahkan tidak diinisialisasi di
+  // konstruktor, jadi tidak ada gunanya disimpan: sekarang thread-nya dibuat
+  // sebagai objek sementara dan langsung di-detach di tempat.
   std::mutex tra_lock_;
   rclcpp::Publisher<robotis_controller_msgs::msg::StatusMsg>::SharedPtr status_msg_pub_;
   const bool DEBUG;

@@ -144,8 +144,8 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
   // Drop the command if process() hasn't yet populated goal_position_ from
   // the controller's joint feedback. Blocking-spin here was flooding the
   // terminal for ~6 s during module-enable handshake. The caller
-  // (head_tracking_node) re-issues SCAN every ~2.5 s, so dropping the
-  // first one is harmless.
+  // (head_tracking_node) re-issues its scan target every scan_period_sec,
+  // so dropping the first one costs one period, not the session.
   if (has_goal_position_ == false)
   {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
@@ -203,8 +203,10 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
   scan_state_ = NoScan;
 
   // generate trajectory
-  tra_gene_thread_ = new std::thread(&HeadControlModule::jointTraGeneThread, this);
-  tra_gene_thread_->detach();
+  // Objek sementara, langsung di-detach: tidak ada yang perlu disimpan atau
+  // dibebaskan. Versi lama menyimpannya di anggota kelas dan menimpanya tiap
+  // perintah tanpa delete -- bocor satu std::thread per perintah.
+  std::thread(&HeadControlModule::jointTraGeneThread, this).detach();
 }
 
 void HeadControlModule::setHeadScanCallback(const std_msgs::msg::String::SharedPtr msg)
@@ -493,8 +495,10 @@ void HeadControlModule::generateScanTra(const int head_direction)
   }
 
   // generate trajectory
-  tra_gene_thread_ = new std::thread(&HeadControlModule::jointTraGeneThread, this);
-  tra_gene_thread_->detach();
+  // Objek sementara, langsung di-detach: tidak ada yang perlu disimpan atau
+  // dibebaskan. Versi lama menyimpannya di anggota kelas dan menimpanya tiap
+  // perintah tanpa delete -- bocor satu std::thread per perintah.
+  std::thread(&HeadControlModule::jointTraGeneThread, this).detach();
 }
 
 /*

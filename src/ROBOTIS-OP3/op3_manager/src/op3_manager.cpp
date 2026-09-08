@@ -419,7 +419,17 @@ int main(int argc, char **argv)
   //
   // Both calls below go through singletons already constructed above, so this
   // allocates nothing new — adding publishers to this function is what smashed
-  // the stack last time. Set boot_init_page:=0 to go back to the ini_pose path.
+  // the stack last time.
+  //
+  // Tiga nilai boot_init_page:
+  //   > 0  mainkan halaman itu lewat action_module (jalur normal, default 2)
+  //   = 0  jalur lama: publish "ini_pose" ke base_module
+  //   < 0  JANGAN init pose sama sekali -- dipakai kalau ada node lain yang
+  //        sudah mengurusnya. op3_demo/launch/demo.launch.xml mengoper -1,
+  //        karena demo_node juga memainkan page 2 sendiri (demo_node.cpp:175).
+  //        Tanpa itu keduanya balapan tiap boot dan yang kalah mencetak
+  //        "Can not play page 2.(Now playing)" + "Failed to start page 2" --
+  //        ERROR palsu yang bikin ERROR asli ikut diabaikan.
   int boot_init_page = 2;
   node->declare_parameter<int>("boot_init_page", boot_init_page);
   node->get_parameter("boot_init_page", boot_init_page);
@@ -448,13 +458,19 @@ int main(int argc, char **argv)
 
     RCLCPP_INFO(node->get_logger(), "Go to init pose (action page %d)", boot_init_page);
   }
-  else
+  else if (boot_init_page == 0)
   {
     // boot_init_page:=0 keeps the old base_module path.
     std_msgs::msg::String init_msg;
     init_msg.data = "ini_pose";
     g_init_pose_pub->publish(init_msg);
     RCLCPP_INFO(node->get_logger(), "Go to init pose (ini_pose → base_module)");
+  }
+  else
+  {
+    RCLCPP_INFO(node->get_logger(),
+                "Init pose dilewati (boot_init_page=%d) — node lain yang mengurusnya.",
+                boot_init_page);
   }
 
   auto health_service = node->create_service<std_srvs::srv::Trigger>(
