@@ -245,7 +245,7 @@ TEST_F(KickAlignmentTest, WalkingPresetMatchesAllScreenshotFields)
     {"init_x_offset", -0.03}, {"init_y_offset", 0.028}, {"init_z_offset", 0.0408},
     {"init_roll_offset", 0.0}, {"init_pitch_offset", -0.12}, {"init_yaw_offset", 0.0},
     {"period_time", 0.77}, {"dsp_ratio", 0.4}, {"step_fb_ratio", 0.25},
-    {"soft_start_time", 0.05}, {"x_move_amplitude", 0.016}, {"y_move_amplitude", 0.0},
+    {"x_move_amplitude", 0.016}, {"y_move_amplitude", 0.0},
     {"z_move_amplitude", 0.037}, {"angle_move_amplitude", 0.0},
     {"angle_move_amplitude_turn_in", 0.0}, {"balance_hip_roll_gain", 0.35},
     {"balance_knee_gain", 0.4}, {"balance_ankle_roll_gain", 0.7},
@@ -259,6 +259,19 @@ TEST_F(KickAlignmentTest, WalkingPresetMatchesAllScreenshotFields)
   EXPECT_FALSE(walking["move_aim_on"].as<bool>());
   EXPECT_FALSE(walking["balance_enable"].as<bool>());
   EXPECT_EQ(36, follower_->walking().p_gain);
+
+  // soft_start_time SENGAJA berbeda dari versi tersimpan Studio (0.05), diperiksa
+  // terpisah supaya penjaga di atas tetap ketat untuk 28 field lainnya.
+  //
+  // Dengan 0.05 detik ramp selesai dalam 50 ms, jauh sebelum gait mengambil
+  // amplitudo pertama kali di batas fase (~0,29 s), jadi x maupun z langsung
+  // penuh -- bukan itu yang diminta operator. Terukur di robot, tinggi angkat
+  // kaki per ayunan (penuh 54,4 mm): 0,05 s -> 8,6/54,4/54,4 (langsung),
+  // 0,9 s -> 35,6/49,2/54,4 (bertahap, penuh ~1,7 s).
+  EXPECT_DOUBLE_EQ(0.9, walking["soft_start_time"].as<double>())
+      << "kalau ini gagal karena preset disamakan lagi dengan Studio, x dan z "
+         "kembali langsung penuh; lihat scripts/sync_preset_from_studio.py "
+         "DISENGAJA_BEDA";
 }
 
 TEST_F(KickAlignmentTest, YawSignKeepsOperatorPresetMapping)
