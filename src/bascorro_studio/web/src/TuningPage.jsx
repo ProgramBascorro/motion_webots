@@ -20,7 +20,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
-import { parseWalkingNumber } from "./walkingParams.js";
+import { parseWalkingNumber, validateWalkingParams } from "./walkingParams.js";
 
 // --- Constants ---
 
@@ -200,7 +200,7 @@ const NumberInput = ({ value, onChange, step = 1, className = "" }) => (
   />
 );
 
-export default function TuningPage({ ros, rosState, joyState, publishJoy, sendStatus }) {
+export default function TuningPage({ ros, rosState, joyState, publishJoy, sendStatus, walkingControls }) {
   // --- State: Offsets ---
   const [offsetRows, setOffsetRows] = useState([]);
   const [offsetLoading, setOffsetLoading] = useState(false);
@@ -216,6 +216,12 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
     period_time: 0.0,
   });
   const [walkingFull, setWalkingFull] = useState(null);
+  const walkingBusy = walkingControls.busy;
+  const walkingUnavailable = rosState !== "connected" || walkingBusy;
+
+  useEffect(() => {
+    setWalkingFull(null);
+  }, [ros, rosState]);
   
   // --- State: Manual Param ---
   const [paramNode, setParamNode] = useState("op3_yolo_vision");
@@ -233,9 +239,6 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
   const offsetCommandPubRef = useRef(null);
   const offsetServiceRef = useRef(null);
   
-  const walkingCommandPubRef = useRef(null);
-  const walkingParamPubRef = useRef(null);
-  const walkingGetServiceRef = useRef(null);
   const enableModulePubRef = useRef(null);
   const preFocusSnapshotRef = useRef(null);
 
@@ -293,21 +296,6 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
     });
 
     // Walking
-    walkingCommandPubRef.current = new ROSLIB.Topic({
-      ros,
-      name: "/robotis/walking/command",
-      messageType: "std_msgs/String",
-    });
-    walkingParamPubRef.current = new ROSLIB.Topic({
-      ros,
-      name: "/robotis/walking/set_params",
-      messageType: "op3_walking_module_msgs/WalkingParam",
-    });
-    walkingGetServiceRef.current = new ROSLIB.Service({
-      ros,
-      name: "/robotis/walking/get_params",
-      serviceType: "op3_walking_module_msgs/srv/GetWalkingParam",
-    });
     enableModulePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/enable_ctrl_module",
@@ -429,52 +417,38 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
 
   // --- Actions: Walking ---
 
-  const loadWalkingParams = () => {
-    if (!walkingGetServiceRef.current || rosState !== "connected") return;
-    walkingGetServiceRef.current.callService(new ROSLIB.ServiceRequest({ get_param: true }), (res) => {
-      if (res?.parameters) {
-        setWalkingFull(res.parameters);
-        setWalkingParams({
-          x_move_amplitude: res.parameters.x_move_amplitude ?? 0,
-          y_move_amplitude: res.parameters.y_move_amplitude ?? 0,
-          angle_move_amplitude: res.parameters.angle_move_amplitude ?? 0,
-          period_time: res.parameters.period_time ?? 0,
-        });
-        sendStatus("Walking Params Loaded");
-      }
-    });
+  const setWalkingSnapshot = (params) => {
+    setWalkingFull(params);
+    setWalkingParams(Object.fromEntries(WALKING_PARAM_FIELDS.map(({ key }) => [key, params[key]])));
   };
 
-  const applyWalkingParams = () => {
-    if (!walkingParamPubRef.current || !walkingFull) {
-      sendStatus("Load params first", true);
-      return false;
-    }
-    // Every field not shown on this card is carried over from the last Load, because
-    // walkingParameterCallback() does walking_param_ = *msg -- publishing a partial
-    // struct would reset the whole gait (balance_enable included) to zero.
-    // A field the user is midway through typing falls back to that same loaded value
-    // instead of to 0; see walkingParams.js.
-    const payload = { ...walkingFull };
-    for (const field of WALKING_PARAM_FIELDS)
-      payload[field.key] = parseWalkingNumber(walkingParams[field.key], walkingFull[field.key]);
-
-    // period_time is a divisor in updateTimeParam(); 0 would make every gait angle NaN
-    // and freeze the legs mid-step.
-    if (!(payload.period_time > 0)) {
-      sendStatus("Period (s) harus lebih besar dari 0", true);
-      return false;
-    }
-
-    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
-    sendStatus("Walking Params Applied");
-    return true;
+  const loadWalkingParams = async () => {
+    if (walkingUnavailable) return;
+    const params = await walkingControls.load();
+    if (params) setWalkingSnapshot(params);
   };
 
-  const sendWalkingCommand = (command, label) => {
-    if (!walkingCommandPubRef.current || rosState !== "connected") return;
-    walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
-    sendStatus(label || `Walking: ${command}`);
+  const applyWalkingParams = async (start = false) => {
+    if (walkingUnavailable || !walkingFull) {
+      sendStatus("Load parameter walking terlebih dahulu dan tunggu operasi selesai", true);
+      return;
+    }
+    try {
+      const draft = validateWalkingParams({ ...walkingFull, ...walkingParams });
+      const result = await walkingControls.apply(draft, walkingFull, start === true);
+      if (result) setWalkingSnapshot(result);
+    } catch (error) {
+      sendStatus(error.message, true);
+    }
+  };
+
+  const sendWalkingCommand = (command) => {
+    if (command === "stop") return walkingControls.stop();
+    if (walkingUnavailable) return;
+    if (command === "start") return walkingControls.start();
+    if (command === "save") return walkingControls.save();
+    if (command === "balance on") return walkingControls.balance(true);
+    if (command === "balance off") return walkingControls.balance(false);
   };
 
   // --- Filter Logic ---
@@ -807,7 +781,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
             onToggleCollapse={() => toggleCardCollapse(CARD_IDS.walkingTuner)}
             onToggleFocus={() => toggleCardFocus(CARD_IDS.walkingTuner)}
             actions={
-              <button onClick={loadWalkingParams} className="p-1.5 text-gray-400 hover:text-undip-blue hover:bg-blue-50 rounded transition-colors"><RefreshCw size={14}/></button>
+              <button onClick={loadWalkingParams} disabled={walkingUnavailable} title="Load parameter runtime" className="p-1.5 text-gray-400 hover:text-undip-blue hover:bg-blue-50 rounded transition-colors"><RefreshCw size={14}/></button>
             }
           >
             <div className="space-y-5">
@@ -818,7 +792,12 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                       <span className="text-xs font-mono font-bold text-undip-blue">{parseWalkingNumber(walkingParams[field.key], walkingFull?.[field.key] ?? 0).toFixed(4)}</span>
                    </div>
                    <div className="flex gap-2">
-                     <NumberInput 
+                     <input
+                        type="text"
+                        inputMode="decimal"
+                        aria-label={"tuner_" + field.key}
+                        disabled={walkingUnavailable}
+                        className="w-full px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono"
                         value={walkingParams[field.key]} 
                         onChange={e => setWalkingParams({ ...walkingParams, [field.key]: e.target.value })} 
                         step={field.step}
@@ -826,6 +805,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                      {field.quick.map(q => (
                        <button
                           key={q.label}
+                          disabled={walkingUnavailable}
                           onClick={() => setWalkingParams(p => ({
                             ...p,
                             [field.key]: (parseWalkingNumber(p[field.key], walkingFull?.[field.key] ?? 0) + q.delta).toFixed(6),
@@ -840,10 +820,10 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
               ))}
 
               <div className="pt-2 grid grid-cols-2 gap-3">
-                 <button onClick={applyWalkingParams} className="py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl text-xs font-bold transition-all">
+                 <button onClick={() => applyWalkingParams(false)} disabled={walkingUnavailable || !walkingFull} className="py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl text-xs font-bold transition-all">
                    Apply Only
                  </button>
-                 <button onClick={() => { if(applyWalkingParams()) sendWalkingCommand("start", "Updated & Started"); }} className="py-2.5 bg-undip-blue text-white hover:bg-opacity-90 rounded-xl text-xs font-bold transition-all shadow-sm">
+                 <button onClick={() => applyWalkingParams(true)} disabled={walkingUnavailable || !walkingFull} className="py-2.5 bg-undip-blue text-white hover:bg-opacity-90 rounded-xl text-xs font-bold transition-all shadow-sm">
                    Apply & Start
                  </button>
               </div>
@@ -864,8 +844,8 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
              <div className="space-y-3">
                 <button
                   className="w-full py-2.5 bg-gradient-to-r from-undip-blue to-blue-900 text-white rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
-                  onClick={() => enableModulePubRef.current?.publish(new ROSLIB.Message({ data: "walking_module" }))}
-                  disabled={rosState !== "connected"}
+                  onClick={walkingControls.enable}
+                  disabled={walkingUnavailable}
                 >
                   <Cpu size={16} /> Enable Walking Module
                 </button>
@@ -901,7 +881,7 @@ export default function TuningPage({ ros, rosState, joyState, publishJoy, sendSt
                   onClick={() => sendWalkingCommand("save")}
                   disabled={rosState !== "connected"}
                 >
-                  Save Params to Flash
+                  Save Runtime to YAML
                 </button>
              </div>
           </SectionCard>

@@ -20,9 +20,12 @@ import {
   BicepsFlexed,
   Footprints,
   Gamepad2,
+  Crosshair,
   Info,
   Play,
+  PlayCircle,
   RefreshCw,
+  Ruler,
   Save,
   Send,
   Square,
@@ -33,12 +36,31 @@ import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
 import WalkingSimPreview from "./WalkingSimPreview.jsx";
-import { parseWalkingNumber } from "./walkingParams.js";
+import {
+  parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
+  parameterValuesEqual, parametersEqual, validateWalkingParams, applyWalkingDraft,
+  snapWalkingRuntime,
+} from "./walkingParams.js";
+import {
+  KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
+  decodeKickParameters, makeKickParameters,
+} from "./kickParams.js";
+import { measureBall, MEASURE_WINDOW_DEFAULTS } from "./kickMeasure.js";
+import { callRosService, waitForRobot } from "./net/services.js";
 import {
   computeDefaultRosbridgeUrl,
   normalizeRosbridgeUrl,
   rewriteLoopbackToCurrentHost,
 } from "./net/rosbridge.js";
+
+// Status magnetometer OpenCR (register 61). Menentukan apakah nilai Yaw layak dipercaya:
+// pada status selain OK/kalibrasi, open_cr_module sengaja memaksa yaw ke 0.
+const MAG_STATUS = {
+  0: { label: "no mag", cls: "bg-red-100 text-red-600" },
+  1: { label: "settling", cls: "bg-amber-100 text-amber-600" },
+  2: { label: "ok", cls: "bg-green-100 text-green-600" },
+  3: { label: "calib", cls: "bg-blue-100 text-blue-600" },
+};
 
 const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
 const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
@@ -52,8 +74,16 @@ const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
 const WALKING_SEED_FLAG_KEY = "bascorro.walking_versions.seeded.dari_claude.v2";
 const TELEOP_COMMAND_TOPIC = "/op3_joy_teleop/command";
 const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
+// Gambar beranotasi dari detektor bola yang SAMA dengan yang dipakai demo.
+//
+// demo.launch.xml meng-include op3_ball_detector/yolo_ball_detector_openvino.launch.py,
+// dan berkas itu menjalankan usb_cam (namespace usb_cam_node) + detektornya
+// (namespace ball_detector_node). Jadi topik yang benar-benar ada saat demo
+// hidup adalah /ball_detector_node/image_out, bukan /vision/yolo/debug --
+// yang terakhir itu milik op3_yolo_vision, pipeline lain yang tidak dipakai
+// demo.launch.xml. Peluncur tmux kini menjalankan berkas yang sama.
 const DEFAULT_OVERLAY_TOPIC =
-  import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
+  import.meta.env.VITE_OVERLAY_TOPIC || "/ball_detector_node/image_out";
 
 // WALKING_READY is action page 2 (user's calibrated standing pose).
 const WALKING_READY_PAGE_NUM = 2;
@@ -66,13 +96,32 @@ const WALKING_READY_PLAY_MS = 1800;
 // Time for op3_manager to load the walking_module control_module before we
 // publish "start"; otherwise the start command is dropped silently.
 const WALKING_ENABLE_SETTLE_MS = 1200;
+const WALKING_LEG_JOINTS = [
+  "r_hip_yaw", "l_hip_yaw", "r_hip_roll", "l_hip_roll", "r_hip_pitch", "l_hip_pitch",
+  "r_knee", "l_knee", "r_ank_pitch", "l_ank_pitch", "r_ank_roll", "l_ank_roll",
+];
 // robotis_controller merges sync_write_item per port per cycle — sending two
 // items in the same ~8 ms tick silently drops the second. Stagger them.
 const SYNC_ITEM_GAP_MS = 60;
+// Batas kecepatan servo yang dipasang sebelum torsi dinyalakan.
+//
+// APA YANG SEBENARNYA DIBATASI: profile_velocity/profile_acceleration hanya
+// mengekang gerakan yang dihasilkan SERVO SENDIRI, yaitu sentakan saat torsi
+// menyala sementara posisi sekarang jauh dari goal yang tersimpan. Kecepatan
+// Init Pose dan gait TIDAK ikut terkekang -- action_module dan walking_module
+// menghitung lintasannya sendiri lalu menulis goal baru tiap 8 ms dengan
+// langkah yang sudah kecil-kecil, jadi profil servo hampir tidak berperan di
+// situ. Lamanya Init Pose ditentukan halaman di ALPHONSE.bin, bukan di sini.
+//
+// Satuan XM430-W350: profile_velocity 0,229 rpm per hitungan, jadi 8 kira-kira
+// 11 deg/detik di keluaran. 0 berarti TANPA BATAS.
+//
+// Angka "Lambat" diturunkan 15 -> 8 pada 2026-09-06 atas laporan operator
+// ("sudah dipilih lambat masih juga kencang").
 const TORQUE_SPEED_PRESETS = [
-  { key: "slow",   label: "Lambat", velocity: 15, accel: 6,  restoreMs: 5000 },
-  { key: "medium", label: "Sedang", velocity: 35, accel: 12, restoreMs: 3000 },
-  { key: "fast",   label: "Cepat",  velocity: 70, accel: 25, restoreMs: 2000 },
+  { key: "slow",   label: "Lambat", velocity: 8,  accel: 4,  approxDegPerSec: 11 },
+  { key: "medium", label: "Sedang", velocity: 20, accel: 8,  approxDegPerSec: 27 },
+  { key: "fast",   label: "Cepat",  velocity: 45, accel: 20, approxDegPerSec: 62 },
 ];
 const DEFAULT_TORQUE_SPEED_KEY = "medium";
 
@@ -83,11 +132,36 @@ const PARAM_TYPES = {
   string: 4,
 };
 
-const YOLO_PARAM_KEYS = [
-  "ball_confidence_threshold",
-  "goalpost_confidence_threshold",
-  "robot_confidence_threshold",
-];
+// Parameter DETEKTOR yang benar-benar jalan, yaitu node
+// /ball_detector_node/yolo_ball_detector dari paket op3_ball_detector -- yang
+// sama dengan yang di-include demo.launch.xml.
+//
+// SEBELUM 2026-09-08 daftar ini berisi ball_/goalpost_/robot_confidence_threshold
+// dan ditembakkan ke /op3_yolo_vision/*. Tiga-tiganya salah sekaligus:
+//   1. nama nodenya bukan "op3_yolo_vision" melainkan "yolo_detector";
+//   2. pipeline itu memang tidak pernah dijalankan peluncur mana pun;
+//   3. detektor yang JALAN tidak punya satu pun nama parameter itu.
+// Jadi slider di halaman Vision tidak pernah berpengaruh sama sekali.
+//
+// Yang dibuka hanya dua ambang yang memang dibaca ulang saat berjalan (lihat
+// _on_set_parameters di yolo_ball_detector.py). model_path, imgsz, device dan
+// detection_rate SENGAJA tidak dibuka: ketiganya cuma dipakai saat memuat model
+// atau membuat timer, jadi menyetelnya lewat parameter tidak berpengaruh.
+const YOLO_PARAM_KEYS = ["confidence_threshold", "iou_threshold"];
+
+const YOLO_PARAM_INFO = {
+  confidence_threshold: {
+    label: "Ambang keyakinan",
+    help: "Di bawah angka ini deteksi dibuang. Terikat pada BOBOT yang dipakai: " +
+      "v8n (Bola-baru) memberi keyakinan sekitar 0,45 sehingga 0,50 memblokir semuanya, " +
+      "sedangkan ball_yolov8n int8 sekitar 0,85. Turunkan kalau bola tidak pernah terdeteksi.",
+  },
+  iou_threshold: {
+    label: "Ambang IoU",
+    help: "Seberapa banyak dua kotak boleh bertindih sebelum salah satunya dibuang. " +
+      "Jarang perlu diubah; naikkan kalau satu bola terdeteksi jadi beberapa kotak.",
+  },
+};
 
 // What the grid shows before the first Load, so it has to be the same gait the robot
 // actually boots with: every value here mirrors op3_walking_module/config/param.yaml,
@@ -101,36 +175,46 @@ const YOLO_PARAM_KEYS = [
 // (action page 2) joint values -- regenerate with scripts/walking_ready_fk.py --yaml
 // <page 2 export> when the page is re-taught, and update param.yaml together with
 // this block.
+// CERMIN op3_walking_module/config/param.yaml: preset "dari ketua"
+// (tersimpan 2026-08-18), yang sejak 2026-08-22 juga jadi isi param.yaml.
+//
+// Inilah yang mengisi kotak isian SEBELUM operator menekan Load, jadi harus
+// tetap seirama dengan param.yaml. Dikembalikan ke isi 3 September pada
+// 2026-09-06 bersama param.yaml-nya.
 const WALKING_DEFAULT_PARAMS = {
   // init_y_offset is the one value here that is NOT FK-derived: the walking module
   // leaves the lateral offset out of the stance it derives walking_bias_ from, so this
   // is extra foot separation on top of page 2 -- applied both standing and walking.
-  // 0.010 is a starting point to tune, not a derived number. See param.yaml.
-  init_x_offset: 0.0046,
-  init_y_offset: 0.010,
+  init_x_offset: -0.02,
+  init_y_offset: 0.028,
   init_z_offset: 0.0408,
   init_roll_offset: 0,
-  init_pitch_offset: 0.0698,
+  init_pitch_offset: -0.07,
   init_yaw_offset: 0,
-  period_time: 0.5,       // param.yaml period_time: 500 (ms)
-  dsp_ratio: 0.35,
-  step_fb_ratio: 0.25,
+  period_time: 0.8,       // param.yaml period_time: 800 (ms)
+  dsp_ratio: 0.58,
+  step_fb_ratio: 0.2,
+  soft_start_time: 2.0,   // param.yaml soft_start_time: 2000 (ms)
+  // x_move_amplitude di sini cuma nilai awal kotak isian. Saat demo, besarnya
+  // ditentukan ball_follower dan dibatasi MAX_FB_STEP = 0.0181 m -- lihat
+  // op3_demo/src/soccer/ball_follower.cpp.
   x_move_amplitude: 0,
   y_move_amplitude: 0,
-  z_move_amplitude: 0.04,
+  z_move_amplitude: 0.037,
   angle_move_amplitude: 0,
+  angle_move_amplitude_turn_in: 0,
   move_aim_on: false,
-  balance_enable: true,
+  balance_enable: false,
   balance_hip_roll_gain: 0.35,
   balance_knee_gain: 0.4,
   balance_ankle_roll_gain: 0.7,
   balance_ankle_pitch_gain: 0.9,
-  y_swap_amplitude: 0.020,
+  y_swap_amplitude: -0.002,
   z_swap_amplitude: 0.006,
-  arm_swing_gain: 1.5,
+  arm_swing_gain: 0,
   pelvis_offset: 0.0524,
   hip_pitch_offset: 0.1396,
-  p_gain: 32,
+  p_gain: 36,
   i_gain: 0,
   d_gain: 0,
 };
@@ -175,7 +259,7 @@ const WALKING_PARAM_HELP = {
   period_time: {
     artinya: "Durasi satu siklus langkah dalam detik.",
     fungsi: "Mengatur cepat-lambat gait. Nilai besar berarti langkah lebih lambat dan biasanya lebih aman.",
-    tuning: "Baseline robot ini 0.50 (param.yaml 500 ms) dan itu tergolong cepat. Untuk test aman naikkan dulu ke 0.85, lalu turunkan perlahan.",
+    tuning: "Baca nilai runtime dengan Load; param.yaml dan preset demo dapat berbeda. Ubah bertahap dengan robot digantung atau dipegang, bukan berdasarkan angka referensi browser.",
     risk: "Terlalu kecil membuat langkah agresif dan robot mudah jatuh."
   },
   dsp_ratio: {
@@ -189,6 +273,12 @@ const WALKING_PARAM_HELP = {
     fungsi: "Mengatur pembagian fase ayunan kaki forward/backward.",
     tuning: "Biasanya jangan disentuh dulu. Pakai default 0.25 sampai gait dasar sudah stabil.",
     risk: "Timing yang salah bisa membuat kaki nyeret atau hentakan langkah."
+  },
+  soft_start_time: {
+    artinya: "Lama (detik) robot menaikkan parameter grup Movement dan tempo langkah dari kecil ke nilai penuh, dihitung sejak tombol start ditekan.",
+    fungsi: "Membuat nilai di halaman ini jadi BATAS ATAS, bukan nilai langkah pertama. X/Y/Z/Angle move amplitude dan period time naik bertahap selama waktu ini, supaya arus servo tidak melonjak dan robot tidak oleng saat mulai jalan. Menekan Apply di tengah jalan juga lewat jalur yang sama: nilai baru dikejar bertahap, bukan dilompati.",
+    tuning: "2.0 detik kira-kira empat langkah pada period time 0.5 s. Naikkan kalau langkah pertama masih tersentak; turunkan kalau robot terasa lamban menuruti perintah. Isi 0 untuk mematikan (langsung penuh, perilaku sebelum 2026-08-18).",
+    risk: "Terlalu besar membuat robot lama mencapai kecepatan yang diminta, dan itu merepotkan kalau butuh reaksi cepat. Hanya grup Timing dan Movement yang terpengaruh; Init pose, Gait shape, Balance dan Gain tidak."
   },
   x_move_amplitude: {
     artinya: "Besar langkah maju-mundur per siklus.",
@@ -213,6 +303,12 @@ const WALKING_PARAM_HELP = {
     fungsi: "Dipakai untuk robot belok kiri/kanan saat walking.",
     tuning: "Mulai kecil, misalnya 0.05 rad. Naikkan hanya kalau belok terlalu lambat.",
     risk: "Turn besar bisa membuat kaki silang dan balance hilang."
+  },
+  angle_move_amplitude_turn_in: {
+    artinya: "Besar putaran yaw \"putar dalam\", sumbu TERPISAH dari Angle move amplitude di atasnya.",
+    fungsi: "Bedanya dua: (1) kedua hip yaw -- servo 7 dan servo 8 -- memutar ke arah yang SAMA, sedangkan sumbu di atas memutar keduanya berlawanan; (2) satu kaki yaw-nya DIAM selama telapaknya di udara, dan seluruh putarannya dipindah ke saat telapak itu sudah menapak, jadi putaran badan datang dari gesekan telapak dan bukan terbuang di udara.",
+    tuning: "Tanda menentukan arah putaran badan sekaligus kaki mana yang berputar saat menapak: POSITIF = searah jarum jam, kaki KIRI (servo 8) yang berputar saat menapak; NEGATIF = berlawanan arah jarum jam, kaki KANAN (servo 7), dan sifat \"putar ke dalam\"-nya tetap sama karena kedua sisi benar-benar bercermin. 0 mematikan sumbu ini sepenuhnya dan gait kembali persis aslinya. Nilai ini DIJUMLAHKAN di atas Angle move amplitude, jadi keduanya bisa dipakai bersamaan; untuk mengenal efeknya, biarkan Angle move amplitude 0 dulu.",
+    risk: "Telapak yang menapak menggosok lantai lebih lama, jadi beban servo 7/8 dan keausan telapak naik. Nilai besar bisa membuat kaki silang dan balance hilang, sama seperti turn biasa."
   },
   move_aim_on: {
     artinya: "Flag mode aim/move pada message walking.",
@@ -320,6 +416,7 @@ const WALKING_PARAM_GROUPS = [
       { key: "period_time", label: "Period time", unit: "s", step: 0.01, ...WALKING_PARAM_HELP.period_time },
       { key: "dsp_ratio", label: "DSP ratio", unit: "ratio", step: 0.01, ...WALKING_PARAM_HELP.dsp_ratio },
       { key: "step_fb_ratio", label: "Step FB ratio", unit: "ratio", step: 0.01, ...WALKING_PARAM_HELP.step_fb_ratio },
+      { key: "soft_start_time", label: "Soft start", unit: "s", step: 0.1, ...WALKING_PARAM_HELP.soft_start_time },
     ],
   },
   {
@@ -330,6 +427,7 @@ const WALKING_PARAM_GROUPS = [
       { key: "y_move_amplitude", label: "Y move amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.y_move_amplitude },
       { key: "z_move_amplitude", label: "Z move amplitude / foot height", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_move_amplitude },
       { key: "angle_move_amplitude", label: "Angle move amplitude", unit: "rad", step: 0.005, ...WALKING_PARAM_HELP.angle_move_amplitude },
+      { key: "angle_move_amplitude_turn_in", label: "Angle move amplitude turn in (putar dalam)", unit: "rad", step: 0.005, ...WALKING_PARAM_HELP.angle_move_amplitude_turn_in },
       { key: "move_aim_on", label: "Move aim on", type: "bool", ...WALKING_PARAM_HELP.move_aim_on },
     ],
   },
@@ -373,9 +471,6 @@ const WALKING_PARAM_GROUPS = [
   },
 ];
 
-const WALKING_INT_FIELDS = new Set(["p_gain", "i_gain", "d_gain"]);
-const WALKING_BOOL_FIELDS = new Set(["move_aim_on", "balance_enable"]);
-
 // Blank/partial input falls back to the default rather than to 0 -- see
 // walkingParams.js for why Number() alone was wrong here.
 function normalizeWalkingParams(params = {}) {
@@ -393,8 +488,10 @@ function normalizeWalkingParams(params = {}) {
 
 function formatWalkingValue(value, field) {
   if (field.type === "bool") return value ? "true" : "false";
-  if (field.type === "int") return String(Math.round(Number(value) || 0));
-  return formatNumber(value, 5);
+  const numeric = parseWalkingNumber(value, NaN);
+  if (!Number.isFinite(numeric)) return "—";
+  if (field.type === "int") return String(numeric);
+  return formatNumber(numeric, 5);
 }
 
 function readWalkingVersions() {
@@ -448,9 +545,11 @@ const CLAUDE_WALKING_PARAMS = {
   period_time: 0.8,
   dsp_ratio: 0.4,
   step_fb_ratio: 0.25,
+  soft_start_time: 2.0,
   x_move_amplitude: 0.02,
   y_move_amplitude: 0,
   angle_move_amplitude: 0,
+  angle_move_amplitude_turn_in: 0,
   z_move_amplitude: 0.04,
   move_aim_on: false,
   y_swap_amplitude: 0.025,
@@ -500,6 +599,100 @@ function seedWalkingVersions(versions) {
     {
       id: CLAUDE_WALKING_VERSION_ID,
       name: CLAUDE_WALKING_VERSION_NAME,
+      createdAt: now,
+      updatedAt: now,
+      params: preset,
+    },
+    ...versions,
+  ];
+}
+
+// Versi tersimpan "JALAN KE SURGA" di Studio.
+//
+// Angka aslinya, yang disetel operator 2026-09-02 dan harus sama persis dengan
+// bagian `jalan` di op3_demo/config/preset_walking.yaml -- itulah yang
+// benar-benar dipakai robot saat demo, jadi keduanya wajib seirama.
+//
+// Sempat diisi preset lama "dari ketua" pada 2026-09-05 (penanda .v1), lalu
+// dikembalikan ke angka ini di hari yang sama (penanda .v2). Arsip "dari ketua"
+// ada di komentar preset_walking.yaml dan di WALKING_DEFAULT_PARAMS di atas.
+//
+// x_move_amplitude 0,016 sengaja DITULIS di sini (WALKING_DEFAULT_PARAMS
+// menaruh 0 karena di sana perannya cuma nilai awal kotak isian). Di slot
+// tersimpan angkanya harus asli: ball_follower membacanya sebagai max_fb_step_.
+const JALAN_WALKING_VERSION_NAME = "JALAN KE SURGA";
+const JALAN_WALKING_VERSION_ID = "jalan-ke-surga-v1";
+// Penanda seed diturunkan dari REVISI ISI di bawah, bukan nomor yang dinaikkan
+// manual. Ubah angkanya -> ubah JALAN_WALKING_SEED_REV -> kunci penandanya ikut
+// berubah -> browser mana pun menyegarkan slot itu sekali di muat berikutnya.
+// Dengan begitu tidak bisa lagi terjadi "angkanya sudah diganti tapi Studio diam".
+const JALAN_WALKING_SEED_REV = "2026-09-02";
+const JALAN_WALKING_SEED_FLAG_KEY =
+  `bascorro.walking_versions.seeded.jalan_ke_surga.${JALAN_WALKING_SEED_REV}`;
+const JALAN_WALKING_PARAMS = {
+  init_x_offset: -0.03,
+  init_y_offset: 0.028,
+  init_z_offset: 0.0408,
+  init_roll_offset: 0,
+  init_pitch_offset: -0.12,
+  init_yaw_offset: 0,
+  period_time: 0.77,
+  dsp_ratio: 0.4,
+  step_fb_ratio: 0.25,
+  soft_start_time: 0.05,
+  x_move_amplitude: 0.016,
+  y_move_amplitude: 0,
+  z_move_amplitude: 0.037,
+  angle_move_amplitude: 0,
+  angle_move_amplitude_turn_in: 0,
+  move_aim_on: false,
+  balance_enable: false,
+  balance_hip_roll_gain: 0.35,
+  balance_knee_gain: 0.4,
+  balance_ankle_roll_gain: 0.7,
+  balance_ankle_pitch_gain: 0.9,
+  y_swap_amplitude: 0.0021,
+  z_swap_amplitude: 0.0,
+  arm_swing_gain: 0,
+  pelvis_offset: 0.05,
+  hip_pitch_offset: 0.14,
+  p_gain: 16,
+  i_gain: 0,
+  d_gain: 0,
+};
+
+// Menyegarkan versi "JALAN KE SURGA" sekali per browser.
+//
+// Bentuknya sengaja sama dengan seedWalkingVersions(): MURNI (cuma membaca
+// penanda, tidak pernah menulisnya) karena StrictMode memanggil initializer
+// useState dua kali di mode dev, dan id-nya tetap supaya kedua panggilan
+// menghasilkan entri yang sama. Penandanya ditulis dari useEffect di bawah.
+//
+// Kalau slotnya sudah ada, isinya DITIMPA di tempat -- nama, urutan, dan versi
+// tersimpan lain tidak disentuh. Kalau belum ada, ditambahkan di depan.
+function seedJalanWalkingVersion(versions) {
+  if (typeof window === "undefined") return versions;
+  try {
+    if (localStorage.getItem(JALAN_WALKING_SEED_FLAG_KEY)) return versions;
+  } catch {
+    // Penyimpanan browser dibatasi (mode privat): lewati saja, jangan
+    // merusak halaman.
+    return versions;
+  }
+  const now = Date.now();
+  const preset = normalizeWalkingParams(JALAN_WALKING_PARAMS);
+
+  const existing = versions.findIndex((version) => version.name === JALAN_WALKING_VERSION_NAME);
+  if (existing !== -1) {
+    const refreshed = versions.slice();
+    refreshed[existing] = { ...versions[existing], params: preset, updatedAt: now };
+    return refreshed;
+  }
+
+  return [
+    {
+      id: JALAN_WALKING_VERSION_ID,
+      name: JALAN_WALKING_VERSION_NAME,
       createdAt: now,
       updatedAt: now,
       params: preset,
@@ -574,6 +767,314 @@ function decodeImage(msg) {
     return new ImageData(pixels, width, height);
   }
   return null;
+}
+
+// Tiga mode demo yang dikenal demoModeCommandCallback() di
+// op3_demo/src/demo_node.cpp. "ready" sengaja TIDAK di sini: ia bukan mode
+// yang bisa dijalankan, melainkan perintah keluar dari demo yang sedang
+// berjalan, jadi tempatnya di tombol berhenti.
+//
+// YANG PALING PENTING dan sempat salah di halaman ini: MEMILIH MODE SUDAH
+// MEMULAI DEMONYA. Di robot, setDemoEnable() memanggil startSoccerMode()
+// (soccer) atau startProcess() (action) langsung. Menekan Start sesudahnya
+// justru MENGHENTIKAN demo, karena "start" itu toggle:
+//
+//     if (msg->data == "start") {
+//       if (soccer_requested_ == true) stopSoccerMode();
+//       else                           startSoccerMode();
+//     }
+//
+// Urutan "pilih mode lalu tekan Start" -- yang dulu tertulis di halaman ini --
+// karena itu berakhir dengan robot yang diam saja.
+const DEMO_MODES = [
+  {
+    key: "soccer",
+    label: "Soccer",
+    description:
+      "Cari bola, dekati, luruskan yaw, lalu tendang. Inilah mode yang memakai semua parameter di halaman Jarak Tendangan.",
+  },
+  {
+    key: "action",
+    label: "Action",
+    description: "Memainkan daftar halaman gerakan dari berkas aksi. Tidak menyentuh walking module.",
+  },
+  {
+    key: "vision",
+    label: "Vision",
+    description: "Peragaan pengolahan citra saja; kendali Jeda/Lanjut tidak dipakai di mode ini.",
+  },
+];
+
+// ---- Halaman TENDANGAN: semua penentu jarak tendangan --------------------
+//
+// Yang diatur di sini BUKAN isi WalkingParam, melainkan parameter ROS milik
+// node demo_node. Bawaannya cermin op3_demo/launch/demo.launch.xml; kalau
+// launch-nya diubah, ubah juga di sini supaya kotak isian sebelum tombol
+// "Muat dari robot" tidak menyesatkan.
+//
+// SEMUANYA dikirim sebagai DOUBLE, saklar on/off sekalipun. Di launch pun
+// saklar ditulis bertipe float (0.0 / 1.0), dan set_parameters MENOLAK nilai
+// yang tipenya berbeda dari yang sudah dideklarasikan node -- mengirim boolean
+// untuk kick_radius_ready_enable akan gagal, bukan sekadar diabaikan.
+const KICK_PARAM_GROUPS = [
+  {
+    title: "Jarak tendang",
+    description:
+      "Inti halaman ini. Jarak yang dipakai robot untuk memutuskan bola sudah cukup dekat untuk ditendang.",
+    fields: [
+      {
+        key: "kick_distance",
+        label: "Jarak tendang",
+        unit: "m",
+        step: 0.005,
+        artinya: "Ambang estimasi jarak horizontal kamera ke bola untuk mendekat dan memicu tendangan, bukan jarak laju bola sesudah ditendang.",
+        fungsi:
+          "Dipakai dua kali sekaligus: (1) pemicu tendangan, dan (2) jarak BERHENTI saat mendekat. calcFootstep() diberi (jarak bola - jarak tendang), jadi begitu bola sampai di angka ini langkah majunya dijepit ke nol dengan sendirinya.",
+        tuning:
+          "Acuan kanan 7 September 2026: 0,15 m dari proyeksi kamera, bukan dari ujung kaki. Ubah paling banyak 0,005 m per uji terawasi. Kalau berhenti terlalu jauh, kecilkan; kalau menabrak bola, besarkan.",
+        risk:
+          "Terlalu kecil berarti robot menginjak bola sebelum sempat menendang; terlalu besar berarti kaki mengayun di udara.",
+      },
+      {
+        key: "kick_pan_max_distance",
+        label: "Jarak maksimum jendela pan",
+        unit: "m",
+        step: 0.01,
+        artinya:
+          "Batas jarak yang masih membolehkan jendela pan (pengecekan bola ada di depan kaki mana) menyala.",
+        fungsi:
+          "Memberi ruang di atas jarak tendang supaya jendela sempat menyala sesaat sebelum robot benar-benar berhenti.",
+        tuning:
+          "Acuan kanan: 0,20 m, yaitu 0,05 m di atas jarak tendang 0,15 m. Ini batas mulai penyelarasan, bukan izin langsung menendang.",
+        risk:
+          "Kalau disamakan persis dengan jarak tendang, jendelanya baru menyala tepat di ambang dan tendangan sering terlewat.",
+      },
+    ],
+  },
+  {
+    title: "Geometri pengukur jarak",
+    description:
+      "Jarak bola TIDAK diukur langsung; dihitung dari sudut tunduk kepala dan ukuran kamera. Angka-angka inilah rumusnya.",
+    fields: [
+      {
+        key: "kick_camera_height",
+        label: "Tinggi kamera",
+        unit: "m",
+        step: 0.005,
+        artinya: "Tinggi lensa kamera dari lantai.",
+        fungsi:
+          "Jarak = (tinggi kamera - jari-jari bola) / tan(sudut tunduk). Salah di sini membuat SEMUA bacaan jarak salah dengan pengali yang sama.",
+        tuning:
+          "Tinggi vertikal terukur 7 September 2026: 0,52 m. Ukur ulang jika pose atau ketinggian robot berubah; jangan memakai nilai lantai saat robot digantung.",
+        risk:
+          "Ini penyebab paling sering 'robot tidak pernah menendang' padahal bola sudah di kaki: ambang radius bola ikut dihitung dari sini.",
+      },
+      {
+        key: "kick_camera_pitch_offset_deg",
+        label: "Koreksi sudut kamera",
+        unit: "deg",
+        step: 0.1,
+        artinya: "Koreksi sudut efektif pada model kamera; positif berarti sinar kamera lebih menunduk.",
+        fungsi: "Ditambahkan saat memutar sinar gambar ke badan, sehingga jarak dan arah bola terkoreksi bersama. Tidak menggerakkan kepala atau mengubah parameter walking.",
+        tuning: "Acuan kanan 7 September 2026: 30,84°, hasil pencocokan rekaman dengan meteran pada satu pose. Perlu diperiksa lagi pada pose walking yang sudah berhenti dan beberapa jarak.",
+        risk: "Jangan menyalin dari sudut sendi atau mengubah untuk sekadar meloloskan tendangan. Koreksi yang salah mengubah perkiraan jarak sekaligus pilihan kaki.",
+      },
+      {
+        key: "kick_ball_real_radius_m",
+        label: "Jari-jari bola sebenarnya",
+        unit: "m",
+        step: 0.005,
+        artinya: "Jari-jari bola yang dipakai, dalam meter.",
+        fungsi:
+          "Kepala mengunci PUSAT bola, bukan titik singgungnya di lantai, jadi beda tinggi yang benar adalah (tinggi kamera - jari-jari bola). Angka ini juga dipakai menghitung ambang radius di gambar.",
+        tuning: "Bola terukur berdiameter 13,4 cm: isi jari-jari 0,067 m, bukan diameter 0,134 m.",
+        risk: "Salah 1 cm menggeser jarak terukur beberapa sentimeter di jarak dekat.",
+      },
+      {
+        key: "kick_fov_width_deg",
+        label: "Setengah bukaan kamera",
+        unit: "deg",
+        step: 0.1,
+        artinya:
+          "Sudut yang dipakai menghitung panjang fokus: fokus_px = (lebar gambar / 2) / tan(sudut ini).",
+        fungsi: "Menentukan berapa piksel jari-jari bola pada jarak tertentu.",
+        tuning:
+          "Hanya diubah kalau lensa atau kameranya diganti. 35,2 untuk kamera yang terpasang sekarang.",
+        risk: "Salah di sini merusak ambang radius bola, bukan jarak dari sudut kepala.",
+      },
+      {
+        key: "kick_image_width_px",
+        label: "Lebar gambar",
+        unit: "px",
+        step: 1,
+        artinya: "Lebar gambar yang benar-benar keluar dari detektor.",
+        fungsi: "Pasangan wajib sudut bukaan di rumus panjang fokus.",
+        tuning:
+          "HARUS sama dengan lebar gambar di berkas parameter detektor. ALPHONSE 640. Robot dengan kamera 1280 harus diisi 1280.",
+        risk: "Beda dari lebar gambar sungguhan membuat ambang radius meleset dua kali lipat.",
+      },
+      {
+        key: "kick_head_tilt_sign",
+        label: "Tanda sudut tunduk",
+        unit: "+1 / -1",
+        step: 1,
+        artinya:
+          "Konvensi tanda head_tilt. +1 berarti head_tilt NEGATIF artinya menunduk; -1 kebalikannya.",
+        fungsi: "Menentukan arah sudut tunduk yang masuk ke rumus jarak.",
+        tuning:
+          "ALPHONSE +1, sudah DIUKUR 2026-09-03 dari 77 sampel goal_joint_states. Jangan ditebak dari komentar yaml, kesan gerak, atau foto lintas run -- tanda ini sudah dua kali salah ditebak.",
+        risk:
+          "Kalau terbalik, jarak bolanya negatif atau raksasa dan robot TIDAK PERNAH menendang sama sekali.",
+      },
+    ],
+  },
+  {
+    title: "Sumber dan mutu bacaan jarak",
+    description:
+      "Dari mana angka jaraknya diambil, dan bacaan seperti apa yang dibuang sebelum dipakai memutuskan.",
+    fields: [
+      {
+        key: "kick_distance_from_radius",
+        label: "Ukur jarak dari radius bola",
+        type: "switch",
+        artinya:
+          "Mati = jarak dihitung dari SUDUT SENDI KEPALA + geometri. Aktif = jarak dihitung dari besar bola di gambar (cara lama).",
+        fungsi: "Memilih salah satu dari dua pengukur jarak yang tersedia.",
+        tuning:
+          "Biarkan MATI. Radius dari YOLO menyusut justru saat bola sudah dekat kaki, karena badan robot menutupi sebagian bola.",
+        risk:
+          "Diaktifkan berarti jarak ikut goyang tiap kali kotak deteksi berubah ukuran, dan robot berhenti di tempat yang tidak konsisten.",
+      },
+      {
+        key: "kick_min_depression_deg",
+        label: "Sudut tunduk minimum",
+        unit: "deg",
+        step: 0.5,
+        artinya: "Bacaan dengan sudut tunduk di bawah angka ini DIBUANG.",
+        fungsi:
+          "Kepala yang hampir mendatar memberi tan() mendekati nol, jadi jaraknya meledak jadi puluhan meter. Ambang ini membuang bacaan seperti itu dan sekalian menahan pemicu tendangan.",
+        tuning:
+          "3 derajat sudah aman. Naikkan kalau di log terlihat jarak melonjak besar saat kepala sedang menyapu ke atas.",
+        risk: "Terlalu besar berarti bola jauh tidak pernah terbaca sama sekali.",
+      },
+      {
+        key: "kick_distance_filter_n",
+        label: "Panjang penapis median",
+        unit: "sampel",
+        step: 1,
+        artinya: "Berapa bacaan jarak terakhir yang dimedian sebelum dipakai.",
+        fungsi:
+          "Membuang satu-dua bacaan liar tanpa memperlambat tanggapan seperti rata-rata biasa.",
+        tuning: "5 adalah titik aman. Isi 1 untuk MEMATIKAN penapis. Dibulatkan ke bawah oleh robot.",
+        risk: "Terlalu panjang membuat jarak tertinggal saat robot mendekat cepat.",
+      },
+      {
+        key: "kick_ready_count",
+        label: "Siklus siap sebelum menendang",
+        unit: "siklus",
+        step: 1,
+        artinya: "Berapa siklus berturut-turut syarat tendangan harus terpenuhi.",
+        fungsi: "Mencegah satu frame kebetulan langsung memicu tendangan.",
+        tuning: "4 adalah bawaan. Turunkan ke 2 kalau tendangan terasa lambat menyusul. Dibulatkan ke bawah oleh robot.",
+        risk: "Terlalu kecil berarti derau satu frame sudah cukup memicu tendangan.",
+      },
+    ],
+  },
+  {
+    title: "Ambang radius bola",
+    description:
+      "Syarat tambahan berbasis besar bola di gambar. Dihitung SENDIRI dari jarak tendang + tinggi kamera selama kolom piksel diisi 0.",
+    fields: [
+      {
+        key: "kick_ball_radius_px",
+        label: "Ambang radius (manual)",
+        unit: "px",
+        step: 1,
+        artinya: "Ambang besar bola di gambar. 0 berarti HITUNG SENDIRI.",
+        fungsi:
+          "Kalau diisi angka > 0, angka itulah yang dipakai dan hasil hitungan diabaikan. Kalau 0, robot menghitungnya dari jarak tendang, tinggi kamera, jari-jari bola, dan panjang fokus.",
+        tuning:
+          "Biarkan 0. Ambang otomatis ikut benar sendiri saat robot naik/turun gantungan; angka tetap tidak.",
+        risk:
+          "Angka tetap yang disalin dari kondisi berdiri akan terlalu menuntut saat robot digantung -- bolanya harus diangkat dulu supaya cukup besar.",
+      },
+      {
+        key: "kick_ball_radius_margin",
+        label: "Potongan ambang radius",
+        unit: "pecahan",
+        step: 0.05,
+        artinya: "Berapa bagian ambang ideal yang dipotong. 0,10 = ambangnya 90 % dari hitungan geometri.",
+        fungsi:
+          "Radius TERUKUR sistematis lebih kecil daripada hitungan geometri justru saat bola sudah dekat kaki: badan robot menutupi sebagian bola dan kotak YOLO ikut mengecil.",
+        tuning:
+          "Terukur 2026-08-28 dari 261 sampel: dengan ambang ideal utuh robot TIDAK PERNAH menendang. Dijepit robot ke rentang 0 sampai 0,9.",
+        risk: "Terlalu besar berarti bola yang masih jauh pun sudah dianggap dekat.",
+      },
+      {
+        key: "kick_radius_ready_enable",
+        label: "Radius ikut memutuskan",
+        type: "switch",
+        artinya:
+          "Mati = ambang radius tetap dihitung dan dicetak di telemetri tapi TIDAK ikut memutuskan apa pun.",
+        fungsi: "Menyalakan pemicu radius yang berdiri sendiri (OR), bukan pagar tambahan yang memperketat syarat jarak.",
+        tuning:
+          "Biarkan MATI sampai radius detektor benar-benar stabil. Nyalakan hanya untuk menambah ketelitian setelah jarak sudah rapi.",
+        risk:
+          "Radius yang melonjak dapat memicu tendangan terlalu dini walaupun syarat jarak belum terpenuhi.",
+      },
+    ],
+  },
+];
+
+// Cermin persis rumus di BallFollower::loadTunableParameters(). Dipakai supaya
+// operator melihat AKIBAT angka yang baru diketik sebelum menekan kirim --
+// tanpa ini, satu-satunya cara mengetahui ambang radius yang baru adalah
+// membaca log robot sesudah demo diluncurkan ulang.
+function computeKickGeometry(params) {
+  const num = (key) => parseWalkingNumber(params[key], NaN);
+  const distance = num("kick_distance");
+  const cameraHeight = num("kick_camera_height");
+  const ballRadius = num("kick_ball_real_radius_m");
+  const fovDeg = num("kick_fov_width_deg");
+  const imageWidth = num("kick_image_width_px");
+  const manualRadiusPx = num("kick_ball_radius_px");
+  const minDepressionDeg = num("kick_min_depression_deg");
+
+  let margin = num("kick_ball_radius_margin");
+  if (margin < 0) margin = 0;
+  if (margin > 0.9) margin = 0.9;
+
+  const tanFov = Math.tan((fovDeg * Math.PI) / 180);
+  const focalPx = tanFov !== 0 ? (imageWidth * 0.5) / tanFov : 0;
+  // Kamera mengunci PUSAT bola, jadi beda tingginya dikurangi jari-jari bola.
+  const drop = cameraHeight - ballRadius;
+  const slant = Math.sqrt(distance * distance + drop * drop);
+  const idealPx = slant > 0 ? (focalPx * ballRadius) / slant : 0;
+  const autoThresholdPx = idealPx * (1 - margin);
+  const usingManual = manualRadiusPx > 0;
+
+  const tanMin = Math.tan((minDepressionDeg * Math.PI) / 180);
+  return {
+    focalPx,
+    drop,
+    slant,
+    idealPx,
+    margin,
+    usingManual,
+    thresholdPx: usingManual ? manualRadiusPx : autoThresholdPx,
+    // Sudut tunduk kepala yang seharusnya terbaca saat bola tepat di jarak tendang.
+    depressionDeg: (Math.atan2(drop, distance) * 180) / Math.PI,
+    // Di luar jarak ini sudut tunduknya sudah di bawah ambang dan bacaannya dibuang.
+    maxReadableM: tanMin > 0 ? drop / tanMin : NaN,
+  };
+}
+
+function normalizeKickParams(params = {}) {
+  const next = { ...KICK_DEFAULT_PARAMS, ...params };
+  KICK_PARAM_KEYS.forEach((key) => {
+    next[key] = parseWalkingNumber(next[key], KICK_DEFAULT_PARAMS[key]);
+  });
+  return next;
 }
 
 function makeParamValue(type, rawValue) {
@@ -668,14 +1169,55 @@ export default function App() {
   const [walkingParams, setWalkingParams] = useState(() => normalizeWalkingParams());
   const [walkingCurrentParams, setWalkingCurrentParams] = useState(null);
   const [walkingLoaded, setWalkingLoaded] = useState(false);
-  const [walkingDirty, setWalkingDirty] = useState(false);
+  const walkingDirty = !parametersEqual(walkingParams, walkingCurrentParams || WALKING_DEFAULT_PARAMS, WALKING_KEYS);
+  const [walkingBusy, setWalkingBusy] = useState(false);
   const [walkingLastAppliedAt, setWalkingLastAppliedAt] = useState(null);
   const [showWalkingAdvanced, setShowWalkingAdvanced] = useState(false);
   const [walkingError, setWalkingError] = useState("");
   const [torqueSpeedKey, setTorqueSpeedKey] = useState(DEFAULT_TORQUE_SPEED_KEY);
-  const [walkingVersions, setWalkingVersions] = useState(() => seedWalkingVersions(readWalkingVersions()));
+  // Batas kecepatan servo TIDAK lagi dilepas sendiri oleh pewaktu.
+  //
+  // Dulu ia dikembalikan ke kecepatan penuh 5 detik sesudah Torque ON. Dalam
+  // pemakaian nyata, gerakan yang ingin diperlambat operator justru terjadi
+  // SESUDAH itu (Init Pose ditekan beberapa detik kemudian), jadi batasnya
+  // sudah kedaluwarsa sebelum sempat berguna -- persis keluhan "sudah dipilih
+  // lambat masih juga kencang". Sekarang batasnya bertahan sampai dilepas
+  // dengan sengaja, atau sampai sesuatu yang memang butuh kecepatan penuh
+  // dimulai (jalan atau demo).
+  const [torqueLimitActive, setTorqueLimitActive] = useState(false);
+  const [walkingVersions, setWalkingVersions] = useState(() =>
+    seedJalanWalkingVersion(seedWalkingVersions(readWalkingVersions()))
+  );
   const [walkingVersionName, setWalkingVersionName] = useState("");
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
+  // Tendangan (parameter ROS milik demo_node, bukan WalkingParam)
+  const [kickParams, setKickParams] = useState(() => normalizeKickParams());
+  const [kickCurrentParams, setKickCurrentParams] = useState(null);
+  const [kickLoaded, setKickLoaded] = useState(false);
+  const kickDirty = !parametersEqual(kickParams, kickCurrentParams || KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS);
+  const [kickBusy, setKickBusy] = useState(false);
+  const [kickError, setKickError] = useState("");
+  const [kickLastAppliedAt, setKickLastAppliedAt] = useState(null);
+  // Dua langkah, sengaja: tombol ini menulis berkas sumber yang dilacak git,
+  // beda kelas dengan tombol lain di halaman yang cuma mengubah RAM robot.
+  const [kickSaveArmed, setKickSaveArmed] = useState(false);
+  // Kamera di halaman Tendangan. Mematikannya benar-benar MEMUTUS langganan,
+  // bukan sekadar berhenti menggambar: saat menera jarak, gambar 640x480 mentah
+  // lewat rosbridge itu beban yang tidak perlu kalau memang tidak dilihat.
+  const [kickCameraOn, setKickCameraOn] = useState(true);
+  // PENGUKUR JARAK: pengamatan MENTAH dari robot (lingkaran bola + sudut leher).
+  // Sengaja disimpan mentah, bukan sudah jadi jarak: jaraknya dihitung ulang
+  // tiap render dengan parameter yang SEDANG DIKETIK, supaya operator melihat
+  // akibat draftnya sebelum mengirim apa pun.
+  const [kickObservation, setKickObservation] = useState(null);
+  const [kickHipPitch, setKickHipPitch] = useState(null);
+  const [kickSavedAt, setKickSavedAt] = useState(null);
+  const [kickSaveMessage, setKickSaveMessage] = useState("");
+  // Apakah node yang dibutuhkan halaman Tendangan dan Demo benar-benar hidup.
+  // null = belum pernah diperiksa. Tanpa ini, "tombolnya ditekan tapi robot
+  // diam saja" tidak bisa dibedakan dari "demonya memang belum diluncurkan".
+  const [rosNodePresence, setRosNodePresence] = useState(null);
+  const [rosNodeCheckedAt, setRosNodeCheckedAt] = useState(null);
   const [teleopStatus, setTeleopStatus] = useState(null);
   const [teleopStatusAt, setTeleopStatusAt] = useState(null);
   
@@ -688,10 +1230,11 @@ export default function App() {
   const [cameraTopicsError, setCameraTopicsError] = useState("");
   
   // Tuning - Vision Params
+  // Bawaan mengikuti config/yolo_ball_detector_openvino_params.yaml, supaya
+  // tampilan sebelum tombol Muat tidak menyesatkan.
   const [yoloParams, setYoloParams] = useState({
-    ball_confidence_threshold: 0.2,
-    goalpost_confidence_threshold: 0.5,
-    robot_confidence_threshold: 0.2,
+    confidence_threshold: 0.3,
+    iou_threshold: 0.45,
   });
   
   // Input
@@ -712,6 +1255,10 @@ export default function App() {
   // Refs
   const rosRef = useRef(null);
   const overlayCanvasRef = useRef(null);
+  const kickCanvasRef = useRef(null);
+  const kickCameraOnRef = useRef(true);
+  // Sudut leher terbaru; dipasangkan ke lingkaran bola begitu deteksi tiba.
+  const kickHeadRef = useRef(null);
   const overlayLastRef = useRef({ stampMs: null, fps: 0, dropped: 0 });
   const showOverlayRef = useRef(true);
   
@@ -731,12 +1278,74 @@ export default function App() {
   const headModulePubRef = useRef(null);
   const walkingModulePubRef = useRef(null);
   const walkingModuleEnabledRef = useRef(false);
+  const walkingOperationRef = useRef(null);
+  const kickOperationRef = useRef(null);
+  const motionSequenceRef = useRef(0);
+  const simStartTimerRef = useRef(null);
+  const walkingModuleGetRef = useRef(null);
   const yoloSetServiceRef = useRef(null);
   const yoloGetServiceRef = useRef(null);
   const snapshotServiceRef = useRef(null);
   const healthCheckServiceRef = useRef(null);
   const demoModePubRef = useRef(null);
   const demoCommandPubRef = useRef(null);
+  const kickGetServiceRef = useRef(null);
+  const kickSetServiceRef = useRef(null);
+  const kickSaveServiceRef = useRef(null);
+  const kickLaunchServiceRef = useRef(null);
+
+  const runRobotOperation = async (kind, action) => {
+    const operationRef = kind === "walking" ? walkingOperationRef : kickOperationRef;
+    const setBusy = kind === "walking" ? setWalkingBusy : setKickBusy;
+    const setError = kind === "walking" ? setWalkingError : setKickError;
+    if (operationRef.current) return false;
+    const controller = new AbortController();
+    const ros = rosRef.current;
+    operationRef.current = controller;
+    setBusy(true);
+    setError("");
+    const check = () => {
+      if (controller.signal.aborted || ros !== rosRef.current || !ros?.isConnected) {
+        throw new Error("Operasi dibatalkan atau koneksi ROS terputus");
+      }
+    };
+    const context = {
+      check,
+      wait: (duration) => waitForRobot(duration, controller.signal),
+      call: async (service, args, options) => {
+        check();
+        if (service?.ros !== ros) throw new Error("Service berasal dari koneksi ROS yang berbeda");
+        const result = await callRosService(service, args, { ...options, signal: controller.signal });
+        check();
+        return result;
+      },
+    };
+    try {
+      check();
+      await action(context);
+      return true;
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setError(error.message);
+        sendStatus(error.message, true);
+      }
+      return false;
+    } finally {
+      if (operationRef.current === controller) {
+        operationRef.current = null;
+        setBusy(false);
+      }
+    }
+  };
+
+  const cancelPendingMotion = () => {
+    motionSequenceRef.current += 1;
+    walkingOperationRef.current?.abort();
+    walkingOperationRef.current = null;
+    setWalkingBusy(false);
+    clearTimeout(simStartTimerRef.current);
+    simStartTimerRef.current = null;
+  };
 
   // --- Effects ---
 
@@ -761,6 +1370,10 @@ export default function App() {
   }, [showOverlay]);
 
   useEffect(() => {
+    kickCameraOnRef.current = kickCameraOn;
+  }, [kickCameraOn]);
+
+  useEffect(() => {
     try {
       localStorage.setItem(WALKING_VERSION_STORAGE_KEY, JSON.stringify(walkingVersions));
     } catch {
@@ -778,15 +1391,40 @@ export default function App() {
     }
   }, []);
 
+  // Sama untuk penyegaran "JALAN KE SURGA": begitu penandanya tertulis, seed
+  // tidak menyentuh slot itu lagi, jadi Simpan berikutnya dari operator tetap
+  // menang dan tidak akan tertimpa saat halaman dimuat ulang.
+  useEffect(() => {
+    try {
+      localStorage.setItem(JALAN_WALKING_SEED_FLAG_KEY, String(Date.now()));
+    } catch {
+      // Penyimpanan dibatasi; seed akan jalan lagi di muat berikutnya.
+    }
+  }, []);
+
   useEffect(() => {
     if (!rosUrl) return;
 
     const ros = new ROSLIB.Ros({ url: rosUrl });
     rosRef.current = ros;
 
-    ros.on("connection", () => setRosState("connected"));
-    ros.on("error", () => setRosState("error"));
-    ros.on("close", () => setRosState("disconnected"));
+    const resetRuntime = (state) => {
+      cancelPendingMotion();
+      kickOperationRef.current?.abort();
+      kickOperationRef.current = null;
+      setKickBusy(false);
+      setWalkingLoaded(false);
+      setWalkingCurrentParams(null);
+      setKickLoaded(false);
+      setKickCurrentParams(null);
+      setKickSaveArmed(false);
+      setKickSaveMessage("");
+      walkingModuleEnabledRef.current = false;
+      setRosState(state);
+    };
+    ros.on("connection", () => resetRuntime("connected"));
+    ros.on("error", () => resetRuntime("error"));
+    ros.on("close", () => resetRuntime("disconnected"));
 
     // Subscriptions
     metricsSubRef.current = new ROSLIB.Topic({
@@ -878,12 +1516,12 @@ export default function App() {
 
     yoloSetServiceRef.current = new ROSLIB.Service({
       ros,
-      name: "/op3_yolo_vision/set_parameters",
+      name: "/ball_detector_node/yolo_ball_detector/set_parameters",
       serviceType: "rcl_interfaces/srv/SetParameters",
     });
     yoloGetServiceRef.current = new ROSLIB.Service({
       ros,
-      name: "/op3_yolo_vision/get_parameters",
+      name: "/ball_detector_node/yolo_ball_detector/get_parameters",
       serviceType: "rcl_interfaces/srv/GetParameters",
     });
     snapshotServiceRef.current = new ROSLIB.Service({
@@ -901,6 +1539,11 @@ export default function App() {
       name: "/robotis/walking/get_params",
       serviceType: "op3_walking_module_msgs/srv/GetWalkingParam",
     });
+    walkingModuleGetRef.current = new ROSLIB.Service({
+      ros,
+      name: "/robotis/get_present_joint_ctrl_modules",
+      serviceType: "robotis_controller_msgs/srv/GetJointModule",
+    });
     demoModePubRef.current = new ROSLIB.Topic({
       ros,
       name: "/robotis/mode_command",
@@ -910,6 +1553,43 @@ export default function App() {
       ros,
       name: "/robotis/demo_command",
       messageType: "std_msgs/String",
+    });
+
+    // Parameter tendangan hidup di node demo, jadi jalurnya service parameter
+    // ROS biasa -- bukan topik seperti WalkingParam.
+    //
+    // Nama NODE-nya "demo_node"; "op_demo_node" itu nama executable-nya dan
+    // launch tidak menimpanya dengan atribut name. Salah satu huruf saja di
+    // sini membuat service-nya tidak pernah ketemu dan halaman ini diam-diam
+    // tidak berfungsi. Diverifikasi di robot: ros2 service list menampilkan
+    // /demo_node/get_parameters dan /demo_node/set_parameters.
+    //
+    // Node-nya baru ada sesudah demo diluncurkan; sebelum itu panggilannya
+    // gagal dan halaman Tendangan mengatakannya apa adanya.
+    kickGetServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/demo_node/get_parameters",
+      serviceType: "rcl_interfaces/srv/GetParameters",
+    });
+    kickSetServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/demo_node/set_parameters_atomically",
+      serviceType: "rcl_interfaces/srv/SetParametersAtomically",
+    });
+
+    // Menyimpan permanen ke demo.launch.xml. Dilayani studio_agent, bukan
+    // demo_node: yang menulis berkas harus proses yang punya akses berkas, dan
+    // agent membaca sendiri angka yang hidup di demo_node supaya yang tersimpan
+    // dijamin sama dengan yang barusan dicoba.
+    kickSaveServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/bascorro_studio/save_kick_to_launch",
+      serviceType: "std_srvs/srv/Trigger",
+    });
+    kickLaunchServiceRef.current = new ROSLIB.Service({
+      ros,
+      name: "/bascorro_studio/get_kick_launch",
+      serviceType: "std_srvs/srv/Trigger",
     });
 
     // Load initial params
@@ -929,6 +1609,8 @@ export default function App() {
     }
 
     return () => {
+      cancelPendingMotion();
+      kickOperationRef.current?.abort();
       metricsSubRef.current?.unsubscribe();
       eventsSubRef.current?.unsubscribe();
       joySubRef.current?.unsubscribe();
@@ -937,11 +1619,28 @@ export default function App() {
     };
   }, [rosUrl]);
 
+  // Satu langganan gambar dipakai DUA halaman: Vision dan Tendangan.
+  //
+  // Dulu langganannya selalu hidup dan yang dilakukan saklar cuma berhenti
+  // menggambar -- gambarnya tetap mengalir lewat rosbridge. Sekarang saklarnya
+  // menentukan langganannya sendiri, jadi "matikan kamera" benar-benar
+  // menghentikan aliran datanya. Sengaja tetap SATU langganan, bukan satu per
+  // halaman: keduanya tidak pernah aktif bersamaan (halaman aktif cuma satu),
+  // dan dua langganan ke topik yang sama akan menggandakan lalu lintasnya.
+  const overlayWanted =
+    (activeTab === "vision" && showOverlay) ||
+    (activeTab === "tendangan" && kickCameraOn);
+
   useEffect(() => {
     if (!rosRef.current || rosState === "disconnected") return;
-    
+
     if (overlaySubRef.current) overlaySubRef.current.unsubscribe();
-    
+    if (!overlayWanted) return undefined;
+
+    // Dibersihkan supaya "belum ada gambar sama sekali" tidak tertutup oleh
+    // cap waktu frame terakhir dari langganan sebelumnya.
+    overlayLastRef.current = { stampMs: null, fps: 0, dropped: 0 };
+
     overlaySubRef.current = new ROSLIB.Topic({
       ros: rosRef.current,
       name: overlayTopic,
@@ -949,13 +1648,17 @@ export default function App() {
     });
 
     overlaySubRef.current.subscribe((msg) => {
-      if (!showOverlayRef.current) return;
-      if (activeTabRef.current !== "vision") return;
+      // Kanvasnya beda per halaman; yang dipakai adalah milik halaman yang
+      // sedang terbuka, dan hanya kalau saklar halaman itu menyala.
+      const tab = activeTabRef.current;
+      let canvas = null;
+      if (tab === "vision" && showOverlayRef.current) canvas = overlayCanvasRef.current;
+      else if (tab === "tendangan" && kickCameraOnRef.current) canvas = kickCanvasRef.current;
+      if (!canvas) return;
 
       const imageData = decodeImage(msg);
-      if (!imageData || !overlayCanvasRef.current) return;
-      
-      const canvas = overlayCanvasRef.current;
+      if (!imageData) return;
+
       if (canvas.width !== imageData.width || canvas.height !== imageData.height) {
         canvas.width = imageData.width;
         canvas.height = imageData.height;
@@ -971,7 +1674,91 @@ export default function App() {
     });
 
     return () => overlaySubRef.current?.unsubscribe();
-  }, [overlayTopic, rosState]);
+  }, [overlayTopic, rosState, overlayWanted]);
+
+  // Saat gambar BERHENTI datang, tidak ada lagi yang memicu render -- tanpa
+  // pencacah ini panel kamera akan diam hitam selamanya tanpa keterangan, yang
+  // persis kejadian saat topiknya memang tidak ada yang menerbitkan.
+  const [cameraTick, setCameraTick] = useState(0);
+  useEffect(() => {
+    if (!overlayWanted) return undefined;
+    const id = window.setInterval(() => setCameraTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [overlayWanted]);
+
+  // ---- PENGUKUR JARAK TENDANGAN -----------------------------------------
+  //
+  // Dua langganan RINGAN, hidup hanya selama halaman Tendangan terbuka:
+  // sudut leher dan lingkaran bola. Keduanya dibatasi 200 ms lewat
+  // throttle_rate rosbridge -- /robotis/present_joint_states terbit 125 Hz
+  // untuk 20 sendi, dan mengalirkan itu utuh ke browser tidak ada gunanya
+  // untuk mengukur bola yang diam.
+  //
+  // Yang disimpan pengamatan MENTAH. Jaraknya dihitung di render.
+  useEffect(() => {
+    if (!rosRef.current || rosState !== "connected" || activeTab !== "tendangan") {
+      return undefined;
+    }
+    const ros = rosRef.current;
+
+    const jointSub = new ROSLIB.Topic({
+      ros, name: "/robotis/present_joint_states", messageType: "sensor_msgs/JointState",
+      throttle_rate: 200, queue_length: 1,
+    });
+    jointSub.subscribe((msg) => {
+      const pan = msg.name.indexOf("head_pan");
+      const tilt = msg.name.indexOf("head_tilt");
+      if (pan < 0 || tilt < 0) return;
+      kickHeadRef.current = { pan: msg.position[pan], tilt: msg.position[tilt] };
+    });
+
+    const circleSub = new ROSLIB.Topic({
+      ros, name: "/ball_detector_node/circle_set",
+      messageType: "op3_ball_detector_msgs/CircleSetStamped",
+      throttle_rate: 200, queue_length: 1,
+    });
+    circleSub.subscribe((msg) => {
+      const head = kickHeadRef.current;
+      // Deteksi tanpa sudut leher tidak bisa dipakai: seluruh geometrinya
+      // bergantung ke mana kepala menghadap.
+      if (!head) return;
+      if (!msg.circles || msg.circles.length === 0) {
+        setKickObservation((prev) => (prev ? { ...prev, circle: null, at: Date.now() } : prev));
+        return;
+      }
+      // Detektor sudah mengurutkan bola terbesar di depan.
+      const c = msg.circles[0];
+      setKickObservation({
+        circle: { x: c.x, y: c.y, radiusPx: c.z },
+        head, at: Date.now(),
+      });
+    });
+
+    return () => {
+      jointSub.unsubscribe();
+      circleSub.unsubscribe();
+      kickHeadRef.current = null;
+    };
+  }, [rosState, activeTab]);
+
+  // hip_pitch_offset ikut menentukan arah pandang kamera, dan ia milik
+  // walking_module -- bukan parameter tendangan. Dibaca sekali saat halaman
+  // dibuka; kalau gagal (manager mati), pengukurannya sengaja tidak ditampilkan
+  // daripada memakai tebakan.
+  useEffect(() => {
+    if (rosState !== "connected" || activeTab !== "tendangan") return undefined;
+    let batal = false;
+    (async () => {
+      try {
+        const result = await callRosService(walkingGetServiceRef.current,
+          { get_param: true }, { timeoutMs: 4000 });
+        if (!batal) setKickHipPitch(Number(result?.parameters?.hip_pitch_offset));
+      } catch {
+        if (!batal) setKickHipPitch(null);
+      }
+    })();
+    return () => { batal = true; };
+  }, [rosState, activeTab]);
 
   // Auto-enable head_control_module on the real robot so head torque comes
   // up as soon as the manager is reachable. Without this, WALKING_READY's head
@@ -1018,45 +1805,55 @@ export default function App() {
     sendStatus(`ROS bridge reset: ${next}`);
   };
 
-  // op3_walking_module drops every message on /robotis/walking/command unless
-  // walking_module is the active control module -- walkingCommandCallback() returns
-  // early with "walking module is not ready." Init Pose, Head module and Action all
-  // hand the joints to another module, so a "balance off" pressed after any of them
-  // was published, reported as sent, and never seen by the robot: the IMU correction
-  // just stayed on. Publish anyway (harmless) and warn, but do NOT report it as a
-  // failure: walkingModuleEnabledRef only tracks what this browser tab did, so after a
-  // page reload it reads false even though the robot is happily walking. Claiming the
-  // command failed there would be worse than the silence it replaces.
   const sendWalkingCommand = (command, label) => {
-    if (!walkingCommandPubRef.current || rosState !== "connected") {
-      sendStatus("Walking command unavailable", true);
+    if (command === "stop") cancelPendingMotion();
+    if (!walkingCommandPubRef.current || !rosRef.current?.isConnected) {
+      sendStatus("ROS terputus: perintah walking tidak dikirim", true);
       return false;
     }
     walkingCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
-    if (!walkingModuleEnabledRef.current) {
-      sendStatus(`"${command}" terkirim. Kalau tidak ada efek: walking_module belum pegang joint (habis Init Pose / Head / Action) dan robot mengabaikannya — tekan Start dulu.`, true);
-      return true;
-    }
-    sendStatus(label || `Walking command: ${command}`);
+    sendStatus(label || "Perintah walking terkirim: " + command);
     return true;
   };
 
-  // Balance on/off writes straight into the module's walking_param_, but the next
-  // Apply publishes the whole WalkingParam struct and walkingParameterCallback does
-  // walking_param_ = *msg -- so a balance_enable checkbox left at true in the grid
-  // silently switched the IMU correction back on right after it had been turned off.
-  // Keep the grid in step with the button. The checkbox follows even when the module
-  // may not have heard the command -- it is the operator's intent either way, and the
-  // next Apply is what makes it stick.
-  const sendBalanceCommand = (enable) => {
-    const ok = sendWalkingCommand(enable ? "balance on" : "balance off",
-                                  enable ? "Balance IMU ON" : "Balance IMU OFF");
-    if (!ok) return;
-    setWalkingParams((prev) => ({ ...prev, balance_enable: enable }));
-    // Then ask the robot what it actually holds now, so the Current column is evidence
-    // rather than an echo of the button that was just pressed.
-    window.setTimeout(() => refreshWalkingCurrent(enable ? "Balance IMU ON" : "Balance IMU OFF"), 200);
+  const readWalkingRuntime = async (context) => {
+    const result = await context.call(walkingGetServiceRef.current, { get_param: true });
+    // Dirapikan di SATU tempat: semua jalur baca walking lewat sini, dan hasilnya
+    // masuk ke kotak isian lewat applyWalkingDraft(). Tanpa ini tiap Apply
+    // menuliskan angka float32 yang sudah berubah jadi double panjang ke layar.
+    const params = snapWalkingRuntime(validateWalkingParams(result?.parameters));
+    setWalkingCurrentParams(params);
+    setWalkingLoaded(true);
+    return params;
   };
+
+  const walkingOwnsLegs = async (context) => {
+    const result = await context.call(walkingModuleGetRef.current, { joint_name: WALKING_LEG_JOINTS });
+    const modules = new Map(result?.joint_name?.map((name, index) => [name, result.module_name?.[index]]) || []);
+    const enabled = WALKING_LEG_JOINTS.every((name) => modules.get(name) === "walking_module");
+    walkingModuleEnabledRef.current = enabled;
+    return enabled;
+  };
+
+  const sendBalanceCommand = (enable) => runRobotOperation("walking", async (context) => {
+    if (!await walkingOwnsLegs(context)) throw new Error("Balance belum dikirim: aktifkan walking_module terlebih dahulu, tanpa menekan Start");
+    context.check();
+    sendWalkingCommand(enable ? "balance on" : "balance off");
+    await context.wait(200);
+    const current = await readWalkingRuntime(context);
+    if (current.balance_enable !== enable) throw new Error("Balance belum terkonfirmasi; periksa penulis parameter lain");
+    setWalkingParams((previous) => ({ ...previous, balance_enable: current.balance_enable }));
+    sendStatus("Balance IMU terkonfirmasi: " + (enable ? "ON" : "OFF"));
+  });
+
+  const saveWalkingRuntime = () => runRobotOperation("walking", async (context) => {
+    if (!walkingLoaded || walkingDirty) throw new Error("Load dan Apply perubahan terlebih dahulu; Save menyimpan runtime, bukan draft");
+    const current = await readWalkingRuntime(context);
+    if (!parametersEqual(current, walkingParams, WALKING_KEYS)) throw new Error("Runtime berubah sejak Load. Periksa nilai robot sebelum menyimpan");
+    if (!await walkingOwnsLegs(context)) throw new Error("Save belum dikirim: walking_module belum aktif");
+    context.check();
+    sendWalkingCommand("save", "Perintah simpan runtime dikirim; periksa log walking untuk hasil penulisan file");
+  });
 
   const sendTeleopCommand = (command, label) => {
     if (!teleopCommandPubRef.current || rosState !== "connected") {
@@ -1068,98 +1865,63 @@ export default function App() {
     return true;
   };
 
-  const applyWalkingAndRefreshTeleop = () => {
-    if (!applyWalkingParams()) return;
-    window.setTimeout(() => {
-      sendTeleopCommand("refresh_params", "Walking applied; teleop baseline refresh requested");
-    }, 150);
+  const applyWalkingAndRefreshTeleop = async () => {
+    if (await applyWalkingParams()) sendTeleopCommand("refresh_params", "Apply terkonfirmasi; refresh baseline teleop diminta");
   };
 
   const updateWalkingParam = (key, value) => {
-    setWalkingParams((prev) => ({
-      ...prev,
-      [key]: WALKING_BOOL_FIELDS.has(key) ? Boolean(value) : value,
-    }));
-    setWalkingDirty(true);
+    setWalkingParams((previous) => ({ ...previous, [key]: value }));
     setWalkingError("");
   };
 
-  // Read the runtime struct back and refresh ONLY the "Current" column. Unlike
-  // loadWalkingParams() it never touches the edit fields, so it is safe to fire while
-  // the operator is midway through tuning. Used to prove what the robot really holds
-  // after a balance on/off -- "sudah dimatikan tapi kok masih jalan" is otherwise
-  // impossible to tell apart from "the command never arrived".
-  const refreshWalkingCurrent = (note) => {
-    if (!walkingGetServiceRef.current || rosState !== "connected") return;
-    walkingGetServiceRef.current.callService(
-      new ROSLIB.ServiceRequest({ get_param: true }),
-      (res) => {
-        if (!res?.parameters) return;
-        const normalized = normalizeWalkingParams(res.parameters);
-        setWalkingCurrentParams(normalized);
-        setWalkingLoaded(true);
-        if (note)
-          sendStatus(`${note} — robot sekarang: balance_enable=${normalized.balance_enable}`);
-      },
-      () => {}
-    );
+  const loadWalkingParams = async () => {
+    let params;
+    const successful = await runRobotOperation("walking", async (context) => {
+      params = await readWalkingRuntime(context);
+      setWalkingParams(params);
+      sendStatus("Parameter walking dimuat dari robot");
+    });
+    return successful ? params : null;
   };
 
-  const loadWalkingParams = () => {
-    if (!walkingGetServiceRef.current || rosState !== "connected") {
-      const message = "Walking params unavailable";
-      setWalkingError(message);
-      sendStatus(message, true);
-      return;
-    }
-
-    setWalkingError("");
-    walkingGetServiceRef.current.callService(
-      new ROSLIB.ServiceRequest({ get_param: true }),
-      (res) => {
-        if (!res?.parameters) {
-          const message = "No walking params returned";
-          setWalkingError(message);
-          sendStatus(message, true);
-          return;
-        }
-        const normalized = normalizeWalkingParams(res.parameters);
-        setWalkingParams(normalized);
-        setWalkingCurrentParams(normalized);
-        setWalkingLoaded(true);
-        setWalkingDirty(false);
-        sendStatus("Walking params loaded");
+  const applyWalkingWithContext = async (context, draft = walkingParams, baseline = walkingCurrentParams) => {
+    if (!baseline) throw new Error("Load parameter dari robot terlebih dahulu sebelum Apply");
+    const params = await applyWalkingDraft({
+      draft,
+      baseline,
+      read: () => readWalkingRuntime(context),
+      publish: (payload) => {
+        context.check();
+        walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
       },
-      (err) => {
-        const message = err?.message || "Failed to load walking params";
-        setWalkingError(message);
-        sendStatus(message, true);
-      }
-    );
-  };
-
-  const applyWalkingParams = () => {
-    if (!walkingParamPubRef.current || rosState !== "connected") {
-      const message = "Walking param publisher unavailable";
-      setWalkingError(message);
-      sendStatus(message, true);
-      return false;
-    }
-
-    const payload = normalizeWalkingParams(walkingParams);
-    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
-    setWalkingParams(payload);
-    setWalkingCurrentParams(payload);
-    setWalkingLoaded(true);
-    setWalkingDirty(false);
+      check: context.check,
+      onRead: setWalkingCurrentParams,
+      wait: context.wait,
+    });
+    setWalkingParams(params);
+    setWalkingCurrentParams(params);
     setWalkingLastAppliedAt(Date.now());
-    setWalkingError("");
-    sendStatus("Walking params applied");
-    return true;
+    sendStatus("Apply walking terkonfirmasi melalui pembacaan runtime");
+    return params;
+  };
+
+  const applyWalkingParams = () => runRobotOperation("walking", (context) => applyWalkingWithContext(context));
+
+  const applyWalkingTuner = async (draft, baseline, start) => {
+    let params;
+    const successful = await runRobotOperation("walking", async (context) => {
+      params = await applyWalkingWithContext(context, draft, baseline);
+      if (start) {
+        await initThenEnableWalking(context);
+        context.check();
+        sendWalkingCommand("start");
+      }
+    });
+    return successful ? params : null;
   };
 
   const writeSyncItem = (itemName, value) => {
-    if (!torquePubRef.current || !metrics?.joint_names?.length) return false;
+    if (!rosRef.current?.isConnected || !torquePubRef.current || !metrics?.joint_names?.length) return false;
     const values = metrics.joint_names.map(() => value);
     torquePubRef.current.publish(new ROSLIB.Message({
       item_name: itemName,
@@ -1170,8 +1932,10 @@ export default function App() {
   };
 
   const writeSyncItemsSequential = (items, onDone) => {
+    const sequence = motionSequenceRef.current;
     let idx = 0;
     const next = () => {
+      if (sequence !== motionSequenceRef.current || !rosRef.current?.isConnected) return;
       if (idx >= items.length) { onDone?.(); return; }
       const [name, val] = items[idx++];
       writeSyncItem(name, val);
@@ -1180,51 +1944,43 @@ export default function App() {
     next();
   };
 
-  const restoreFullSpeed = () => {
+  // 0 = tanpa batas di tabel kontrol Dynamixel.
+  const restoreFullSpeed = (note) => {
     writeSyncItemsSequential([
       ["profile_velocity", 0],
       ["profile_acceleration", 0],
     ]);
+    setTorqueLimitActive(false);
+    if (note) sendStatus(note);
   };
 
-  // Enable walking_module directly. Used to force a replay of action page 2
-  // (WALKING_READY) first to "stamp" the walking-ready pose, but that added a
-  // ~4 s animation + a jerky module handoff. walking_module's init_x/y/z/
-  // pitch_offset are now FK-tuned (in op3_walking_module/config/param.yaml)
-  // to match WALKING_READY page 2 geometry — its IK parks the legs at the
-  // calibrated pose statically the moment it's enabled, no replay needed.
-  const initThenEnableWalking = (onReady) => {
-    restoreFullSpeed();
-    walkingModuleEnabledRef.current = false;
-    if (!walkingModulePubRef.current || rosState !== "connected") {
-      sendStatus("Walking module command unavailable", true);
-      return;
+  const initThenEnableWalking = async (context) => {
+    context.check();
+    if (torqueLimitActive) restoreFullSpeed();
+    if (!await walkingOwnsLegs(context)) {
+      context.check();
+      walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
+      await context.wait(WALKING_ENABLE_SETTLE_MS);
+      if (!await walkingOwnsLegs(context)) throw new Error("Walking module belum menguasai semua sendi kaki; Start dibatalkan");
     }
-    walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
-    walkingModuleEnabledRef.current = true;
-    sendStatus("Walking module enabled (IK ready pose)…");
-    window.setTimeout(() => { onReady?.(); }, WALKING_ENABLE_SETTLE_MS);
+    context.check();
   };
 
-  const applyWalkingAndStart = () => {
-    if (!applyWalkingParams()) return;
-    initThenEnableWalking(() => {
-      sendWalkingCommand("start", "Walking dimulai dari WALKING_READY");
-    });
-  };
+  const applyWalkingAndStart = () => runRobotOperation("walking", async (context) => {
+    await applyWalkingWithContext(context);
+    await initThenEnableWalking(context);
+    context.check();
+    sendWalkingCommand("start", "Start dikirim setelah Apply dan modul walking terkonfirmasi");
+  });
 
-  // Plain Start, without re-sending the parameters. Enables walking_module first when
-  // something else owns the joints, otherwise the command is dropped and the button
-  // looks dead (ORION_NEW does the same before its start).
-  const startWalkingNow = () => {
-    if (walkingModuleEnabledRef.current) {
-      sendWalkingCommand("start");
-      return;
-    }
-    initThenEnableWalking(() => {
-      sendWalkingCommand("start", "Walking dimulai dari WALKING_READY");
-    });
-  };
+  const startWalkingNow = () => runRobotOperation("walking", async (context) => {
+    if (!walkingLoaded || walkingDirty) throw new Error("Load lalu Apply perubahan terlebih dahulu, atau gunakan Apply & Start");
+    const current = await readWalkingRuntime(context);
+    if (!parametersEqual(current, walkingParams, WALKING_KEYS)) throw new Error("Runtime berubah; Load ulang sebelum Start");
+    await initThenEnableWalking(context);
+    context.check();
+    sendWalkingCommand("start");
+  });
 
   // ===== SIM-ONLY walking pipeline =====
   // Publishes through the same rosbridge as the real-robot path, but on the
@@ -1234,7 +1990,7 @@ export default function App() {
   // so the commands physically cannot reach the real robot's stack.
   const publishOnSim = (name, messageType, data) => {
     const ros = rosRef.current;
-    if (!ros) return false;
+    if (!ros?.isConnected) return false;
     const topic = new ROSLIB.Topic({ ros, name, messageType });
     topic.publish(new ROSLIB.Message(data));
     return true;
@@ -1245,7 +2001,14 @@ export default function App() {
       sendStatus("ROS bridge belum siap", true);
       return;
     }
-    const params = normalizeWalkingParams(walkingParams);
+    let params;
+    try {
+      params = validateWalkingParams(walkingParams);
+    } catch (error) {
+      setWalkingError(error.message);
+      return;
+    }
+    clearTimeout(simStartTimerRef.current);
     if (!publishOnSim("/bascorro_studio/sim/walking/set_params", "op3_walking_module_msgs/WalkingParam", params)) return;
     sendStatus("[SIM] Parameter terkirim — enable walking_module…");
 
@@ -1255,13 +2018,15 @@ export default function App() {
     // and start. Mirror change in op3_demo + real-robot path above.
     publishOnSim("/bascorro_studio/sim/enable_ctrl_module", "std_msgs/String", { data: "head_control_module" });
     publishOnSim("/bascorro_studio/sim/enable_ctrl_module", "std_msgs/String", { data: "walking_module" });
-    window.setTimeout(() => {
+    simStartTimerRef.current = window.setTimeout(() => {
       publishOnSim("/bascorro_studio/sim/walking/command", "std_msgs/String", { data: "start" });
       sendStatus("[SIM] Walking dimulai di simulator (robot asli tidak ikut bergerak)");
     }, WALKING_ENABLE_SETTLE_MS);
   };
 
   const stopWalkingOnSim = () => {
+    clearTimeout(simStartTimerRef.current);
+    simStartTimerRef.current = null;
     if (rosState !== "connected") {
       sendStatus("ROS bridge belum siap", true);
       return;
@@ -1271,16 +2036,19 @@ export default function App() {
   };
 
 
-  const enableWalkingModule = () => {
-    initThenEnableWalking(() => sendStatus("Walking module enabled di WALKING_READY"));
-  };
+  const enableWalkingModule = () => runRobotOperation("walking", async (context) => {
+    await initThenEnableWalking(context);
+    sendStatus("Walking module terkonfirmasi aktif; Start belum dikirim");
+  });
 
   const applyWalkingPreset = (preset) => {
+    if (walkingOperationRef.current) return;
     const presetParams = {
       tiny: {
         x_move_amplitude: 0.003,
         y_move_amplitude: 0,
         angle_move_amplitude: 0,
+        angle_move_amplitude_turn_in: 0,
         period_time: 0.85,
         z_move_amplitude: 0.03,
         dsp_ratio: 0.35,
@@ -1290,6 +2058,7 @@ export default function App() {
         x_move_amplitude: 0,
         y_move_amplitude: 0,
         angle_move_amplitude: 0,
+        angle_move_amplitude_turn_in: 0,
       },
       balance: {
         balance_enable: true,
@@ -1301,16 +2070,22 @@ export default function App() {
     }[preset];
 
     if (!presetParams) return;
-    setWalkingParams((prev) => normalizeWalkingParams({ ...prev, ...presetParams }));
-    setWalkingDirty(true);
+    setWalkingParams((prev) => ({ ...prev, ...presetParams }));
     setWalkingError("");
   };
 
   const saveWalkingVersion = () => {
+    if (walkingOperationRef.current) return;
     const now = Date.now();
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     const name = walkingVersionName.trim() || selected?.name || `Walking ${new Date(now).toLocaleString()}`;
-    const params = normalizeWalkingParams(walkingParams);
+    let params;
+    try {
+      params = validateWalkingParams(walkingParams);
+    } catch (error) {
+      setWalkingError(error.message);
+      return;
+    }
 
     if (selected) {
       setWalkingVersions((versions) =>
@@ -1338,17 +2113,44 @@ export default function App() {
     sendStatus(`Walking version saved: ${name}`);
   };
 
+  // Memuat versi tersimpan IKUT membaca robot dulu.
+  //
+  // Halaman ini punya DUA tombol bernama "Load": yang di baris PARAMETER
+  // membaca robot, yang di baris Versi Tersimpan cuma mengisi kotak isian.
+  // Operator menekan yang kedua lalu Apply, dan Apply menolak dengan "Load
+  // parameter dari robot terlebih dahulu" -- pesan yang menunjuk tombol lain
+  // tanpa mengatakannya. Terjadi 2026-09-08.
+  //
+  // Sekarang tombol ini membaca robot lebih dulu (itu yang memasang angka
+  // pembanding yang dibutuhkan Apply), BARU menimpa kotak isian dengan versi
+  // yang dipilih. Urutannya penting dan tidak bisa dibalik: membaca robot
+  // sesudahnya akan membuang versi yang baru saja dimuat.
+  //
+  // Kalau ROS mati, versinya TETAP dimuat supaya draft bisa disiapkan luring;
+  // yang hilang cuma angka pembandingnya, dan itu dikatakan terang-terangan.
   const loadWalkingVersion = () => {
+    if (walkingOperationRef.current) return;
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     if (!selected) {
-      sendStatus("Select a walking version first", true);
+      sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
-    setWalkingParams(normalizeWalkingParams(selected.params));
-    setWalkingVersionName(selected.name);
-    setWalkingDirty(true);
-    setWalkingError("");
-    sendStatus(`Walking version loaded: ${selected.name}`);
+    const isiDraft = () => {
+      setWalkingParams(normalizeWalkingParams(selected.params));
+      setWalkingVersionName(selected.name);
+      setWalkingError("");
+    };
+    if (!rosConnected) {
+      isiDraft();
+      sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
+        + "pembacaan robot: tekan Load di baris PARAMETER sebelum Apply.", true);
+      return;
+    }
+    runRobotOperation("walking", async (context) => {
+      await readWalkingRuntime(context);
+      isiDraft();
+      sendStatus(`Versi "${selected.name}" dimuat, dan parameter robot ikut dibaca. Tinggal Apply.`);
+    });
   };
 
   const deleteWalkingVersion = () => {
@@ -1362,6 +2164,46 @@ export default function App() {
     setWalkingVersionName("");
     sendStatus(`Walking version deleted: ${selected.name}`);
   };
+
+  // Node mana yang benar-benar hidup di robot.
+  //
+  // Halaman Tendangan butuh demo_node (pemilik parameternya) dan
+  // bascorro_studio_agent (yang menulis ke demo.launch.xml); halaman Demo butuh
+  // demo_node. Tanpa penanda ini, satu-satunya gejala "demonya belum
+  // diluncurkan" adalah tombol yang ditekan tapi robot diam saja -- persis
+  // keluhan yang sudah terjadi.
+  const refreshRosNodes = useCallback(() => {
+    const ros = rosRef.current;
+    if (!ros || rosState !== "connected" || typeof ros.getNodes !== "function") {
+      setRosNodePresence(null);
+      return;
+    }
+    ros.getNodes(
+      (nodes) => {
+        const list = Array.isArray(nodes) ? nodes : [];
+        setRosNodePresence({
+          demo: list.includes("/demo_node"),
+          agent: list.includes("/bascorro_studio_agent"),
+          // Dua bagian rantai kamera, diperiksa TERPISAH: gejalanya sama
+          // (panel hitam) tapi obatnya berbeda sama sekali.
+          camera: list.includes("/usb_cam_node/usb_cam"),
+          detector: list.includes("/ball_detector_node/yolo_ball_detector"),
+        });
+        setRosNodeCheckedAt(Date.now());
+      },
+      () => {
+        setRosNodePresence(null);
+        setRosNodeCheckedAt(Date.now());
+      }
+    );
+  }, [rosState]);
+
+  // Diperiksa saat masuk halaman yang memerlukannya, bukan terus-menerus:
+  // rosapi memindai seluruh graf ROS dan itu tidak gratis.
+  useEffect(() => {
+    if (activeTab !== "demo" && activeTab !== "tendangan") return;
+    refreshRosNodes();
+  }, [activeTab, rosState, refreshRosNodes]);
 
   const refreshCameraTopics = () => {
     if (!rosRef.current || rosState !== "connected") {
@@ -1400,6 +2242,8 @@ export default function App() {
   };
 
   const handleInitPose = () => {
+    cancelPendingMotion();
+    const sequence = motionSequenceRef.current;
     // "Init Pose" button literally plays action page 2 (WALKING_READY — the
     // user's calibrated standing pose recorded in the action editor).
     // Walking-ready is a separate transition triggered by Apply & Start
@@ -1410,9 +2254,16 @@ export default function App() {
       return;
     }
     walkingModuleEnabledRef.current = false;
+    // Batas kecepatan dipasang ulang di sini supaya perpindahan ke
+    // action_module tidak menyentak. Yang TIDAK bisa diperlambat dari sini
+    // adalah laju pemutaran halamannya sendiri: action_module menghitung
+    // lintasannya sendiri dan menulis goal tiap 8 ms dengan langkah kecil,
+    // jadi lamanya ditentukan halaman di ALPHONSE.bin.
+    reapplyTorqueLimit();
     walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
     sendStatus(`Init Pose: switching to action_module → page ${WALKING_READY_PAGE_NUM}…`);
     window.setTimeout(() => {
+      if (sequence !== motionSequenceRef.current || !rosRef.current?.isConnected) return;
       actionPagePubRef.current.publish(new ROSLIB.Message({ data: WALKING_READY_PAGE_NUM }));
       sendStatus(`Init Pose: playing page ${WALKING_READY_PAGE_NUM} (WALKING_READY)`);
     }, ACTION_MODULE_SETTLE_MS);
@@ -1423,6 +2274,7 @@ export default function App() {
   };
 
   const handleTorque = (enable) => {
+    cancelPendingMotion();
     if (!torquePubRef.current || !metrics?.joint_names?.length) {
       sendStatus("Torque command unavailable", true);
       return;
@@ -1440,14 +2292,33 @@ export default function App() {
         ["torque_enable", 1],
       ],
       () => {
-        sendStatus(`Torque ON (${preset.label})`);
-        window.setTimeout(restoreFullSpeed, preset.restoreMs);
+        setTorqueLimitActive(true);
+        sendStatus(
+          `Torque ON (${preset.label}, ~${preset.approxDegPerSec} deg/s) — batas tetap terpasang sampai dilepas`
+        );
       }
     );
   };
 
+  // Dipasang ULANG tepat sebelum gerakan yang dimulai dari Studio, bukan
+  // sekadar saat tombol torsi ditekan: itulah gerakan yang benar-benar dilihat
+  // operator. Kembali false kalau tidak ada batas yang sedang aktif.
+  const reapplyTorqueLimit = (onDone) => {
+    if (!torqueLimitActive) return false;
+    const preset = TORQUE_SPEED_PRESETS.find(p => p.key === torqueSpeedKey) || TORQUE_SPEED_PRESETS[1];
+    writeSyncItemsSequential(
+      [
+        ["profile_velocity", preset.velocity],
+        ["profile_acceleration", preset.accel],
+      ],
+      onDone
+    );
+    return true;
+  };
+
   const handleEnableHeadModule = () => {
-    if (headModulePubRef.current) {
+    cancelPendingMotion();
+    if (rosRef.current?.isConnected && headModulePubRef.current) {
       walkingModuleEnabledRef.current = false;
       headModulePubRef.current.publish(new ROSLIB.Message({ data: "head_control_module" }));
       sendStatus("Head Module Enabled");
@@ -1461,9 +2332,16 @@ export default function App() {
   };
 
   const handleDemoMode = (mode) => {
+    cancelPendingMotion();
     if (!demoModePubRef.current || rosState !== "connected") {
       sendStatus("Demo mode unavailable", true);
       return;
+    }
+    // Memilih mode SUDAH memulai demonya (lihat DEMO_MODES), dan demo berjalan
+    // dengan gait -- batas kecepatan servo yang masih terpasang akan
+    // melumpuhkannya. Dilepas dulu, kecuali saat keluar ke posisi siap.
+    if (mode !== "ready" && torqueLimitActive) {
+      restoreFullSpeed("Batas kecepatan servo dilepas — demo butuh kecepatan penuh");
     }
     demoModePubRef.current.publish(new ROSLIB.Message({ data: mode }));
     pushDemoStatus(`mode ${mode}`, mode);
@@ -1471,6 +2349,7 @@ export default function App() {
   };
 
   const handleDemoCommand = (command) => {
+    cancelPendingMotion();
     if (!demoCommandPubRef.current || rosState !== "connected") {
       sendStatus("Demo command unavailable", true);
       return;
@@ -1537,6 +2416,85 @@ export default function App() {
         else sendStatus("YOLO Update Failed", true);
       });
     }
+  };
+
+  const updateKickParam = (key, value) => {
+    setKickParams((previous) => ({ ...previous, [key]: value }));
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    setKickError("");
+  };
+
+  const readKickRuntime = async (context) => {
+    const result = await context.call(kickGetServiceRef.current, { names: KICK_PARAM_KEYS });
+    const decoded = decodeKickParameters(result);
+    setKickCurrentParams(decoded.params);
+    setKickLoaded(true);
+    return decoded;
+  };
+
+  const loadKickParams = () => runRobotOperation("kick", async (context) => {
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    const { params } = await readKickRuntime(context);
+    setKickParams(params);
+    sendStatus("Parameter tendangan dimuat lengkap dari robot");
+  });
+
+  const applyKickParams = () => runRobotOperation("kick", async (context) => {
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    if (!kickLoaded || !kickCurrentParams) throw new Error("Muat parameter dari robot terlebih dahulu sebelum mengirim");
+    const draft = validateKickParams(kickParams);
+    const { params: current, types } = await readKickRuntime(context);
+    const payload = { ...current };
+    for (const key of KICK_PARAM_KEYS) {
+      if (!parameterValuesEqual(draft[key], kickCurrentParams[key])) payload[key] = draft[key];
+    }
+    validateKickParams(payload);
+    const parameters = makeKickParameters(payload, types);
+    if (!parametersEqual(payload, current, KICK_PARAM_KEYS)) {
+      const response = await context.call(kickSetServiceRef.current, { parameters });
+      if (response?.result?.successful !== true) throw new Error(response?.result?.reason || "Perubahan parameter ditolak secara atomik");
+      await context.wait(300);
+    }
+    const { params: observed } = await readKickRuntime(context);
+    if (!parametersEqual(payload, observed, KICK_PARAM_KEYS)) throw new Error("Hasil kirim belum cocok dengan pembacaan robot; periksa perubahan dari klien lain");
+    setKickParams(observed);
+    setKickLastAppliedAt(Date.now());
+    sendStatus("Parameter tendangan diterima atomik dan terbaca balik dari robot");
+  });
+
+  const saveKickParamsToLaunch = () => runRobotOperation("kick", async (context) => {
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    if (!kickLoaded || kickDirty) throw new Error("Muat dan kirim perubahan sebelum menyimpan ke launch");
+    const { params } = await readKickRuntime(context);
+    if (!parametersEqual(params, kickParams, KICK_PARAM_KEYS)) throw new Error("Runtime berubah sejak pembacaan terakhir. Periksa nilai robot sebelum menyimpan");
+    const response = await context.call(kickSaveServiceRef.current, {}, { timeoutMs: 12000 });
+    if (response?.success !== true) throw new Error(response?.message || "Penyimpanan launch belum terkonfirmasi");
+    setKickSavedAt(Date.now());
+    setKickSaveMessage(response.message);
+    sendStatus("Setelan runtime tendangan tersimpan ke demo.launch.xml");
+  });
+
+  const resetKickParamsToLaunch = () => runRobotOperation("kick", async (context) => {
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    const response = await context.call(kickLaunchServiceRef.current);
+    if (response?.success !== true) throw new Error(response?.message || "Bawaan launch tidak terbaca; restart studio_agent jika service belum tersedia");
+    const result = JSON.parse(response.message);
+    setKickParams(validateKickParams(result.parameters));
+    sendStatus("Draft dimuat dari berkas " + result.path + "; belum dikirim ke robot");
+  });
+
+  const revertKickEdits = () => {
+    if (!kickCurrentParams) return;
+    setKickParams({ ...kickCurrentParams });
+    setKickSaveArmed(false);
+    setKickSaveMessage("");
+    setKickError("");
+    sendStatus("Draft kembali ke hasil pembacaan robot terakhir");
   };
 
   // --- Derived Data ---
@@ -1635,6 +2593,20 @@ export default function App() {
             <span>Walking</span>
           </button>
           <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tendangan" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("tendangan"); setSidebarOpen(false); }}
+          >
+            <Crosshair size={20} className={activeTab === "tendangan" ? "text-accent-yellow" : ""} />
+            <span>Tendangan</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "demo" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("demo"); setSidebarOpen(false); }}
+          >
+            <PlayCircle size={20} className={activeTab === "demo" ? "text-accent-yellow" : ""} />
+            <span>Demo</span>
+          </button>
+          <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "teleop" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("teleop"); setSidebarOpen(false); }}
           >
@@ -1708,11 +2680,11 @@ export default function App() {
       return formatWalkingValue(walkingCurrentParams[field.key], field);
     };
     const isFieldDirty = (field) => {
-      if (!walkingCurrentParams) return walkingLoaded;
-      if (field.type === "bool") return Boolean(walkingParams[field.key]) !== Boolean(walkingCurrentParams[field.key]);
+      if (!walkingCurrentParams) return false;
+      if (field.type === "bool") return walkingParams[field.key] !== walkingCurrentParams[field.key];
       // NaN !== NaN, so comparing with Number() marked a field as changed forever the
       // moment it held anything Number() could not read (a half-typed value, a comma).
-      return parseWalkingNumber(walkingParams[field.key], NaN) !== parseWalkingNumber(walkingCurrentParams[field.key], NaN);
+      return !parameterValuesEqual(walkingParams[field.key], walkingCurrentParams[field.key]);
     };
     const selectedWalkingVersion = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     const renderWalkingHelp = (field) => (
@@ -1744,10 +2716,10 @@ export default function App() {
             <div className="px-5 pt-5 pb-3 border-b border-gray-100">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-bold font-display text-gray-900">Walking</h2>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`} title={walkingDirty ? "Ada perubahan yang belum di-Apply" : "UI sudah sama dengan runtime"}>
-                  {walkingDirty ? "Belum di-Apply" : "Tersinkron"}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`} title={walkingDirty ? "Ada perubahan yang belum di-Apply" : "Cocok dengan pembacaan terakhir, bukan pemantauan runtime terus-menerus"}>
+                  {!walkingLoaded ? "Belum dibaca" : walkingDirty ? "Belum di-Apply" : "Cocok saat dibaca"}
                 </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`} title={walkingLoaded ? "Nilai diambil dari robot via Load" : "Belum pernah Load — masih nilai default"}>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`} title={walkingLoaded ? "Nilai diambil dari robot via Load" : "Belum pernah Load — masih nilai referensi UI"}>
                   {walkingLoaded ? "Runtime" : "Default"}
                 </span>
                 {walkingLastAppliedAt && (
@@ -1757,7 +2729,7 @@ export default function App() {
                 )}
               </div>
               <p className="mt-1 text-xs text-gray-500">
-                Workflow: <b>Enable Module</b> → ubah parameter → <b>Apply</b> → <b>Start</b>. Satuan: detik, meter, radian.
+                Workflow: <b>Load</b> → ubah draft → <b>Apply</b> → <b>Start</b>. Start memeriksa modul terlebih dahulu. Satuan: detik, meter, radian.
               </p>
               {walkingError && (
                 <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
@@ -1770,15 +2742,15 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`}
                 onClick={enableWalkingModule}
-                disabled={!rosConnected}
-                title="Aktifkan walking_module pada controller (wajib sebelum Apply/Start)"
+                disabled={!rosConnected || walkingBusy}
+                title="Aktifkan walking_module; dapat mengubah postur meskipun belum Start"
               >
                 <Cpu size={14} /> Enable Module
               </button>
               <button
                 className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
                 onClick={loadWalkingParams}
-                disabled={!rosConnected}
+                disabled={!rosConnected || walkingBusy}
                 title="Tarik parameter walking yang sedang aktif dari robot"
               >
                 <RefreshCw size={14} /> Load
@@ -1787,15 +2759,15 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
                 onClick={applyWalkingParams}
-                disabled={!rosConnected}
-                title="Kirim parameter UI ke robot tanpa menjalankan walking"
+                disabled={!rosConnected || walkingBusy}
+                title="Kirim perubahan draft dan baca balik hasilnya. Dapat mengubah postur/gait jika modul aktif"
               >
                 <Send size={14} /> Apply
               </button>
               <button
                 className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`}
                 onClick={applyWalkingAndStart}
-                disabled={!rosConnected}
+                disabled={!rosConnected || walkingBusy}
                 title="Apply parameter + langsung jalan (gabungan Apply + Start)"
               >
                 <Play size={14} /> Apply &amp; Start
@@ -1808,7 +2780,7 @@ export default function App() {
                 <button
                   className={`${walkingButtonBase} bg-white text-gray-700 border border-gray-200 hover:bg-gray-100`}
                   onClick={applyWalkingAndRefreshTeleop}
-                  disabled={!rosConnected}
+                  disabled={!rosConnected || walkingBusy}
                   title="Apply + minta teleop publish baseline parameter baru"
                 >
                   <Gamepad2 size={14} /> + Teleop
@@ -1825,21 +2797,21 @@ export default function App() {
             {/* Control group — runtime commands */}
             <div className="px-5 py-3 flex flex-wrap items-center gap-2">
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-1">Kontrol</span>
-              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalkingNow} disabled={!rosConnected} title="Mulai jalan dengan parameter yang sudah di-Apply">
+              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalkingNow} disabled={!rosConnected || walkingBusy} title="Mulai jalan dengan parameter yang sudah di-Apply">
                 <Play size={14} /> Start
               </button>
               <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected} title="Berhenti jalan (parameter tetap aktif)">
                 <Square size={14} /> Stop
               </button>
               <div className="h-5 w-px bg-gray-300 mx-1" />
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(true)} disabled={!rosConnected} title="Aktifkan balance IMU feedback (checkbox balance_enable ikut menyala)">
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(true)} disabled={!rosConnected || walkingBusy} title="Aktifkan balance IMU feedback (checkbox balance_enable ikut menyala)">
                 Balance On
               </button>
-              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(false)} disabled={!rosConnected} title="Matikan balance IMU feedback (checkbox balance_enable ikut padam, jadi Apply berikutnya tidak menyalakannya lagi)">
+              <button className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(false)} disabled={!rosConnected || walkingBusy} title="Matikan balance IMU feedback (checkbox balance_enable ikut padam, jadi Apply berikutnya tidak menyalakannya lagi)">
                 Balance Off
               </button>
               <div className="h-5 w-px bg-gray-300 mx-1" />
-              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected} title="Simpan parameter runtime ke config robot (persistent)">
+              <button className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={saveWalkingRuntime} disabled={!rosConnected || walkingBusy || !walkingLoaded || walkingDirty} title="Simpan parameter runtime ke config robot (persistent)">
                 <Save size={14} /> Save to Robot
               </button>
             </div>
@@ -1883,7 +2855,7 @@ export default function App() {
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
                 Tersimpan di browser
               </span>
-              <span className="text-[10px] text-gray-400">Load Version mengisi UI — tetap perlu Apply untuk kirim ke robot</span>
+              <span className="text-[10px] text-gray-400">Muat versi mengisi kotak isian (dan ikut membaca robot) — tetap perlu Apply untuk kirim</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
               <input
@@ -1920,10 +2892,10 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
                 onClick={loadWalkingVersion}
-                disabled={!selectedWalkingVersion}
-                title="Isi UI dengan parameter dari versi terpilih"
+                disabled={!selectedWalkingVersion || walkingBusy}
+                title="Baca parameter robot, lalu isi kotak isian dengan versi terpilih"
               >
-                Load
+                <RefreshCw size={14} /> Muat versi
               </button>
               <button
                 className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
@@ -1986,6 +2958,8 @@ export default function App() {
                                 : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
                             }`}
                             onClick={() => updateWalkingParam(field.key, !walkingParams[field.key])}
+                            disabled={walkingBusy}
+                            aria-label={field.key}
                           >
                             {walkingParams[field.key] ? "Enabled" : "Disabled"}
                           </button>
@@ -2000,6 +2974,8 @@ export default function App() {
                             inputMode="decimal"
                             value={walkingParams[field.key]}
                             onChange={(e) => updateWalkingParam(field.key, e.target.value)}
+                            disabled={walkingBusy}
+                            aria-label={field.key}
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
                           />
                         )}
@@ -2015,6 +2991,821 @@ export default function App() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderKick = () => {
+    const rosConnected = rosState === "connected";
+    const kickButtonBase = "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
+    const fmt = (value, digits = 2) =>
+      Number.isFinite(value) ? Number(value.toFixed(digits)).toString() : "--";
+
+    const showValue = (raw, field) => {
+      const value = parseWalkingNumber(raw, NaN);
+      if (Number.isNaN(value)) return String(raw ?? "");
+      if (field?.type === "switch") return value > 0.5 ? "aktif" : "mati";
+      return fmt(value, 3);
+    };
+    const currentValue = (field) => {
+      if (!kickCurrentParams) return "belum dimuat";
+      return showValue(kickCurrentParams[field.key], field);
+    };
+    const isFieldDirty = (field) => {
+      if (!kickCurrentParams) return kickDirty;
+      return (
+        !parameterValuesEqual(kickParams[field.key], kickCurrentParams[field.key])
+      );
+    };
+
+    // cameraTick sengaja dibaca supaya perhitungan ini ikut disegarkan tiap
+    // detik walaupun tidak ada frame yang datang.
+    void cameraTick;
+    const lastFrameMs = overlayLastRef.current.stampMs;
+    const frameAgeSec = lastFrameMs === null ? null : (performance.now() - lastFrameMs) / 1000;
+    const cameraSilent = kickCameraOn && (frameAgeSec === null || frameAgeSec > 3);
+
+    // Rantai kameranya dua bagian, dan kalau salah satunya hilang gejalanya
+    // SAMA PERSIS: panel hitam. Menyebut bagian mana yang hilang menghemat satu
+    // putaran tanya-jawab -- sudah terjadi dua kali.
+    let cameraDiagnosis =
+      "Coba tombol Scan di halaman Vision untuk melihat topik gambar yang benar-benar ada.";
+    if (rosNodePresence) {
+      if (!rosNodePresence.detector && !rosNodePresence.camera) {
+        cameraDiagnosis =
+          "Kamera dan detektor dua-duanya tidak jalan. Pilih YOLO Vision di peluncur — ia menjalankan " +
+          "yolo_ball_detector_openvino.launch.py, berkas yang sama dengan yang dipakai demo, lengkap dengan usb_cam-nya.";
+      } else if (!rosNodePresence.camera) {
+        cameraDiagnosis =
+          "Detektornya JALAN, tapi usb_cam tidak ada — jadi detektor itu tidak punya gambar untuk dilihat. " +
+          "Jalankan ulang tanpa use_usb_cam:=false.";
+      } else if (!rosNodePresence.detector) {
+        cameraDiagnosis =
+          "usb_cam JALAN, tapi detektornya tidak ada. Periksa log pane YOLO Vision — kalau node-nya mati saat " +
+          "start, alasannya tercetak di situ.";
+      } else {
+        cameraDiagnosis =
+          "Kamera dan detektor dua-duanya jalan, tapi tidak ada gambar yang sampai ke sini. Periksa nama topiknya " +
+          "dengan tombol Scan di halaman Vision.";
+      }
+    }
+
+    // PENGUKURAN LANGSUNG. Dihitung ulang tiap render supaya ia memakai
+    // parameter yang SEDANG DIKETIK, bukan yang tersimpan di robot.
+    const measureParams = { ...MEASURE_WINDOW_DEFAULTS, ...kickParams };
+    const obsAgeSec = kickObservation ? (Date.now() - kickObservation.at) / 1000 : null;
+    const obsFresh = obsAgeSec !== null && obsAgeSec < 2;
+    const measurement =
+      obsFresh && kickObservation.circle && Number.isFinite(kickHipPitch)
+        ? measureBall(kickObservation.circle, kickObservation.head, kickHipPitch, measureParams)
+        : null;
+    const draftKickDistance = parseWalkingNumber(kickParams.kick_distance, NaN);
+    const draftPanMax = parseWalkingNumber(kickParams.kick_pan_max_distance, NaN);
+    // Kenapa belum ada angka. Diurut dari yang paling sering jadi sebabnya.
+    const measureBlocker = !rosConnected
+      ? "ROS bridge belum tersambung."
+      : !Number.isFinite(kickHipPitch)
+        ? "hip_pitch_offset belum terbaca dari walking_module -- op3_manager belum jalan."
+        : kickObservation === null
+          ? "Belum ada deteksi sama sekali di /ball_detector_node/circle_set -- jalankan usb_cam + detektor."
+          : !obsFresh
+            ? `Deteksi terakhir sudah ${fmt(obsAgeSec, 1)} detik lalu.`
+            : !kickObservation.circle
+              ? "Detektor jalan tapi tidak melihat bola. Dekatkan bola atau turunkan confidence_threshold di halaman Vision."
+              : "Sudut tunduk di luar rentang sahih; kepala terlalu datar untuk mengukur.";
+
+    const geometry = computeKickGeometry(kickParams);
+    const liveGeometry = kickCurrentParams ? computeKickGeometry(kickCurrentParams) : null;
+    const geometryRows = [
+      {
+        label: "Ambang radius bola (hitung/manual)",
+        value: `${fmt(geometry.thresholdPx, 1)} px`,
+        note: geometry.usingManual
+          ? "diisi manual; hanya memicu jika Radius ikut memutuskan aktif"
+          : `hitung sendiri: ideal ${fmt(geometry.idealPx, 1)} px dipotong ${fmt(geometry.margin * 100, 0)} %`,
+        highlight: true,
+      },
+      {
+        label: "Sudut tunduk kepala saat bola tepat di jarak tendang",
+        value: `${fmt(geometry.depressionDeg, 1)} deg`,
+        note: "sudut sinar ke bola setelah koreksi posisi gambar dan kepala; bukan head_tilt mentah",
+      },
+      {
+        label: "Jarak terjauh yang masih terbaca",
+        value: Number.isFinite(geometry.maxReadableM) ? `${fmt(geometry.maxReadableM, 2)} m` : "—",
+        note: "di luar ini sudut tunduknya di bawah ambang minimum dan bacaannya dibuang",
+      },
+      {
+        label: "Beda tinggi efektif kamera ke pusat bola",
+        value: `${fmt(geometry.drop, 3)} m`,
+        note: "tinggi kamera dikurangi jari-jari bola",
+      },
+      {
+        label: "Jarak miring kamera ke bola",
+        value: `${fmt(geometry.slant, 3)} m`,
+        note: `panjang fokus ${fmt(geometry.focalPx, 0)} px`,
+      },
+    ];
+
+    const renderKickHelp = (field) => (
+      <div className="absolute left-4 right-4 top-[calc(100%-4px)] z-30 hidden rounded-xl border border-undip-blue/20 bg-white p-4 text-xs shadow-xl group-hover/param:block group-focus-within/param:block lg:left-5 lg:right-auto lg:w-[380px]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-bold text-gray-900">{field.label}</div>
+            <div className="mt-1 font-mono text-[11px] text-gray-400">
+              {field.key}{field.unit ? ` | ${field.unit}` : ""} | di robot {currentValue(field)} | diketik {showValue(kickParams[field.key], field)}
+            </div>
+          </div>
+          <Info size={16} className="mt-0.5 flex-shrink-0 text-undip-blue" />
+        </div>
+        <div className="mt-3 space-y-2 leading-relaxed text-gray-600">
+          <p><span className="font-bold text-gray-800">Artinya:</span> {field.artinya}</p>
+          <p><span className="font-bold text-gray-800">Fungsi:</span> {field.fungsi}</p>
+          <p><span className="font-bold text-gray-800">Tuning:</span> {field.tuning}</p>
+          <p className="text-yellow-700"><span className="font-bold">Risiko:</span> {field.risk}</p>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="h-full p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-7xl mx-auto flex flex-col gap-5">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold font-display text-gray-900">Jarak Tendangan</h2>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${kickDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}
+                  title={kickDirty ? "Ada perubahan yang belum dikirim ke robot" : "Cocok dengan pembacaan terakhir, bukan pemantauan terus-menerus"}
+                >
+                  {!kickLoaded ? "Belum dibaca" : kickDirty ? "Belum dikirim" : "Cocok saat dibaca"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${kickLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}
+                  title={kickLoaded ? "Angka diambil dari robot" : "Belum dibaca — angka referensi UI, bukan isi launch aktual"}
+                >
+                  {kickLoaded ? "Dari robot" : "Referensi UI"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    rosNodePresence === null
+                      ? "bg-gray-100 text-gray-500"
+                      : rosNodePresence.demo
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-600"
+                  }`}
+                  title="Pemilik parameter tendangan. Tanpa node ini, Muat dan Kirim tidak ada yang menjawab."
+                >
+                  demo_node {rosNodePresence === null ? "?" : rosNodePresence.demo ? "hidup" : "tidak ada"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    rosNodePresence === null
+                      ? "bg-gray-100 text-gray-500"
+                      : rosNodePresence.agent
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-600"
+                  }`}
+                  title="Yang menulis ke demo.launch.xml. Tanpa node ini, Simpan ke launch tidak bisa dipakai."
+                >
+                  studio_agent {rosNodePresence === null ? "?" : rosNodePresence.agent ? "hidup" : "tidak ada"}
+                </span>
+                {kickLastAppliedAt && (
+                  <span className="text-[10px] font-mono text-gray-400" title="Waktu terakhir dikirim ke robot">
+                    Kirim: {new Date(kickLastAppliedAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                Angka di halaman ini adalah parameter ROS milik node <span className="font-mono">demo_node</span>, bukan
+                isi WalkingParam. Robot membacanya ulang sendiri 0,2 detik setelah dikirim, jadi tidak perlu
+                meluncurkan ulang demo. Perubahannya hidup di RAM: sesudah demo dimatikan semuanya kembali ke
+                bawaan <span className="font-mono">demo.launch.xml</span> — pakai <span className="font-bold">Simpan ke launch</span> kalau
+                setelannya sudah pas dan mau dipermanenkan.
+              </p>
+            </div>
+
+            <div className="px-5 py-4 flex flex-wrap items-center gap-2">
+              <button
+                className={`${kickButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={loadKickParams}
+                disabled={!rosConnected || kickBusy}
+                title="Baca angka yang benar-benar hidup di robot"
+              >
+                <RefreshCw size={14} /> Muat dari robot
+              </button>
+              <button
+                className={`${kickButtonBase} bg-accent-yellow text-black hover:bg-yellow-400 shadow-sm`}
+                onClick={applyKickParams}
+                disabled={!rosConnected || kickBusy || !kickLoaded}
+                title="Kirim semua angka di halaman ini ke robot sekarang juga"
+              >
+                <Send size={14} /> Kirim ke robot
+              </button>
+              <button
+                className={`${kickButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={revertKickEdits}
+                disabled={kickBusy || !kickLoaded}
+                title="Kembalikan kotak isian ke angka terakhir yang dibaca dari robot"
+              >
+                Batalkan perubahan
+              </button>
+              <button
+                className={`${kickButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={resetKickParamsToLaunch}
+                disabled={!rosConnected || kickBusy}
+                title="Baca default langsung dari berkas demo.launch.xml melalui studio_agent; hanya mengisi draft"
+              >
+                Bawaan launch
+              </button>
+              <button
+                className={`${kickButtonBase} ${
+                  kickSaveArmed
+                    ? "bg-red-600 text-white hover:bg-red-700"
+                    : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+                }`}
+                onClick={() => {
+                  if (kickSaveArmed) saveKickParamsToLaunch();
+                  else setKickSaveArmed(true);
+                }}
+                disabled={!rosConnected || kickBusy || kickDirty || !kickLoaded}
+                title={
+                  kickDirty
+                    ? "Kirim ke robot dulu — yang disimpan adalah angka yang hidup di robot, bukan isi kotak ini"
+                    : "Tulis permanen ke demo.launch.xml supaya bertahan sesudah demo dimatikan"
+                }
+              >
+                <Save size={14} /> {kickSaveArmed ? "Yakin? klik lagi" : "Simpan ke launch"}
+              </button>
+              <div className="flex-1" />
+              <button
+                className={`${kickButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                onClick={() => setActiveTab("demo")}
+                title="Buka halaman Demo untuk langsung mencoba hasil tuning"
+              >
+                <PlayCircle size={14} /> Coba di Demo
+              </button>
+            </div>
+
+            {kickDirty && (
+              <div className="mx-5 mb-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                <span className="font-bold">Simpan ke launch dikunci.</span> Yang ditulis ke berkas adalah angka
+                yang benar-benar hidup di robot, bukan isi kotak di bawah — jadi kirim dulu ke robot, coba di
+                demo, baru simpan.
+              </div>
+            )}
+            {kickSaveMessage && (
+              <div className="mx-5 mb-3 rounded-xl border border-green-100 bg-green-50 px-4 py-3 text-xs text-green-700">
+                <div className="font-bold">
+                  Tersimpan ke demo.launch.xml{kickSavedAt ? ` — ${new Date(kickSavedAt).toLocaleTimeString()}` : ""}
+                </div>
+                <div className="mt-1 font-mono break-all leading-relaxed">{kickSaveMessage}</div>
+              </div>
+            )}
+            {kickError && (
+              <div className="mx-5 mb-5 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
+                {kickError}
+              </div>
+            )}
+            {!rosConnected && (
+              <div className="mx-5 mb-5 rounded-xl border border-yellow-100 bg-yellow-50 px-4 py-3 text-xs text-yellow-700">
+                Rosbridge belum tersambung. Kotak isian tetap bisa diubah, tapi tombol kirim dimatikan.
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* Kamera ditaruh BERSEBELAHAN dengan panel hitungan, bukan di halaman
+                lain: yang dinilai operator saat menera jarak adalah lingkaran bola
+                di gambar versus ambang radius yang tercetak di sebelahnya. */}
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Video size={18} className="text-undip-blue" />
+                    <h3 className="font-bold text-gray-900">Kamera</h3>
+                    {kickCameraOn && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-green-50 text-green-700">
+                        {formatNumber(overlayStats.fps, 1)} FPS
+                      </span>
+                    )}
+                    {rosNodePresence && (
+                      <>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${rosNodePresence.camera ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}
+                          title="/usb_cam_node/usb_cam"
+                        >
+                          usb_cam {rosNodePresence.camera ? "hidup" : "tidak ada"}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${rosNodePresence.detector ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}
+                          title="/ball_detector_node/yolo_ball_detector"
+                        >
+                          detektor {rosNodePresence.detector ? "hidup" : "tidak ada"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Tampilan YOLO memperlihatkan lingkaran bola yang jari-jarinya dibandingkan dengan ambang di panel
+                    sebelah.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`flex-shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors ${
+                    kickCameraOn
+                      ? "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100"
+                      : "bg-green-50 text-green-700 border border-green-100 hover:bg-green-100"
+                  }`}
+                  onClick={() => setKickCameraOn((prev) => !prev)}
+                  title={
+                    kickCameraOn
+                      ? "Memutus langganan gambar — aliran datanya benar-benar berhenti, bukan cuma berhenti digambar"
+                      : "Berlangganan lagi ke topik gambar"
+                  }
+                >
+                  {kickCameraOn ? <><Square size={14} /> Matikan kamera</> : <><Play size={14} /> Nyalakan kamera</>}
+                </button>
+              </div>
+
+              <div className="bg-black flex items-center justify-center min-h-[260px] flex-1 relative">
+                {kickCameraOn ? (
+                  <canvas ref={kickCanvasRef} className="max-w-full max-h-[420px] object-contain" />
+                ) : (
+                  <div className="text-gray-500 text-sm font-mono py-16">Kamera dimatikan</div>
+                )}
+                {cameraSilent && (
+                  <div className="absolute inset-0 flex items-center justify-center p-6">
+                    <div className="max-w-sm rounded-xl border border-amber-300/40 bg-black/85 px-4 py-3 text-xs text-amber-200 leading-relaxed">
+                      <div className="font-bold">Belum ada gambar yang masuk.</div>
+                      <div className="mt-1 font-mono break-all text-amber-100/80">{overlayTopic}</div>
+                      <div className="mt-2 text-amber-100/70">{cameraDiagnosis}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 border-t border-gray-100">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">
+                  Sumber gambar
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setOverlayTopic("/ball_detector_node/image_out")}
+                    className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/ball_detector_node/image_out" ? "bg-undip-blue text-white border-undip-blue" : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"}`}
+                  >
+                    YOLO Debug
+                  </button>
+                  <button
+                    onClick={() => setOverlayTopic("/usb_cam_node/image_raw")}
+                    className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/usb_cam_node/image_raw" ? "bg-undip-blue text-white border-undip-blue" : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"}`}
+                  >
+                    Kamera murni
+                  </button>
+                </div>
+                <div className="mt-2 text-[11px] font-mono text-gray-400 break-all">{overlayTopic}</div>
+                <div className="mt-1 text-[11px] text-gray-400">
+                  Sumbernya sama dengan halaman Vision — mengubahnya di sini ikut mengubah di sana.
+                </div>
+              </div>
+            </div>
+
+            {/* PENGUKUR JARAK: taruh bola di tempat yang diinginkan, baca
+                angkanya, lalu pakai. Ini menjawab "berapa kick_distance yang
+                pas" tanpa meteran dan tanpa menebak. */}
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Ruler size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Ukur jarak bola sekarang</h3>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${measurement ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {measurement ? "terukur" : "menunggu bola"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Letakkan bola tepat di tempat Abang ingin robot BERHENTI, arahkan kepala ke bola,
+                  lalu tekan <span className="font-bold">Pakai jarak ini</span>. Dihitung dengan geometri
+                  yang sama persis dengan yang dipakai robot saat demo.
+                </p>
+              </div>
+
+              {measurement && measurement.distanceM !== null ? (
+                <>
+                  <div className="px-5 py-4 flex flex-wrap items-end gap-x-8 gap-y-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Jarak bola</div>
+                      <div className="font-mono text-3xl font-bold text-undip-blue">
+                        {fmt(measurement.distanceM, 3)} <span className="text-lg">m</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Jarak tendang (draft)</div>
+                      <div className="font-mono text-xl text-gray-700">{fmt(draftKickDistance, 3)} m</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase text-gray-400">Selisih</div>
+                      <div className={`font-mono text-xl font-bold ${Math.abs(measurement.distanceM - draftKickDistance) < 0.02 ? "text-green-600" : "text-amber-600"}`}>
+                        {measurement.distanceM > draftKickDistance ? "+" : ""}
+                        {fmt((measurement.distanceM - draftKickDistance) * 100, 1)} cm
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100 border-y border-gray-100">
+                    {[
+                      { l: "Radius bola", v: `${fmt(measurement.radiusPx, 1)} px`,
+                        n: `ambang ${fmt(geometry.thresholdPx, 1)} px` },
+                      { l: "Sudut tunduk", v: `${fmt(measurement.depressionDeg, 1)} deg`, n: "ke pusat bola" },
+                      { l: "Arah bola", v: `${fmt(measurement.bearingDeg, 1)} deg`, n: "+ = kiri" },
+                      { l: "Jendela kaki", v: measurement.footWindow === "right" ? "KANAN"
+                          : measurement.footWindow === "left" ? "KIRI" : "di luar",
+                        n: `servo ${fmt(measurement.servoWindowDeg, 1)} deg` },
+                    ].map((k) => (
+                      <div key={k.l} className="bg-white px-4 py-3">
+                        <div className="text-[10px] font-bold uppercase text-gray-400">{k.l}</div>
+                        <div className="font-mono text-sm font-bold text-gray-800">{k.v}</div>
+                        <div className="text-[10px] text-gray-400">{k.n}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="px-5 py-4 flex flex-wrap items-center gap-3">
+                    <button
+                      className={`${kickButtonBase} bg-undip-blue text-white hover:bg-undip-blue/90`}
+                      onClick={() => {
+                        updateKickParam("kick_distance", measurement.distanceM.toFixed(3));
+                        sendStatus(`Jarak tendang draft diisi ${measurement.distanceM.toFixed(3)} m dari pengukuran`);
+                      }}
+                      title="Isi kotak Jarak tendang dengan jarak bola yang barusan diukur"
+                    >
+                      <Crosshair size={14} /> Pakai jarak ini
+                    </button>
+                    <span className="text-[11px] text-gray-500">
+                      Baru mengisi kotak isian; masih perlu tombol kirim untuk sampai ke robot.
+                    </span>
+                  </div>
+
+                  {Number.isFinite(draftPanMax) && Number.isFinite(draftKickDistance)
+                    && draftPanMax <= draftKickDistance && (
+                    <div className="px-5 pb-4 text-[11px] text-yellow-800 bg-yellow-50 border-t border-yellow-100 pt-3">
+                      <span className="font-bold">Perhatian:</span> batas mulai penyelarasan
+                      ({fmt(draftPanMax, 3)} m) tidak boleh lebih kecil daripada jarak tendang
+                      ({fmt(draftKickDistance, 3)} m) -- robot tidak akan pernah mulai meluruskan yaw.
+                      Isi sekitar 5 cm lebih besar.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="px-5 py-6 text-sm text-gray-500">
+                  <div className="font-bold text-gray-700">Belum ada angka.</div>
+                  <div className="mt-1">{measureBlocker}</div>
+                  {measurement && measurement.distanceM === null && (
+                    <div className="mt-2 text-[11px]">
+                      Arah bola terbaca ({fmt(measurement.bearingDeg, 1)} deg) tapi jaraknya tidak:
+                      sudut tunduk {fmt(measurement.depressionDeg, 1)} deg di luar rentang sahih
+                      ({fmt(parseWalkingNumber(kickParams.kick_min_depression_deg, NaN), 1)} sampai 89 deg).
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>
+
+          {/* Akibat dari angka yang sedang diketik — dihitung dengan rumus yang
+              sama persis dengan yang dipakai robot.
+
+              SELEBAR HALAMAN, dan isinya ubin, bukan daftar menurun. Dulu ia
+              kartu ketiga di grid dua kolom di atas, jadi ia sendirian di baris
+              kedua dan separuh kanan halaman kosong sepanjang kartunya. */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <Crosshair size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Akibat angka yang sedang diketik</h3>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Dihitung dengan rumus yang sama persis dengan <span className="font-mono">BallFollower::loadTunableParameters()</span>.
+                  Belum tentu sama dengan yang di robot sampai tombol kirim ditekan.
+                </p>
+              </div>
+              <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-5">
+                  {geometryRows.map((row) => (
+                    <div key={row.label} className={`rounded-xl border px-4 py-3 ${row.highlight ? "border-undip-blue/20 bg-blue-50/40" : "border-gray-100 bg-gray-50"}`}>
+                      <div className={`text-xs ${row.highlight ? "font-bold text-gray-900" : "text-gray-600"}`}>{row.label}</div>
+                      <div className={`mt-1 font-mono ${row.highlight ? "text-xl font-bold text-undip-blue" : "text-base text-gray-800"}`}>
+                        {row.value}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-snug text-gray-400">{row.note}</div>
+                    </div>
+                  ))}
+                </div>
+                {liveGeometry && (
+                  <div className="px-5 pb-4 -mt-1 text-[11px] text-gray-500">
+                    Pada pembacaan robot terakhir, ambang radius hitung/manual <span className="font-mono font-bold">{fmt(liveGeometry.thresholdPx, 1)} px</span> pada
+                    jarak tendang <span className="font-mono font-bold">{fmt(parseWalkingNumber(kickCurrentParams.kick_distance, NaN), 3)} m</span>.
+                  </div>
+                )}
+              </div>
+          </div>
+
+          {/* KOLOM CSS, bukan grid. Keempat grup ini isinya 2, 6, 4 dan 3 field;
+              di grid dua kolom tinggi tiap BARIS mengikuti kartu tertinggi, jadi
+              "Jarak tendang" (2 field) meninggalkan lubang setinggi 4 field di
+              sebelah "Geometri pengukur jarak" (6 field). Kolom CSS menata
+              kartunya berurutan dan menyeimbangkan tinggi kedua kolom sendiri.
+              Jarak antar kartu pakai mb-6: row-gap tidak berlaku di multikolom. */}
+          <div className="columns-1 xl:columns-2 gap-6">
+            {KICK_PARAM_GROUPS.map((group) => (
+              <div key={group.title} className="mb-6 break-inside-avoid bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
+                <div className="p-5 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal size={18} className="text-undip-blue" />
+                    <h3 className="font-bold text-gray-900">{group.title}</h3>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">{group.description}</p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {group.fields.map((field) => {
+                    const dirty = isFieldDirty(field);
+                    const switchOn = parseWalkingNumber(kickParams[field.key], 0) > 0.5;
+                    return (
+                      <div key={field.key} className="group/param relative grid grid-cols-1 gap-3 p-4 md:grid-cols-[minmax(170px,1fr)_minmax(180px,220px)_minmax(150px,180px)] md:items-center">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm font-bold text-gray-800">{field.label}</label>
+                            <Info size={13} className="text-gray-300 transition-colors group-hover/param:text-undip-blue group-focus-within/param:text-undip-blue" />
+                            {dirty && <span className="w-2 h-2 rounded-full bg-yellow-400" title="Diubah, belum dikirim" />}
+                          </div>
+                          <div className="mt-1 text-[11px] text-gray-400 font-mono break-all">{field.key}{field.unit ? ` (${field.unit})` : ""}</div>
+                        </div>
+
+                        {field.type === "switch" ? (
+                          // Tetap angka 0/1, bukan boolean: robot mendeklarasikannya
+                          // bertipe float dan set_parameters menolak tipe lain.
+                          <button
+                            type="button"
+                            className={`w-full px-3 py-2 rounded-lg border text-sm font-bold transition-colors ${
+                              switchOn
+                                ? "bg-green-50 text-green-700 border-green-100 hover:bg-green-100"
+                                : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                            }`}
+                            onClick={() => updateKickParam(field.key, switchOn ? 0 : 1)}
+                            disabled={kickBusy}
+                            aria-label={field.key}
+                          >
+                            {switchOn ? "Aktif (1.0)" : "Mati (0.0)"}
+                          </button>
+                        ) : (
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={kickParams[field.key]}
+                            onChange={(e) => updateKickParam(field.key, e.target.value)}
+                            disabled={kickBusy}
+                            aria-label={field.key}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
+                          />
+                        )}
+
+                        <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase text-gray-400">Di robot</div>
+                          <div className="text-xs font-mono text-gray-700 truncate">{currentValue(field)}</div>
+                        </div>
+                        {renderKickHelp(field)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDemo = () => {
+    const rosConnected = rosState === "connected";
+    const demoButtonBase = "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+    const demoNodeUp = rosNodePresence?.demo === true;
+    const demoNodeKnown = rosNodePresence !== null;
+    const controlsDisabled = !rosConnected || (demoNodeKnown && !demoNodeUp);
+
+    return (
+      <div className="h-full p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-7xl mx-auto flex flex-col gap-5">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold font-display text-gray-900">Demo</h2>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${rosConnected ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                  {rosConnected ? "Tersambung" : "Terputus"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    !demoNodeKnown
+                      ? "bg-gray-100 text-gray-500"
+                      : demoNodeUp
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-600"
+                  }`}
+                  title="Node yang menerima semua perintah di halaman ini"
+                >
+                  demo_node {!demoNodeKnown ? "?" : demoNodeUp ? "hidup" : "tidak ada"}
+                </span>
+                {demoMode && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-50 text-undip-blue">
+                    terakhir dikirim: {demoMode}
+                  </span>
+                )}
+                <button
+                  className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                  onClick={refreshRosNodes}
+                  disabled={!rosConnected}
+                >
+                  Periksa lagi
+                </button>
+                {rosNodeCheckedAt && (
+                  <span className="text-[10px] font-mono text-gray-400">
+                    {new Date(rosNodeCheckedAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {demoNodeKnown && !demoNodeUp && (
+              <div className="mx-5 mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+                <div className="font-bold">demo_node tidak ditemukan di robot.</div>
+                <div className="mt-1 leading-relaxed">
+                  Selama node ini belum ada, semua tombol di halaman ini terkirim ke ruang hampa — robot tidak akan
+                  bereaksi sama sekali. Luncurkan demonya dulu di robot:
+                  <span className="font-mono block mt-1">ros2 launch op3_demo demo.launch.xml</span>
+                </div>
+              </div>
+            )}
+
+            {/* Perilaku sebenarnya di robot, bukan tebakan: memilih mode SUDAH
+                memulai demonya, dan "start" itu toggle. */}
+            <div className="mx-5 my-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 leading-relaxed">
+              <span className="font-bold">Memilih mode sudah memulai demonya.</span> Tidak perlu menekan Lanjut
+              sesudahnya — di robot, memilih mode langsung memanggil rutin start-nya. Menekan Lanjut saat demo
+              sedang berjalan justru <span className="font-bold">menghentikannya</span>, karena perintah start itu
+              toggle. Kalau ragu, tekan Jeda dulu.
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <PlayCircle size={18} className="text-undip-blue" />
+                <h3 className="font-bold text-gray-900">Mulai demo</h3>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Satu klik = kirim mode ke /robotis/mode_command, dan robot langsung menjalankannya. Mode hanya bisa
+                dipilih dari keadaan siap; kalau demo lain masih berjalan, tekan Berhenti dulu.
+              </p>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {DEMO_MODES.map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  className={`w-full text-left px-5 py-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    demoMode === mode.key ? "bg-blue-50/60" : "hover:bg-gray-50"
+                  }`}
+                  onClick={() => handleDemoMode(mode.key)}
+                  disabled={controlsDisabled}
+                >
+                  <div className="flex items-center gap-2">
+                    <Play size={15} className={demoMode === mode.key ? "text-undip-blue" : "text-gray-400"} />
+                    <span className={`text-sm font-bold ${demoMode === mode.key ? "text-undip-blue" : "text-gray-800"}`}>
+                      Mulai {mode.label}
+                    </span>
+                    <span className="font-mono text-[11px] text-gray-400">{mode.key}</span>
+                    {demoMode === mode.key && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-undip-blue text-white">terkirim</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-500 leading-relaxed">{mode.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <StopCircle size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Saat demo berjalan</h3>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">Berlaku untuk Soccer dan Action; mode Vision tidak memakainya.</p>
+              </div>
+              <div className="p-5 grid grid-cols-2 gap-3">
+                <button
+                  className="py-4 rounded-xl text-sm font-bold bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                  onClick={() => handleDemoCommand("stop")}
+                  disabled={controlsDisabled}
+                  title="Selalu menghentikan, aman ditekan walaupun demo sudah berhenti"
+                >
+                  <Square size={16} /> Jeda
+                </button>
+                <button
+                  className="py-4 rounded-xl text-sm font-bold bg-green-50 text-green-700 border border-green-100 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                  onClick={() => handleDemoCommand("start")}
+                  disabled={controlsDisabled}
+                  title="Toggle di robot: melanjutkan kalau sedang berhenti, MENGHENTIKAN kalau sedang berjalan"
+                >
+                  <Play size={16} /> Lanjut
+                </button>
+                <button
+                  className="col-span-2 py-3 rounded-xl text-sm font-bold bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                  onClick={() => handleDemoMode("ready")}
+                  disabled={controlsDisabled}
+                  title="Keluar dari demo dan kembali ke posisi siap"
+                >
+                  <StopCircle size={16} /> Berhenti &amp; kembali siap
+                </button>
+              </div>
+              <div className="px-5 pb-5 text-[11px] text-gray-500">
+                {demoCommandAt
+                  ? `Terakhir: ${new Date(demoCommandAt).toLocaleTimeString()} — ${demoCommand}`
+                  : "Belum ada perintah demo yang dikirim dari halaman ini."}
+                <div className="mt-1 text-gray-400">
+                  Penanda di atas mencatat apa yang DIKIRIM halaman ini, bukan bacaan balik dari robot. Kalau tombol
+                  fisik di punggung robot ikut dipakai, keduanya bisa berbeda.
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal size={18} className="text-undip-blue" />
+                  <h3 className="font-bold text-gray-900">Persiapan cepat</h3>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">Torsi dan posisi siap sebelum demo dimulai, tanpa pindah halaman.</p>
+              </div>
+              <div className="p-5 flex flex-wrap gap-2">
+                <button
+                  className={`${demoButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                  onClick={() => handleTorque(true)}
+                  disabled={!rosConnected}
+                >
+                  Torsi ON
+                </button>
+                <button
+                  className={`${demoButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                  onClick={handleInitPose}
+                  disabled={!rosConnected}
+                >
+                  Init Pose (page {WALKING_READY_PAGE_NUM})
+                </button>
+                <button
+                  className={`${demoButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                  onClick={handleSoftStop}
+                  disabled={!rosConnected}
+                >
+                  <StopCircle size={14} /> Stop jalan
+                </button>
+                <button
+                  className={`${demoButtonBase} bg-red-50 text-red-600 hover:bg-red-100`}
+                  onClick={() => handleTorque(false)}
+                  disabled={!rosConnected}
+                >
+                  Torsi OFF
+                </button>
+                {torqueLimitActive && (
+                  <button
+                    className={`${demoButtonBase} bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200`}
+                    onClick={() => restoreFullSpeed("Kecepatan penuh dikembalikan")}
+                  >
+                    Batas kecepatan aktif — lepas
+                  </button>
+                )}
+                <div className="w-full" />
+                <button
+                  className={`${demoButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                  onClick={() => setActiveTab("tendangan")}
+                >
+                  <Crosshair size={14} /> Setel jarak tendangan
+                </button>
+              </div>
+              <div className="px-5 pb-5 text-[11px] text-gray-400 leading-relaxed">
+                Torsi OFF melepas seluruh servo — pegang robotnya dulu.
+                <div className="mt-1">
+                  Pilihan Lambat/Sedang/Cepat di Dashboard mengekang sentakan SERVO saat torsi menyala. Laju Init
+                  Pose ditentukan halaman di ALPHONSE.bin dan laju jalan oleh walking_module, jadi keduanya tidak
+                  ikut melambat. Memulai demo otomatis melepas batasnya — gait butuh kecepatan penuh.
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2224,15 +4015,28 @@ export default function App() {
           </button>
           <div className="flex-1 hidden sm:block"></div>
           <div className="flex gap-2 w-full sm:w-auto items-center flex-wrap">
-            <div className="flex bg-blue-50 border border-blue-200 rounded-lg p-1 text-xs font-medium" title="Kecepatan saat Torque ON (anti nyentak)">
+            <div
+              className="flex bg-blue-50 border border-blue-200 rounded-lg p-1 text-xs font-medium"
+              title="Batas kecepatan servo saat Torque ON. Mengekang sentakan servo, BUKAN laju Init Pose atau gait."
+            >
               {TORQUE_SPEED_PRESETS.map(p => (
                 <button
                   key={p.key}
                   className={`px-3 py-1 rounded-md transition-all font-semibold ${torqueSpeedKey === p.key ? "bg-undip-blue text-white shadow-sm" : "text-undip-blue hover:bg-blue-100"}`}
                   onClick={() => setTorqueSpeedKey(p.key)}
+                  title={`~${p.approxDegPerSec} deg/detik (profile_velocity ${p.velocity})`}
                 >{p.label}</button>
               ))}
             </div>
+            {torqueLimitActive && (
+              <button
+                className="flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200 transition-all"
+                onClick={() => restoreFullSpeed("Kecepatan penuh dikembalikan")}
+                title="Batas kecepatan sedang terpasang. Klik untuk melepasnya."
+              >
+                Batas aktif — lepas
+              </button>
+            )}
             <button className="flex-1 sm:flex-none px-4 py-2 border border-gray-200 rounded-lg text-gray-600 font-medium hover:bg-gray-50 text-sm" onClick={() => handleTorque(false)}>Torque OFF</button>
             <button className="flex-1 sm:flex-none px-4 py-2 bg-undip-blue text-white rounded-lg font-bold hover:bg-opacity-90 shadow-sm transition-all text-sm" onClick={() => handleTorque(true)}>Torque ON</button>
           </div>
@@ -2306,7 +4110,15 @@ export default function App() {
               <strong className="font-mono text-gray-900">{formatNumber(imu.pitch, 1)}°</strong>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-gray-50">
-              <span className="text-sm text-gray-500">Yaw</span>
+              <span className="flex items-center gap-2 text-sm text-gray-500">
+                Yaw
+                {/* Yaw berasal dari magnetometer OpenCR. Tanpa penanda ini, yaw yang
+                    dipaksa 0 (sensor belum siap) tidak bisa dibedakan dari robot yang
+                    memang sedang menghadap arah awalnya. */}
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${MAG_STATUS[imu.mag_status]?.cls || "bg-gray-100 text-gray-400"}`}>
+                  {MAG_STATUS[imu.mag_status]?.label || "n/a"}
+                </span>
+              </span>
               <strong className="font-mono text-gray-900">{formatNumber(imu.yaw, 1)}°</strong>
             </div>
             <div className={`mt-4 text-center p-2 rounded-lg text-xs font-bold uppercase tracking-wider ${metrics?.fall?.state !== "upright" ? "bg-red-100 text-red-600" : "bg-green-50 text-green-600"}`}>
@@ -2481,20 +4293,23 @@ export default function App() {
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Preset Topics</label>
               <div className="grid grid-cols-2 gap-2">
                 <button 
-                  onClick={() => setOverlayTopic("/vision/yolo/debug")} 
-                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/vision/yolo/debug" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                  onClick={() => setOverlayTopic("/ball_detector_node/image_out")} 
+                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/ball_detector_node/image_out" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
                 >
                   YOLO Debug
                 </button>
                 <button 
-                  onClick={() => setOverlayTopic("/robotis_op3/camera/image_raw")} 
-                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/robotis_op3/camera/image_raw" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                  onClick={() => setOverlayTopic("/usb_cam_node/image_raw")} 
+                  className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${overlayTopic === "/usb_cam_node/image_raw" ? 'bg-undip-blue text-white border-undip-blue' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
                 >
                   Pure Camera
                 </button>
               </div>
               <p className="mt-2 text-[11px] text-gray-400">
-                Hardware camera (manager + usb_cam) publishes on <span className="font-mono">/robotis_op3/camera/image_raw</span>.
+                usb_cam menerbitkan <span className="font-mono">/usb_cam_node/image_raw</span>, dan detektor bola
+                menerbitkan gambar beranotasi di <span className="font-mono">/ball_detector_node/image_out</span>.
+                Keduanya berasal dari berkas launch yang sama dengan yang dipakai demo, dan dijalankan oleh
+                pilihan <span className="font-bold">YOLO Vision</span> di peluncur.
               </p>
             </div>
             <div>
@@ -2550,19 +4365,27 @@ export default function App() {
           <div className="flex flex-col gap-6 mt-2">
             {YOLO_PARAM_KEYS.map(key => (
               <div key={key}>
-                <div className="flex justify-between mb-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">{key.replace(/_confidence_threshold|_/g, " ")}</label>
+                <div className="flex justify-between mb-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    {YOLO_PARAM_INFO[key]?.label || key}
+                  </label>
                   <span className="text-xs font-mono font-bold text-undip-blue">{yoloParams[key].toFixed(2)}</span>
                 </div>
                 <input
-                  type="range" min="0" max="1" step="0.05"
+                  type="range" min="0.05" max="0.95" step="0.01"
                   className="w-full accent-undip-blue h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer"
                   value={yoloParams[key]}
                   onChange={e => setYoloParams({ ...yoloParams, [key]: Number(e.target.value) })}
                 />
+                <p className="mt-1 text-[11px] leading-relaxed text-gray-500">{YOLO_PARAM_INFO[key]?.help}</p>
               </div>
             ))}
-            <button className="w-full py-3 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyYoloParams}>Apply Thresholds</button>
+            <p className="text-[11px] text-gray-400">
+              Ditulis ke <span className="font-mono">/ball_detector_node/yolo_ball_detector</span>, langsung
+              berlaku tanpa memuat ulang model. Tidak permanen: kembali ke isi
+              <span className="font-mono"> yolo_ball_detector_openvino_params.yaml</span> saat detektor dijalankan ulang.
+            </p>
+            <button className="w-full py-3 bg-accent-yellow text-black hover:bg-yellow-400 rounded-lg text-sm font-bold transition-colors shadow-sm" onClick={applyYoloParams}>Kirim ke detektor</button>
           </div>
         </div>
       </div>
@@ -2660,10 +4483,23 @@ export default function App() {
             {renderVision()}
           </div>
           <div className={activeTab === "tuning" ? "h-full" : "hidden"}>
-            <TuningPage ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus} />
+            <TuningPage
+              ros={rosRef.current} rosState={rosState} joyState={joyState} publishJoy={publishJoy} sendStatus={sendStatus}
+              walkingControls={{
+                busy: walkingBusy, load: loadWalkingParams, apply: applyWalkingTuner, enable: enableWalkingModule,
+                start: startWalkingNow, stop: () => sendWalkingCommand("stop"),
+                balance: sendBalanceCommand, save: saveWalkingRuntime,
+              }}
+            />
           </div>
           <div className={activeTab === "walking" ? "h-full" : "hidden"}>
             {renderWalking()}
+          </div>
+          <div className={activeTab === "tendangan" ? "h-full" : "hidden"}>
+            {renderKick()}
+          </div>
+          <div className={activeTab === "demo" ? "h-full" : "hidden"}>
+            {renderDemo()}
           </div>
           <div className={activeTab === "teleop" ? "h-full" : "hidden"}>
             {renderTeleop()}
