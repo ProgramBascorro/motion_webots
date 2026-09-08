@@ -28,6 +28,7 @@
   <depend>boost</depend>
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
   <exec_depend>op3_manager</exec_depend>
   <exec_depend>op3_camera_setting_tool</exec_depend>
   <exec_depend>op3_web_setting_tool</exec_depend>

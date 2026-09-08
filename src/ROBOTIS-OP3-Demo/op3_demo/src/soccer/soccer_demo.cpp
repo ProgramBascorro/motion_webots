@@ -202,6 +202,7 @@ void SoccerDemo::setDemoDisable()
   ball_follower_.clearBallPosition();
 
   enable_ = false;
+  kick_pending_ = false;
   wait_count_ = 0;
   soccer_requested_ = false;
   on_following_ball_ = false;
@@ -248,39 +249,6 @@ void SoccerDemo::process()
 
   if (wait_count_ <= 0)
   {
-    // ball following
-    //
-    // isYawAligning() ikut jadi syarat: selama badan sedang diputar ke yaw
-    // target, processFollowing()/waitFollowing() TIDAK boleh ikut menulis ke
-    // /robotis/walking/set_params. Keduanya mengirim amplitudo mereka sendiri
-    // tiap tick dan akan langsung menimpa perintah putar -- robot terlihat
-    // "mencoba memutar tapi tidak pernah berputar". on_following_ball_ sendiri
-    // sengaja TIDAK dinolkan di sini: handleFallen() memakainya untuk memutuskan
-    // apakah demo perlu dinyalakan lagi sesudah robot bangkit.
-    if (on_following_ball_ == true && ball_follower_.isYawAligning() == false)
-    {
-      switch(tracking_status_)
-      {
-      case BallTracker::Found:
-        // Argumen ke-3 tetap 0.0: itu SUDUT jari-jari dalam radian, dipakai di
-        // dalam tan(). Radius piksel masuk lewat argumen ke-4 -- mengopernya ke
-        // slot ke-3 berarti 45 RADIAN di dalam tan() dan merusak seluruh
-        // perhitungan jarak.
-        ball_follower_.processFollowing(ball_tracker_.getPanOfBall(),
-                                        ball_tracker_.getTiltOfBall(),
-                                        0.0,
-                                        ball_tracker_.getBallSize());
-        break;
-
-      case BallTracker::NotFound:
-        ball_follower_.waitFollowing();
-        break;
-
-      default:
-        break;
-      }
-    }
-
     if (on_tracking_ball_ == true)
     {
       // ball tracking
@@ -309,6 +277,44 @@ void SoccerDemo::process()
         tracking_status_ = tracking_status;
     }
 
+    if (on_tracking_ball_ && tracking_status_ == BallTracker::Found)
+      ball_follower_.updateBallObservation(ball_tracker_.getPanOfBall(),
+                                          ball_tracker_.getTiltOfBall(),
+                                          ball_tracker_.getBallSize());
+
+    // ball following
+    //
+    // isYawAligning() ikut jadi syarat: selama badan sedang diputar ke yaw
+    // target, processFollowing()/waitFollowing() TIDAK boleh ikut menulis ke
+    // /robotis/walking/set_params. Keduanya mengirim amplitudo mereka sendiri
+    // tiap tick dan akan langsung menimpa perintah putar -- robot terlihat
+    // "mencoba memutar tapi tidak pernah berputar". on_following_ball_ sendiri
+    // sengaja TIDAK dinolkan di sini: handleFallen() memakainya untuk memutuskan
+    // apakah demo perlu dinyalakan lagi sesudah robot bangkit.
+    if (on_following_ball_ == true && ball_follower_.isYawAligning() == false && !kick_pending_)
+    {
+      switch(tracking_status_)
+      {
+      case BallTracker::Found:
+        // Argumen ke-3 tetap 0.0: itu SUDUT jari-jari dalam radian, dipakai di
+        // dalam tan(). Radius piksel masuk lewat argumen ke-4 -- mengopernya ke
+        // slot ke-3 berarti 45 RADIAN di dalam tan() dan merusak seluruh
+        // perhitungan jarak.
+        ball_follower_.processFollowing(ball_tracker_.getPanOfBall(),
+                                        ball_tracker_.getTiltOfBall(),
+                                        0.0,
+                                        ball_tracker_.getBallSize());
+        break;
+
+      case BallTracker::NotFound:
+        ball_follower_.waitFollowing();
+        break;
+
+      default:
+        break;
+      }
+    }
+
     // check fallen states
     switch (stand_state_)
     {
@@ -324,6 +330,16 @@ void SoccerDemo::process()
         break;
       }
 
+      if (kick_pending_)
+      {
+        if (std::chrono::steady_clock::now() >= kick_ready_at_)
+        {
+          kick_pending_ = false;
+          handleKick(kick_pre_delay_sec_);
+        }
+        break;
+      }
+
       // Fase MEMUTAR: bola sudah dalam posisi tendang, tapi badan belum
       // menghadap yaw target. Satu langkah per tick, tidak memblokir -- jadi
       // tombol STOP dan deteksi jatuh tetap hidup selama robot berputar.
@@ -332,8 +348,18 @@ void SoccerDemo::process()
         // Sudut leher hanya sahih sebagai arah bola kalau pelacak memang
         // sedang melihat bola; kalau tidak, kepala sedang menyapu dan
         // angkanya akan menyesatkan geseran menyamping.
-        if (ball_follower_.processYawAlign(tracking_status_ == BallTracker::Found) == true)
+        // Jari-jari bola ikut dioper: fase MENGGESER sesudah mengitari bola
+        // memakainya sebagai pengukur jarak, dengan ambang yang sama persis
+        // dengan pemicu tendangan.
+        if (ball_follower_.processYawAlign(tracking_status_ != BallTracker::NotFound,
+                                           ball_tracker_.getBallSize()) == true)
           kickAfterYawAlign();
+        else if (!ball_follower_.isYawAligning())
+        {
+          on_following_ball_ = false;
+          restart_soccer_ = soccer_requested_;
+          wait_count_ = SPIN_RATE / 2;
+        }
         break;
       }
 
@@ -344,10 +370,6 @@ void SoccerDemo::process()
       if(in_range == true)
       {
         // JANGAN langsung menendang. Hadapkan badan ke yaw target dulu.
-        // startYawAlign() mengembalikan false kalau tidak perlu memutar (yaw
-        // sudah di dalam toleransi) atau tidak bisa (magnetometer belum siap) --
-        // di situ perilakunya persis seperti sebelum fitur ini ada.
-        //
         // stopFollowing() TIDAK boleh dipanggil sebelum ini. Ia mengirim "stop"
         // ke walking_module, dan startInPlaceTurn() mengirim "start" beberapa
         // puluh mikrodetik kemudian -- keduanya tiba dalam satu siklus kontrol
@@ -355,20 +377,15 @@ void SoccerDemo::process()
         // mati dan perintah putar tidak berpengaruh sama sekali: terukur yaw
         // beku di pita +-1,1 deg selama 12 detik penuh. startYawAlign() kini
         // memakai pauseFollowingForTurn() yang membiarkan gait tetap jalan.
-        if (ball_follower_.startYawAlign() == true)
-        {
-          sendDebugTopic("Aligning yaw before kick");
-          break;
-        }
-
-        ball_follower_.stopFollowing();
-        handleKick();
+        ball_follower_.startYawAlign();
+        sendDebugTopic("Checking yaw and ball position before kick");
       }
       break;
     }
       // fallen state : Fallen_Forward, Fallen_Behind
     default:
     {
+      kick_pending_ = false;
       // Dibatalkan LEBIH DULU: cancelYawAlign() menolkan amplitudo putar yang
       // masih tersimpan di walking_module. Tanpa itu, robot yang jatuh saat
       // memutar akan berputar lagi sendiri begitu "start" berikutnya dikirim.
@@ -545,7 +562,7 @@ void SoccerDemo::callServiceSettingModule(const robotis_controller_msgs::msg::Jo
   }
 
   auto future = set_joint_module_client_->async_send_request(request);
-  if (rclcpp::spin_until_future_complete(temp_node, future) == rclcpp::FutureReturnCode::SUCCESS)
+  if (rclcpp::spin_until_future_complete(temp_node, future, std::chrono::milliseconds(1500)) == rclcpp::FutureReturnCode::SUCCESS)
   {
     RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "SoccerDemo::callServiceSettingModule(%s) : result : %d", modules.module_name[0].c_str(), future.get()->result);
   }
@@ -715,14 +732,11 @@ void SoccerDemo::imuDataCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
   // convertQuaternionToRPY() membongkarnya pada urutan ZYX yang sama.
   ball_follower_.setBodyYaw(rpy_orientation.coeff(2, 0));
 
-  // Gyro sumbu tegak, rad/detik. Inilah yang mengendalikan putaran; yaw di
-  // atas hanya dipakai saat robot DIAM untuk menetapkan targetnya.
-  ball_follower_.setBodyGyroZ(msg->angular_velocity.z);
-
-  // Gyro sumbu tegak: laju putar badan, rad/detik. Inilah yang mengendalikan
-  // fase memutar, karena ia tidak terganggu medan magnet motor seperti
-  // magnetometer. Disuapkan tiap pesan supaya integrasinya tidak kehilangan
-  // sampel.
+  // Gyro sumbu tegak, rad/detik. Inilah yang mengendalikan fase memutar, karena
+  // ia tidak terganggu medan magnet motor seperti magnetometer; yaw di atas
+  // hanya dipakai saat robot DIAM untuk menetapkan targetnya. Disuapkan tiap
+  // pesan supaya integrasinya tidak kehilangan sampel -- dan HANYA SEKALI:
+  // panggilan kedua yang dulu ada di sini menyuapkan sampel yang sama dua kali.
   ball_follower_.setBodyGyroZ(msg->angular_velocity.z);
 
   if (stop_fallen_check_ == true)
@@ -760,6 +774,22 @@ void SoccerDemo::startSoccerMode()
   is_start_soccer_running_ = true;
   soccer_requested_ = true;
 
+  // ACUAN POSE dikembalikan SEBELUM modulnya dinyalakan, dan urutan itu wajib.
+  //
+  // walking_module merekam walking_bias_ tepat pada tick pertama sesudah
+  // diaktifkan, terhadap offset yang SEDANG hidup. Kalau yang hidup masih
+  // preset dari siklus sebelumnya (paling sering terjadi sesudah robot JATUH:
+  // gerakan bangun memakai action_module, lalu walking_module dinyalakan lagi
+  // di sini), posenya salah untuk sisa run -- dan kalau preset itu kebetulan
+  // JALAN, selisihnya NOL dan robot terkunci di pose page 2.
+  //
+  // Ini satu satunya tempat walking_module dinyalakan di seluruh demo, jadi
+  // satu baris di sini menutup semua jalurnya: bangun dari jatuh, mulai lagi
+  // sesudah menendang, dan tombol demo ditekan ulang. Pada demo pertama
+  // fungsinya tidak melakukan apa apa, karena acuannya memang belum direkam
+  // dan yang hidup sudah param.yaml.
+  ball_follower_.publishPoseReference();
+
   // Switch the controller to walking_module FIRST. This is the slow path
   // (service call, ~100-300 ms) so we get it underway before we tell the
   // head tracker to scan — the head tracker is fire-and-forget and
@@ -784,6 +814,7 @@ void SoccerDemo::startSoccerMode()
 
 void SoccerDemo::stopSoccerMode()
 {
+  kick_pending_ = false;
   RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Stop Soccer Demo");
 
   // Sequence the stop so it FEELS immediate (~50 ms perceived) instead of
@@ -879,7 +910,7 @@ void SoccerDemo::handleKick(int ball_position)
     return;
 
   // ceremony
-  //playMotion(Ceremony);
+  playMotion(Ceremony);
 }
 
 void SoccerDemo::handleKick(double already_settled_sec)
@@ -899,12 +930,37 @@ void SoccerDemo::handleKick(double already_settled_sec)
     delay_sec = 0.0;
 
   if (delay_sec > 0.0)
-    rclcpp::sleep_for(std::chrono::milliseconds((int) (delay_sec * 1000.0)));
+  {
+    kick_pending_ = true;
+    kick_ready_at_ = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(static_cast<int>(delay_sec * 1000.0));
+    return;
+  }
+
+  kick_pending_ = false;
+  if (!soccer_requested_ || !enable_)
+    return;
+  const auto kick_is_ready = [this]()
+  {
+    if (tracking_status_ != BallTracker::NotFound && ball_follower_.canKickNow())
+      return true;
+    RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+                "Tendangan ditahan: jarak, kaki, atau yaw berubah selama jeda. Dekati ulang.");
+    ball_follower_.clearBallPosition();
+    on_following_ball_ = false;
+    restart_soccer_ = soccer_requested_;
+    return false;
+  };
+  if (!kick_is_ready())
+    return;
 
   // change to motion module
   setModuleToDemo("action_module");
 
   if (handleFallen(stand_state_) == true || enable_ == false)
+    return;
+
+  if (!kick_is_ready())
     return;
 
   // kick motion
@@ -958,7 +1014,7 @@ void SoccerDemo::handleKick(double already_settled_sec)
     return;
 
   // ceremony
-  //playMotion(Ceremony);
+  playMotion(Ceremony);
 }
 
 void SoccerDemo::kickAfterYawAlign()
@@ -974,7 +1030,18 @@ void SoccerDemo::kickAfterYawAlign()
   // tidak menunjuk ke bola dan decideBallPositin() cuma akan membaca posisi
   // kepala terakhir; dalam keadaan itu keputusan lama lebih dipercaya.
   // Matikan seluruh perilaku ini dengan kick_refresh_foot_after_align:=0.0.
-  if (ball_follower_.refreshFootAfterAlign() == true && tracking_status_ == BallTracker::Found)
+  // Kalau fase MENGGESER (atau pemeriksaan "bola sudah di depan kaki" yang
+  // melewatinya) sudah menetapkan kakinya, keputusan itu yang dipakai. Fase itu
+  // bekerja membawa bola ke depan kaki tertentu dan baru saja selesai; menilai
+  // ulang dari sudut leher di sini cuma bisa membatalkannya.
+  if (ball_follower_.footDecidedByReposition() == true)
+  {
+    RCLCPP_WARN(rclcpp::get_logger("SoccerDemo"),
+                "Kaki penendang %s sudah ditetapkan fase menggeser; tidak dinilai ulang.",
+                footName(ball_follower_.getBallPosition()));
+  }
+  else if (ball_follower_.refreshFootAfterAlign() == true &&
+           tracking_status_ == BallTracker::Found)
   {
     const int before = ball_follower_.getBallPosition();
     ball_follower_.decideBallPositin(ball_tracker_.getPanOfBall(), ball_tracker_.getTiltOfBall());

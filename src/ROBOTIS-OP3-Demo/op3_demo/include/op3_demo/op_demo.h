@@ -27,15 +27,28 @@ namespace robotis_op
 class OPDemo
 {
  public:
+  // Nomor halaman aksi di ALPHONSE.bin. INI SUMBER UTAMANYA: soccer_demo,
+  // vision_demo dan demo_node memakai nama-nama di bawah, bukan angka, jadi
+  // cukup satu tempat ini yang diubah kalau .bin-nya di-teach ulang.
+  //
+  // Pemakai lain yang TIDAK bisa meng-include berkas ini menyimpan angka yang
+  // sama sebagai parameter/enum sendiri, dan harus ikut disamakan:
+  //   op3_gui_demo/include/op3_gui_demo/main_window.hpp   (enum Motion_Index)
+  //   op3_ball_localization/config/ball_localizer.yaml    (kick_*/getup_*_page)
+  //   op3_joy_teleop/config/op3_joy_teleop.yaml           (left/right_kick_page, getup_*)
+  //   plus default declare_parameter() di node python masing-masing.
   enum Motion_Index
   {
-    InitPose = 2,
-    WalkingReady = 8,
+    InitPose = 1,
+    WalkingReady = 2,
     GetUpFront = 85,
     GetUpBack = 86,
-    RightKick = 218, //32 inti  //218 regional //220 nasional // smpg kanan : 6 
-    LeftKick = 104, //104 inti //219 regional //221 nasional // smpg kiri : 7 
-    Ceremony = 27, //
+    // Riwayat nomor tendangan di robot ini, disimpan supaya gampang dikembalikan:
+    // kanan 32 (inti) / 218 (regional) / 220 (nasional) / 6 (smpg)
+    // kiri  104 (inti) / 219 (regional) / 221 (nasional) / 7 (smpg)
+    RightKick = 105,
+    LeftKick = 104,
+    Ceremony = 17,
     ForGrass = 21,
   };
 

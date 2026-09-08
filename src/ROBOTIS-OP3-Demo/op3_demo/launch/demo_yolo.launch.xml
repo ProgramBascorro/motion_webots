@@ -2,8 +2,13 @@
 <launch>
   <arg name="with_manager" default="true"/>
 
-  <!-- robotis op3 manager -->
-  <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
+  <!-- robotis op3 manager. boot_init_page:=-1 dengan alasan yang sama seperti di
+       demo.launch.xml: berkas ini juga menjalankan op_demo_node, dan demo_node
+       memainkan page 2 sendiri. Dua init pose yang balapan menghasilkan ERROR
+       "Can not play page 2.(Now playing)" tiap boot. -->
+  <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py">
+    <arg name="boot_init_page" value="-1"/>
+  </include>
 
   <!-- YOLO detector -->
   <include file="$(find-pkg-share op3_yolo_vision)/launch/yolo.launch.py"/>

@@ -103,8 +103,27 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
 )
 
-install(DIRECTORY data launch list 
+install(DIRECTORY config data launch list
   DESTINATION share/${PROJECT_NAME}
 )
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(kick_alignment_test
+    test/kick_alignment_test.cpp
+    src/soccer/ball_follower.cpp
+  )
+  ament_target_dependencies(kick_alignment_test
+    rclcpp ament_index_cpp std_msgs sensor_msgs geometry_msgs
+    robotis_controller_msgs op3_walking_module_msgs
+    op3_ball_detector_msgs YAML_CPP
+  )
+  target_compile_definitions(kick_alignment_test PRIVATE
+    OP3_DEMO_PRESET_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/preset_walking.yaml"
+  )
+  set_tests_properties(kick_alignment_test PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=77;ROS_LOCALHOST_ONLY=1"
+  )
+endif()
 
 ament_package()

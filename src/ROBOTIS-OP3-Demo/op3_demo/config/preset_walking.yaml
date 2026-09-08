@@ -1,0 +1,433 @@
+# Preset walking untuk DEMO SEPAK BOLA.
+# =============================================================================
+#
+# Enam gerakan, enam bagian. Semuanya disetel operator langsung di robot lewat
+# Bascorro Studio > Walking, lalu disalin ke sini:
+#
+#   jalan          "JALAN MENUJU MEKKAH" dipakai selama bola TERLIHAT
+#   mencari_celah  "MENCARI CELAH"    berputar di tempat saat bola TIDAK terlihat
+#   putar_kiri     "Putar Kiri New"   mengitari bola saat yaw POSITIF
+#   putar_kanan    "Putar Kanan New"  mengitari bola saat yaw NEGATIF
+#   geser_kiri     "KIRI MIN NEW"     menyesuaikan kaki ke KIRI
+#   geser_kanan    "KANAN MIN NEW"    menyesuaikan kaki ke KANAN
+#
+# URUTAN SATU SIKLUS DEMO
+# -----------------------
+#   0. bola belum terlihat         -> preset mencari_celah
+#      (robot berputar di tempat; kepala tetap menyapu mencari bola)
+#   1. robot melihat bola          -> jeda sebentar, lalu preset jalan
+#   2. sudah dekat bola, berhenti
+#   3. mengitari bola sampai yaw masuk toleransi
+#                                  -> preset putar_kiri / putar_kanan
+#   4. menyesuaikan posisi kaki    -> preset geser_kiri / geser_kanan
+#      (DILEWATI kalau bolanya sudah tepat di depan salah satu kaki)
+#   5. menendang dengan kaki itu, lalu kembali ke langkah 0
+#
+# CARA MENGISI
+# ------------
+# Nama field di sini SAMA PERSIS dengan sublabel di Bascorro Studio > Walking
+# (mis. "angle_move_amplitude_turn_in (rad)" -> angle_move_amplitude_turn_in).
+# Jadi: pilih versi di "Versi Tersimpan", tekan Load, lalu salin angkanya ke
+# sini. Sesudah mengubah berkas ini, jalankan ULANG demo; tidak perlu compile.
+#
+# FIELD YANG TIDAK DITULIS TIDAK DIUBAH. Ia mewarisi nilai yang sedang hidup
+# di walking_module -- untuk bagian jalan itu isi param.yaml, dan untuk empat
+# bagian lainnya itu hasil bagian jalan, karena semuanya ditimpakan DI ATAS
+# preset jalan. Itu disengaja: lebih baik mewarisi angka yang benar-benar
+# dipakai robot daripada menuliskan tebakan.
+#
+# SATUANNYA SATUAN STUDIO, bukan satuan param.yaml: period_time dan
+# soft_start_time dalam DETIK (bukan milidetik), roll/pitch/yaw/pelvis/
+# hip_pitch dalam RADIAN (bukan derajat).
+#
+# PRESET MANA UNTUK YAW MANA
+# --------------------------
+# Aturannya tetap dan tidak pernah ditukar sendiri saat demo berjalan:
+#
+#     yaw POSITIF -> putar_kiri        yaw NEGATIF -> putar_kanan
+#
+# ("yaw" di sini simpangan terhadap kick_yaw_target_deg, yang bawaannya 0, jadi
+# angkanya persis bacaan yaw robot.)
+#
+# Perlu diingat: "putar_kiri"/"putar_kanan" itu nama dari operator, dan menurut
+# WalkingParam.msg tanda turn_in memilih KAKI mana yang berputar saat menapak
+# (turn_in > 0 = kaki kiri) -- bukan arah badan. Kalau di robot ternyata
+# terbalik, ada DUA cara membalikkannya, keduanya di tangan operator:
+#   1. jalankan dengan kick_orbit_left_yaw_sign:=-1.0, atau
+#   2. tukar isi kedua bagian di berkas ini.
+# Gyro tetap mengukur arah putaran, tapi hanya untuk MELAPORKAN kalau arahnya
+# berlawanan dengan yang diminta; ia tidak menukar preset sendiri.
+
+# --- JALAN MENUJU MEKKAH -----------------------------------------------------
+# Angka versi "JALAN MENUJU MEKKAH" dari tiga screenshot Bascorro Studio
+# 2026-09-07 pukul 19:44-19:45; p_gain 36, 28 field lainnya tetap.
+#
+# RIWAYAT SINGKAT, supaya tidak bolak-balik lagi:
+#   02 Sep 17:23 UTC  bagian ini dibuat, tapi cuma 27 field -- init_x_offset dan
+#                     period_time tidak terlihat di tangkapan layar yang pertama,
+#                     jadi keduanya mewarisi param.yaml (-0.02 m dan 0,8 s) dan
+#                     robot memang berjalan dengan langkah + periode yang salah
+#                     selama satu jam. Terbaca di dump op3_manager 18:02 UTC.
+#   02 Sep 18:16 UTC  operator mengirim ulang tangkapan layarnya; init_x -0.03
+#                     dan period 0.77 diisi, genap 29 field. Dump op3_manager
+#                     18:21 UTC sudah menunjukkan -0.03 / 770 ms.
+#   05 Sep 15:20 UTC  sempat diganti dengan preset lama "dari ketua" atas
+#                     permintaan operator, lalu dikembalikan lagi 15:35 UTC.
+#
+# ARSIP -- preset lama "dari ketua" (tersimpan 2026-08-18, dipakai robot 22 Agu
+# sampai 1 Sep). Salin balik ke bawah kalau suatu saat mau dipakai lagi:
+#   init_x -0.02   init_y 0.028   init_z 0.0408   roll 0   pitch -0.07   yaw 0
+#   period 0.8     dsp 0.58       step_fb 0.2     soft_start 2.0
+#   x_move 0.0181  y_move 0       z_move 0.037    angle 0   turn_in 0
+#   y_swap -0.002  z_swap 0.006   arm 0           pelvis 0.0524  hip_pitch 0.1396
+#   balance false (0.35/0.4/0.7/0.9)              p36 i0 d0
+# Sumbernya kalau berkas ini hilang: WALKING_DEFAULT_PARAMS di
+# bascorro_studio/web/src/App.jsx (satu-satunya yang punya soft_start_time dan
+# p/i/d) plus dump parameter op3_manager di ~/.ros/log, 87 berkas, 22 Agu-1 Sep.
+#
+# Dipakai sejak tombol demo ditekan dan jadi DASAR kelima preset lainnya:
+# mencari celah/putar/geser ditimpakan di atas nilai-nilai ini, jadi field yang
+# tidak mereka sebut memakai angka dari sini. Yang terpengaruh cuma geser_kanan,
+# satu-satunya yang tidak menyebut pelvis_offset dan hip_pitch_offset: keduanya
+# mewarisi 0.05 dan 0.14 dari sini.
+#
+# x_move_amplitude di sini bukan langkah tetap melainkan BATAS ATAS: demo
+# menaikkan langkah maju bertahap sampai angka ini, dan ball_follower memakainya
+# sebagai max_fb_step_ (16,0 mm). Begitu juga z_move_amplitude, yang jadi batas
+# atas tinggi angkat kaki.
+#
+# KEENAM ANGKA init_* DI BAWAH BEKERJA SEBAGAI SELISIH, BUKAN POSE MUTLAK.
+# walking_module merekam walking_bias_ waktu modulnya diaktifkan, jadi
+#
+#     pose robot = page 2 + [ neutral(init_* di sini) - neutral(param.yaml) ]
+#
+# Persis seperti di Bascorro Studio: menekan Apply menggeser robot sebesar
+# selisihnya terhadap acuan, bukan memindahkannya ke pose mutlak. Karena itu
+# param.yaml op3_walking_module SENGAJA berbeda dengan bagian ini di ketujuh
+# offset pose -- kalau disamakan, selisihnya nol dan robot terkunci di page 2
+# berapa pun angka yang ditulis di sini. Selisih yang berlaku sekarang:
+# x -10,0 mm, pitch -2,8648 deg, hip_pitch +0,0229 deg.
+#
+# Field SELAIN init_* (timing, amplitudo, bentuk gait, gain) tidak begitu:
+# mereka dipakai apa adanya.
+jalan:
+  init_x_offset: -0.03
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.12
+  init_yaw_offset: 0.0
+
+  period_time: 0.77
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.05
+
+  x_move_amplitude: 0.016
+  y_move_amplitude: 0.0
+  z_move_amplitude: 0.037
+  angle_move_amplitude: 0.0
+  angle_move_amplitude_turn_in: 0.0
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 36
+  i_gain: 0
+  d_gain: 0
+
+# --- MENCARI CELAH -----------------------------------------------------------
+# Disalin dari Bascorro Studio 2026-09-04 (versi "MENCARI CELAH",
+# tersimpan 3/9/2026 23:40).
+#
+# Dipakai saat BOLA TIDAK TERDETEKSI. Sesudah bola hilang selama
+# walk_search_lost_sec, demo menerbitkan preset ini apa adanya: langkah maju
+# dan geser NOL, yang bergerak cuma angle_move_amplitude -0,2 rad (-11,5 deg
+# per langkah), jadi robot berputar di tempat sambil kepala tetap menyapu
+# mencari bola.
+#
+# Tandanya (-0,2) setelan operator di Studio, dipakai apa adanya -- jangan
+# dibalik dari dalam kode.
+#
+# Begitu bola terlihat lagi robot TIDAK langsung berjalan: amplitudo dinolkan
+# dulu selama walk_search_resume_delay_sec supaya badan berhenti berputar dan
+# kepala sempat mengunci bola, BARU preset JALAN diterbitkan kembali. Tanpa
+# jeda itu robot berpindah dari memutar ke berjalan di tengah langkah dan
+# arah bola terbaca sambil badan masih berayun.
+#
+# Sama seperti putar dan geser, preset ini ditimpakan DI ATAS hasil preset
+# JALAN: field yang tidak disebut di sini mewarisi angka JALAN.
+mencari_celah:
+  init_x_offset: -0.018
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.28
+  init_yaw_offset: 0.0
+
+  period_time: 0.57
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.03
+
+  x_move_amplitude: 0.0
+  y_move_amplitude: 0.0
+  z_move_amplitude: 0.037
+  angle_move_amplitude: -0.2
+  angle_move_amplitude_turn_in: 0.0
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 16
+  i_gain: 0
+  d_gain: 0
+
+# --- PUTAR KIRI --------------------------------------------------------------
+# Disalin dari Bascorro Studio 2026-09-04 (versi "Putar Kiri New",
+# tersimpan 3/9/2026 23:31).
+#
+# BARU: sekarang KEDUA sumbu putar dipakai sekaligus, bukan turn_in saja --
+# angle_move_amplitude -0,07 rad DITAMBAH turn_in +0,015 rad. Tandanya
+# berlawanan, dan itu memang setelan operator. Keduanya bermuara ke
+# r_hip_yaw/l_hip_yaw tapi dengan pola yang berbeda: angle_move_amplitude
+# memutar kedua pinggul BERLAWANAN arah saat kaki di udara, turn_in memutar
+# keduanya SEARAH pada jendela DSP sesudah telapak menapak.
+#
+# Sebelum ini angle_move_amplitude 0,0 dan turn_in +0,025.
+putar_kiri:
+  init_x_offset: -0.022
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.2
+  init_yaw_offset: 0.0
+
+  period_time: 0.57
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.005
+
+  x_move_amplitude: 0.0
+  y_move_amplitude: -0.029
+  z_move_amplitude: 0.037
+  angle_move_amplitude: -0.07
+  angle_move_amplitude_turn_in: 0.015
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 16
+  i_gain: 0
+  d_gain: 0
+
+# --- PUTAR KANAN -------------------------------------------------------------
+# Disalin dari Bascorro Studio 2026-09-04 (versi "Putar Kanan New",
+# tersimpan 3/9/2026 23:24).
+#
+# BARU: angle_move_amplitude naik dari 0,0 ke +0,015 rad. turn_in tetap -0,09.
+#
+# Perhatikan: ini BUKAN cermin putar_kiri, dan sekarang makin jelas tidak.
+# Operator menyetel keduanya sendiri-sendiri:
+#
+#             angle_move_amplitude   turn_in    y_move
+#   KIRI            -0,070           +0,015     -29 mm
+#   KANAN           +0,015           -0,090     +20 mm
+#
+# Jadi bukan cuma tandanya yang berbeda: besarnya pun tertukar peran (yang
+# besar di kiri adalah angle, yang besar di kanan adalah turn_in), 4-6x lipat.
+# JANGAN PERNAH "menurunkan" satu sisi dari sisi lainnya.
+#
+# CATATAN SALINAN: tangkapan layar putaran ini tidak sampai ke dasar panel
+# "Bentuk Gait", jadi arm_swing_gain, pelvis_offset, hip_pitch_offset, dan
+# d_gain di bawah masih nilai salinan sebelumnya (0,0 / 0,05 / 0,14 / 0) --
+# sama dengan keempat preset lain. Kalau di Studio ternyata beda, kirim
+# tangkapan layar bagian bawahnya.
+putar_kanan:
+  init_x_offset: -0.022
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.18
+  init_yaw_offset: 0.0
+
+  period_time: 0.57
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.005
+
+  x_move_amplitude: 0.0
+  y_move_amplitude: 0.02
+  z_move_amplitude: 0.037
+  angle_move_amplitude: 0.015
+  angle_move_amplitude_turn_in: -0.09
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 16
+  i_gain: 0
+  d_gain: 0
+
+# --- GESER KIRI --------------------------------------------------------------
+# Disalin dari Bascorro Studio 2026-09-02 (versi "KIRI MIN NEW").
+#
+# Dipakai sesudah yaw lurus, waktu robot menyesuaikan posisi kaki dengan bola:
+# bola ada di sebelah KIRI kaki yang dituju, jadi robot bergeser ke kiri sampai
+# bolanya masuk jendela tendang.
+#
+# Preset ini membawa angle_move_amplitude 0.1 rad (~5,7 deg), jadi ia ikut
+# MEMUTAR badan sedikit, bukan menggeser murni. Itu setelan operator dan
+# dipakai apa adanya; toleransi yaw +-15 deg memang cukup lebar untuk itu.
+geser_kiri:
+  # init_x_offset SENGAJA TIDAK diambil dari Studio (2026-09-08).
+  #
+  # KIRI MIN NEW dan KANAN MIN NEW yang tersimpan di Bascorro Studio memakai
+  # init_x_offset -0.18, dan angka itu MUSTAHIL secara mekanis: kaki jadi
+  # diminta 254,1 mm dari pinggul padahal paha + betis cuma 220,2 mm. Diuji
+  # langsung terhadap op3_kinematics_dynamics, IK gagal di seluruh rentang
+  # langkahnya, sementara kelima preset lain lolos.
+  #
+  # Itu bukan dugaan: inilah yang membuat log membanjir
+  # "IK produced non-finite leg_angle[2]" pada 2026-09-08 dini hari, dan
+  # waktunya cocok persis. KANAN MIN NEW disimpan 02:06:52, walking_module
+  # dinyalakan 02:07:53, galat IK mulai 02:08:41 dan tidak berhenti.
+  #
+  # Dibiarkan di -0.03 (nilai lama yang terbukti jalan) sampai operator
+  # memastikan angkanya. Dugaan kuat maksudnya -0.018, sama dengan
+  # mencari_celah; itu terjangkau (180,3 mm) dan pola angkanya cocok.
+  init_x_offset: -0.03
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.28
+  init_yaw_offset: 0.0
+
+  period_time: 0.55
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.01
+
+  x_move_amplitude: -0.0026
+  y_move_amplitude: -0.025
+  z_move_amplitude: 0.037
+  angle_move_amplitude: 0.1
+  angle_move_amplitude_turn_in: 0.0
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 16
+  i_gain: 0
+  d_gain: 0
+
+# --- GESER KANAN -------------------------------------------------------------
+# Disalin dari Bascorro Studio 2026-09-02 (versi "KANAN MIN NEW").
+#
+# pelvis_offset dan hip_pitch_offset SENGAJA tidak ditulis: di tangkapan layar
+# keduanya tertutup kotak keterangan. Keduanya mewarisi nilai dari bagian
+# jalan (0.05 dan 0.14 rad), yang juga dipakai ketiga preset lainnya. Isi
+# manual kalau versi "KANAN MIN NEW" ternyata memakai angka lain.
+geser_kanan:
+  # init_x_offset SENGAJA TIDAK diambil dari Studio (2026-09-08).
+  #
+  # KIRI MIN NEW dan KANAN MIN NEW yang tersimpan di Bascorro Studio memakai
+  # init_x_offset -0.18, dan angka itu MUSTAHIL secara mekanis: kaki jadi
+  # diminta 254,1 mm dari pinggul padahal paha + betis cuma 220,2 mm. Diuji
+  # langsung terhadap op3_kinematics_dynamics, IK gagal di seluruh rentang
+  # langkahnya, sementara kelima preset lain lolos.
+  #
+  # Itu bukan dugaan: inilah yang membuat log membanjir
+  # "IK produced non-finite leg_angle[2]" pada 2026-09-08 dini hari, dan
+  # waktunya cocok persis. KANAN MIN NEW disimpan 02:06:52, walking_module
+  # dinyalakan 02:07:53, galat IK mulai 02:08:41 dan tidak berhenti.
+  #
+  # Dibiarkan di -0.03 (nilai lama yang terbukti jalan) sampai operator
+  # memastikan angkanya. Dugaan kuat maksudnya -0.018, sama dengan
+  # mencari_celah; itu terjangkau (180,3 mm) dan pola angkanya cocok.
+  init_x_offset: -0.03
+  init_y_offset: 0.028
+  init_z_offset: 0.0408
+  init_roll_offset: 0.0
+  init_pitch_offset: -0.28
+  init_yaw_offset: 0.0
+
+  period_time: 0.56
+  dsp_ratio: 0.4
+  step_fb_ratio: 0.25
+  soft_start_time: 0.05
+
+  x_move_amplitude: 0.0
+  y_move_amplitude: 0.007
+  z_move_amplitude: 0.037
+  angle_move_amplitude: 0.0
+  angle_move_amplitude_turn_in: 0.0
+  move_aim_on: false
+
+  balance_enable: false
+  balance_hip_roll_gain: 0.35
+  balance_knee_gain: 0.4
+  balance_ankle_roll_gain: 0.7
+  balance_ankle_pitch_gain: 0.9
+
+  y_swap_amplitude: 0.0021
+  z_swap_amplitude: 0.0
+  arm_swing_gain: 0.0
+  # Ditulis tegas 2026-09-08 (sebelumnya mewarisi bagian jalan, kebetulan sama
+  # nilainya). Sekarang keenam bagian sama-sama memuat 29 field penuh.
+  pelvis_offset: 0.05
+  hip_pitch_offset: 0.14
+
+  p_gain: 16
+  i_gain: 0
+  d_gain: 0

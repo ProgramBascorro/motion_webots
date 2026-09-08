@@ -110,7 +110,10 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr dxl_torque_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr enable_ctrl_module_pub;
 rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_page_pub;
 
-const int WALKING_READY_PAGE_NUM = 2;
+// Diambil dari enum, bukan ditulis ulang: dulu angka 2 di sini adalah salinan
+// kedua dari nomor halaman yang sama, dan salinan kedua itulah yang ketinggalan
+// setiap kali .bin di-teach ulang.
+const int WALKING_READY_PAGE_NUM = robotis_op::OPDemo::WalkingReady;
 
 std::string default_mp3_path = "";
 Demo_Status current_status = Ready;
@@ -279,6 +282,13 @@ int main(int argc, char **argv)
         current_demo->setDemoEnable();
       apply_desired = false;
       current_status = desired_status;
+
+      // Tombol START diproses ketika status masih Ready, sehingga pada
+      // tekanan pertama ia hanya sempat memilih SoccerDemo. Mulai soccer
+      // setelah objek demo benar-benar aktif agar robot tidak tertahan di
+      // WALKING_READY (action page 2) dan tidak memerlukan tekanan kedua.
+      if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
+        soccer_demo->startSoccerMode();
     }
 
     if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)

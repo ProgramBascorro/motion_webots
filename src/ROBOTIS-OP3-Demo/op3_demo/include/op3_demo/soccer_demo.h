@@ -73,6 +73,7 @@ class SoccerDemo : public OPDemo
   void setUsingHeadControl(bool use_head_control);
   void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
   void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
+  void startSoccerMode();
 
  protected:
   const double FALL_FORWARD_LIMIT;
@@ -96,7 +97,6 @@ class SoccerDemo : public OPDemo
   void imuDataCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
   void magStatusCallback(const std_msgs::msg::UInt8::SharedPtr msg);
 
-  void startSoccerMode();
   void stopSoccerMode();
 
   void handleKick(int ball_position);
@@ -166,6 +166,8 @@ class SoccerDemo : public OPDemo
   bool stop_following_;
   bool stop_fallen_check_;
   int robot_status_;
+  bool kick_pending_ = false;
+  std::chrono::steady_clock::time_point kick_ready_at_;
   int tracking_status_;
   int stand_state_;
   double kick_pre_delay_sec_;
