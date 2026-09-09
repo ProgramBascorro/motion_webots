@@ -115,14 +115,7 @@ jalan:
   init_y_offset: 0.028
   init_z_offset: 0.0408
   init_roll_offset: 0.0
-  # 2026-09-09: -0.12 -> -0.34, disamakan dengan versi tersimpan Studio
-  # "JALAN MENUJU MEKKAH". Sebelum hari ini angka ini tidak berpengaruh apa-apa
-  # pada pose berdiri (acuan walking_bias_ ikut bergeser ke nilai yang sedang
-  # hidup, jadi selisihnya selalu nol), sehingga -0.12 dan -0.34 memberi robot
-  # yang sama persis. Sejak acuan dipatok di param.yaml > bias_reference,
-  # selisihnya nyata -- dan demo harus memakai angka yang sama dengan yang
-  # dipakai operator lewat Studio, kalau tidak demo justru miring KE BELAKANG.
-  init_pitch_offset: -0.34
+  init_pitch_offset: -0.12
   init_yaw_offset: 0.0
 
   period_time: 0.77

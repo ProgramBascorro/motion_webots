@@ -120,15 +120,7 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   // passes false (so init_y_offset survives the subtraction and stays a live knob),
   // the idle tracking passes true (so standing already shows the same foot
   // separation the gait will use). See computeNeutralLegAngle() for why.
-  // src memilih SET PARAMETER mana yang dipakai menghitung stance netral itu, dan
-  // itu menentukan segalanya. Sebelum 2026-09-09 fungsi ini selalu memakai
-  // walking_param_ yang sedang hidup, sehingga penangkapan bias memakai preset
-  // yang baru saja di-Apply -- offset init preset itu dikurangkan terhadap
-  // dirinya sendiri dan hasilnya NOL. Robot berdiri persis di page 2 dan
-  // init_x/init_pitch operator tidak pernah terasa. Sekarang penangkapan memakai
-  // bias_reference_param_ (isi param.yaml, tetap sepanjang sesi).
-  bool computeNeutralLegAngle(double *neutral, bool with_y_offset,
-                              const op3_walking_module_msgs::msg::WalkingParam &src);
+  bool computeNeutralLegAngle(double *neutral, bool with_y_offset);
   void computeArmAngle(double *arm_angle);
   void sensoryFeedback(const double &rlGyroErr, const double &fbGyroErr, double *balance_angle);
 
@@ -187,17 +179,6 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   int walking_state_;
   int init_pose_count_;
   op3_walking_module_msgs::msg::WalkingParam walking_param_;
-  // ACUAN TETAP untuk walking_bias_: isi param.yaml apa adanya, diambil sekali
-  // saat boot dan tidak pernah ikut berubah waktu operator menekan Apply.
-  //
-  // Dengan ini pose berdiri jadi fungsi yang pasti dari parameter yang hidup:
-  //
-  //     pose = page 2 + [ neutral(parameter hidup) - neutral(param.yaml) ]
-  //
-  // dan hasilnya SAMA saja Apply dikirim sebelum atau sesudah walking_module
-  // diaktifkan. Dulu keduanya memberi hasil berbeda dengan nilai yang sama
-  // persis, karena acuannya ikut bergeser mengikuti Apply terakhir.
-  op3_walking_module_msgs::msg::WalkingParam bias_reference_param_;
   double previous_x_move_amplitude_;
 
   // Soft start (walking_param_.soft_start_time detik, knob "Soft start" di grup
