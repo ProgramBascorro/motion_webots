@@ -132,8 +132,54 @@ export function mergeWalkingEdits(draft, baseline, current) {
   return validateWalkingParams(draft);
 }
 
+// Panjang tautan kaki OP3 (op3_kinematics_dynamics): paha + betis. Pergelangan
+// TIDAK ikut -- ia di luar rantai dua-tautan yang dibatasi acos() di IK lutut.
+export const LEG_REACH_M = 0.11015 + 0.110;   // 220,15 mm
+
+// Sejauh apa pinggul harus menjangkau pergelangan pada init pose ini, sudah
+// termasuk satu langkah penuh maju maupun mundur. Rumusnya sengaja sama persis
+// dengan terjangkau() di scripts/sync_preset_from_studio.py.
+export function legReachNeeded(params) {
+  const drop = Math.abs(params.init_z_offset - LEG_REACH_M);
+  let farthest = 0;
+  for (const sx of [0, params.x_move_amplitude, -params.x_move_amplitude]) {
+    for (const sy of [0, params.y_move_amplitude / 2, -params.y_move_amplitude / 2]) {
+      farthest = Math.max(farthest, Math.hypot(params.init_x_offset + sx,
+        Math.hypot(sy - params.init_y_offset / 2, drop)));
+    }
+  }
+  return farthest;
+}
+
+// TERJADI DI ROBOT 2026-09-09. Versi tersimpan "JALAN MENUJU MEKKAH" berisi
+// init_x_offset 0,3 m -- kaki diminta menjangkau ~300 mm padahal paha + betis
+// cuma 220,2 mm. IK gagal SETIAP siklus, walking_module melewati seluruh siklus
+// gait itu dan kaki menahan goal terakhir. Di layar Studio Apply & Start
+// tampak sukses dan robot diam total tanpa satu pun petunjuk, sementara log
+// manager membanjir "IK KAKI KANAN gagal".
+//
+// DIPERIKSA HANYA PADA DRAFT YANG AKAN DIKIRIM, bukan di validateWalkingParams.
+// Itu penting: nilai yang DIBACA dari robot juga lewat validasi, dan saat robot
+// sedang memegang setelan mustahil (persis keadaan tadi) penjaga di validator
+// akan menolak pembacaan itu juga -- operator jadi tidak bisa Load, tidak bisa
+// Apply, dan tidak punya jalan keluar sama sekali.
+//
+// Toleransi 0,1 mm supaya preset yang duduk PERSIS di batas tidak tertolak
+// gara-gara pembulatan float.
+export function checkLegReach(params) {
+  const needed = legReachNeeded(params);
+  if (needed <= LEG_REACH_M + 0.0001) return;
+  const mm = (v) => (v * 1000).toFixed(1);
+  throw new Error(
+    `Kaki tidak sampai: init pose ini menuntut ${mm(needed)} mm, jangkauan paha+betis `
+    + `cuma ${mm(LEG_REACH_M)} mm, jadi IK gagal tiap siklus dan robot akan diam total. `
+    + `Periksa init_x_offset (${params.init_x_offset} m) dan init_z_offset `
+    + `(${params.init_z_offset} m). Kesalahan paling sering: kelebihan satu angka nol, `
+    + `mis. -0.18 padahal maksudnya -0.018.`);
+}
+
 export async function applyWalkingDraft({ draft, baseline, read, publish, check, onRead, wait }) {
-  validateWalkingParams(draft);
+  checkLegReach(validateWalkingParams(draft));
   validateWalkingParams(baseline);
   check();
   const current = await read();

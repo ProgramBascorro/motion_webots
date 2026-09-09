@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   WALKING_KEYS, WALKING_BOOL_FIELDS, WALKING_INT_FIELDS, parseWalkingNumber,
   validateWalkingParams, parametersEqual, mergeWalkingEdits, applyWalkingDraft,
-  snapFloat32, snapWalkingRuntime,
+  snapFloat32, snapWalkingRuntime, legReachNeeded, checkLegReach, LEG_REACH_M,
 } from "../src/walkingParams.js";
 import {
   KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
@@ -15,6 +15,11 @@ function walkingParams(overrides = {}) {
   return {
     ...Object.fromEntries(WALKING_KEYS.map((key) => [key, WALKING_BOOL_FIELDS.has(key) ? false : 0])),
     period_time: 0.8, dsp_ratio: 0.4, step_fb_ratio: 0.25, soft_start_time: 2,
+    // init_z_offset 0 berarti kaki diminta lurus penuh 220,2 mm, dan satu
+    // langkah saja sudah melewati jangkauan -- Apply memang menolaknya sekarang
+    // (checkLegReach). Bawaan uji dibuat sedalam preset asli supaya setiap uji
+    // di berkas ini menguji maksudnya sendiri, bukan tersandung pose mustahil.
+    init_z_offset: 0.0408,
     ...overrides,
   };
 }
@@ -225,4 +230,58 @@ test("Apply works with no prior robot read, using the draft as its own baseline"
   assert.equal(dikirim[0].init_pitch_offset, -0.12);
   assert.equal(hasil.x_move_amplitude, 0.016);
   assert.ok(dibaca >= 2, "robot tetap dibaca sebelum dan sesudah menerbitkan");
+});
+
+// TERJADI DI ROBOT 2026-09-09. Versi tersimpan "JALAN MENUJU MEKKAH" berisi
+// init_x_offset 0,3 m. Kaki diminta menjangkau ~300 mm padahal paha + betis
+// cuma 220,2 mm, jadi IK gagal SETIAP siklus dan walking_module melewati
+// seluruh siklus gait -- Apply & Start tampak sukses tapi robot diam total.
+const poseKaki = (ubah = {}) => walkingParams({
+  init_x_offset: -0.018, init_y_offset: 0.028, init_z_offset: 0.0408,
+  x_move_amplitude: 0.016, y_move_amplitude: 0, ...ubah,
+});
+
+test("Apply refuses an init pose the leg cannot physically reach", async () => {
+  let published = 0;
+  const jalankan = (draft) => applyWalkingDraft({
+    draft, baseline: poseKaki(), read: async () => draft,
+    publish: () => { published += 1; }, check: () => {}, onRead: () => {}, wait: async () => {},
+  });
+  await jalankan(poseKaki());                       // terjangkau: lolos
+  for (const mustahil of [
+    { init_x_offset: 0.3 }, { init_x_offset: -0.3 },  // nilai yang benar-benar terjadi
+    { init_x_offset: -0.18 },                         // "kelebihan satu angka nol"
+    { init_z_offset: -0.2 },                          // jongkok lebih dalam dari jangkauan
+  ]) {
+    await assert.rejects(() => jalankan(poseKaki(mustahil)), /Kaki tidak sampai/,
+      JSON.stringify(mustahil));
+  }
+  assert.equal(published, 0, "yang terjangkau pun tidak perlu terbit: draft == runtime");
+});
+
+// Penjaga ini HANYA untuk draft yang akan dikirim. Kalau ia dipasang di
+// validateWalkingParams, pembacaan dari robot ikut ditolak -- dan saat robot
+// sedang memegang setelan mustahil (persis keadaan 9 Sep), operator tidak bisa
+// Load, tidak bisa Apply, tidak punya jalan keluar sama sekali.
+test("a robot already holding an unreachable pose can still be read and fixed", async () => {
+  const rusak = poseKaki({ init_x_offset: 0.3 });
+  assert.doesNotThrow(() => validateWalkingParams(rusak), "pembacaan robot tidak boleh ditolak");
+  const published = [];
+  const sehat = poseKaki();
+  const reads = [rusak, { ...sehat }];
+  const hasil = await applyWalkingDraft({
+    draft: sehat, baseline: rusak, read: async () => reads.shift(),
+    publish: (p) => published.push(p), check: () => {}, onRead: () => {}, wait: async () => {},
+  });
+  assert.equal(published.length, 1, "draft sehat tetap bisa dikirim untuk memperbaiki");
+  assert.equal(hasil.init_x_offset, -0.018);
+});
+
+test("leg reach accounts for a full step, not just the standing pose", () => {
+  const diam = poseKaki({ init_x_offset: 0.125, x_move_amplitude: 0 });
+  assert.ok(legReachNeeded(diam) <= LEG_REACH_M, "berdiri saja: masih sampai");
+  assert.doesNotThrow(() => checkLegReach(diam));
+  const melangkah = poseKaki({ init_x_offset: 0.125, x_move_amplitude: 0.02 });
+  assert.ok(legReachNeeded(melangkah) > LEG_REACH_M, "dengan langkah penuh: tidak sampai");
+  assert.throws(() => checkLegReach(melangkah), /Kaki tidak sampai/);
 });
