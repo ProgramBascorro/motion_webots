@@ -1444,6 +1444,16 @@ export default function App() {
     mirrorWalkingVersionsLocally(state);
   };
 
+  // Mengisi EDITING STATE dari snapshot tersimpan saat Studio dibuka -- satu
+  // satunya penulis isian yang bukan tindakan operator langsung.
+  //
+  // Hanya mengganti isian yang BELUM disentuh operator: kalau pembacaan
+  // penyimpanan lambat dan operator sudah sempat mengetik, ketikannya menang.
+  const restoreWalkingDraft = (params) => {
+    const draft = normalizeWalkingParams(params);
+    setWalkingParams((current) => (current === initialWalkingDraftRef.current ? draft : current));
+  };
+
   // URUTAN STARTUP: baca penyimpanan -> periksa -> pulihkan versi aktif -> UI.
   //
   // Dulu isian Walking dibuat dari WALKING_DEFAULT_PARAMS dan versi yang
@@ -1468,9 +1478,7 @@ export default function App() {
         if (typeof state.ui?.relativeDisplay === "boolean") setWalkingRelativeDisplay(state.ui.relativeDisplay);
         const restored = findRestorableVersion(state);
         if (restored) {
-          const draft = normalizeWalkingParams(restored.params);
-          // Hanya mengganti isian yang BELUM disentuh operator.
-          setWalkingParams((current) => (current === initialWalkingDraftRef.current ? draft : current));
+          restoreWalkingDraft(restored.params);
           setActiveWalkingVersionId(restored.id);
           setWalkingVersionName(restored.name);
           console.info(`[LOAD] action = ${restored.name}`);
@@ -2032,7 +2040,28 @@ export default function App() {
       onRead: setWalkingCurrentParams,
       wait: context.wait,
     });
-    setWalkingParams(params);
+    // APPLY TIDAK MENYENTUH ISIAN OPERATOR.
+    //
+    // Dulu di sini ada setWalkingParams(params) -- hasil BACA ULANG dari robot
+    // ditulis balik ke isian. Itu mencampur dua hal yang harus terpisah:
+    //
+    //   EDITING STATE  = isian operator, calon isi Save
+    //   RUNTIME STATE  = apa yang sedang dipegang walking_module (kolom Current)
+    //
+    // Akibatnya runtime bisa menimpa nilai tersimpan tanpa operator mengetik
+    // apa pun. Jalur yang terbukti: Walking Tuner di tab Tuning memakai
+    // applyWalkingTuner() -> fungsi ini, dengan draft MILIKNYA SENDIRI. Begitu
+    // Tuner menekan Apply, isian tab Walking ikut berubah jadi nilai Tuner,
+    // dan Save berikutnya menuliskannya ke versi yang sedang terbuka.
+    // walking_param_ di robot juga bisa digeser penulis lain (perintah
+    // "balance on/off", demo, teleop), dan semuanya ikut mendarat di isian.
+    //
+    // Sekarang hasil pembacaan hanya masuk walkingCurrentParams. Isian tetap
+    // milik operator, dan penanda "belum di-Apply"/"belum disimpan" jadi jujur:
+    // kalau robot mengembalikan angka lain, itu TERLIHAT, bukan diam-diam
+    // menggantikan yang diketik. Nilai yang diterbitkan sendiri sudah dijamin
+    // sama dengan draft oleh applyWalkingDraft() -- ia mengulang pembacaan
+    // sampai cocok, dan melempar kalau tidak pernah cocok.
     setWalkingCurrentParams(params);
     setWalkingLastAppliedAt(Date.now());
     console.info(`[APPLY] runtime confirmed = ${JSON.stringify(params)}`);
