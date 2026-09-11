@@ -216,3 +216,7 @@ meshes.bak.*/
 
 # Rekaman uji detektor.
 tes_ball_*.mp4
+
+# Salinan otomatis sebelum tiap Save versi walking Studio (berkas utamanya
+# src/bascorro_studio/data/walking_versions.json sengaja TIDAK diabaikan).
+src/bascorro_studio/data/backup/

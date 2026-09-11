@@ -40,7 +40,11 @@ import WalkingOffsetInput from "./WalkingOffsetInput.jsx";
 import {
   WALKING_POSE_REFERENCE, walkingReferenceOffset, walkingOffsetToDisplay,
 } from "./walkingPoseReference.js";
-import { seedWalkingVersion, parseStoredWalkingVersions } from "./walkingVersionStore.js";
+import {
+  seedWalkingVersion, parseStoredWalkingVersions, findRestorableVersion, planWalkingSave,
+  walkingDraftUnsaved, sameWalkingParams,
+} from "./walkingVersionStore.js";
+import { fetchWalkingStore, mutateWalkingStore } from "./walkingVersionServer.js";
 import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
@@ -71,6 +75,9 @@ const MAG_STATUS = {
 const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
 const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
 const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
+// Versi aktif di browser: HANYA dipakai untuk impor pertama ke disk robot dan
+// untuk mode baca-saja saat server penyimpanan tidak terjangkau.
+const WALKING_ACTIVE_VERSION_KEY = "bascorro.walking_versions.active.v1";
 // Seeded once, then never again: if the version is deleted on purpose it must
 // stay deleted, so the flag records that the seed already ran rather than
 // checking whether the version is currently present.
@@ -543,6 +550,14 @@ function readWalkingVersions() {
     updatedAt: Number(item.updatedAt || item.createdAt || Date.now()),
     params: normalizeWalkingParams(item.params),
   }));
+}
+
+function readLocalActiveVersionId() {
+  try {
+    return localStorage.getItem(WALKING_ACTIVE_VERSION_KEY) || null;
+  } catch {
+    return null;
+  }
 }
 
 function makeWalkingVersionId() {
@@ -1214,6 +1229,19 @@ export default function App() {
   );
   const [walkingVersionName, setWalkingVersionName] = useState("");
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
+  // Versi tersimpan tinggal di DISK robot (server/walkingVersionFile.js), bukan
+  // di localStorage. Sampai penyimpanan itu selesai dibaca, Save dan Hapus
+  // dimatikan: menulis sebelum membaca adalah persis pola "default menimpa
+  // yang tersimpan".
+  const [walkingStoreStatus, setWalkingStoreStatus] = useState("loading");
+  const [walkingStoreError, setWalkingStoreError] = useState("");
+  const [walkingSaving, setWalkingSaving] = useState(false);
+  const initialLocalWalkingVersionsRef = useRef(walkingVersions);
+  const initialWalkingDraftRef = useRef(walkingParams);
+  const activeWalkingVersion = walkingVersions.find((version) => version.id === activeWalkingVersionId) || null;
+  const walkingUnsaved = walkingDraftUnsaved({
+    draft: walkingParams, activeVersion: activeWalkingVersion, defaults: WALKING_DEFAULT_PARAMS,
+  });
   // Tendangan (parameter ROS milik demo_node, bukan WalkingParam)
   const [kickParams, setKickParams] = useState(() => normalizeKickParams());
   const [kickCurrentParams, setKickCurrentParams] = useState(null);
@@ -1397,13 +1425,84 @@ export default function App() {
     kickCameraOnRef.current = kickCameraOn;
   }, [kickCameraOn]);
 
-  useEffect(() => {
+  // Salinan cadangan di localStorage, HANYA untuk dibaca saat server penyimpanan
+  // tidak terjangkau. Tidak pernah dipakai untuk menimpa disk robot, dan gagal
+  // menulisnya (kuota penuh) bukan kegagalan Save.
+  const mirrorWalkingVersionsLocally = (state) => {
     try {
-      localStorage.setItem(WALKING_VERSION_STORAGE_KEY, JSON.stringify(walkingVersions));
-    } catch {
-      // Browser storage can fail in private or restricted contexts.
+      localStorage.setItem(WALKING_VERSION_STORAGE_KEY, JSON.stringify(state.versions));
+      localStorage.setItem(WALKING_ACTIVE_VERSION_KEY, state.activeVersionId || "");
+    } catch (error) {
+      console.warn("[SAVE] salinan cadangan di browser gagal ditulis; disk robot tetap yang utama:", error?.name || error);
     }
-  }, [walkingVersions]);
+  };
+
+  // Daftar versi selalu diambil dari JAWABAN server, bukan dari yang kita kira
+  // sudah tersimpan. Nilainya dipakai apa adanya, tanpa normalisasi.
+  const takeWalkingStoreState = (state) => {
+    setWalkingVersions(state.versions);
+    mirrorWalkingVersionsLocally(state);
+  };
+
+  // URUTAN STARTUP: baca penyimpanan -> periksa -> pulihkan versi aktif -> UI.
+  //
+  // Dulu isian Walking dibuat dari WALKING_DEFAULT_PARAMS dan versi yang
+  // terakhir dipakai tidak pernah diingat, jadi setiap kali Studio dibuka isian
+  // menampilkan default walaupun versi tersimpannya utuh. Default sekarang HANYA
+  // dipakai kalau memang tidak ada versi aktif yang tersimpan. Tidak ada yang
+  // dikirim ke robot di sini: Apply tetap tombol operator.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      console.info("[LOAD] loading persisted walking parameters");
+      try {
+        let state = await fetchWalkingStore();
+        if (!state.exists) {
+          const local = initialLocalWalkingVersionsRef.current;
+          console.info(`[LOAD] penyimpanan robot belum ada -> memindahkan ${local.length} versi dari browser ini`);
+          state = await mutateWalkingStore({ op: "import", versions: local, activeVersionId: readLocalActiveVersionId() });
+          if (state.result?.rejected?.length) console.warn("[LOAD] versi browser yang ditolak:", state.result.rejected);
+        }
+        if (cancelled) return;
+        takeWalkingStoreState(state);
+        if (typeof state.ui?.relativeDisplay === "boolean") setWalkingRelativeDisplay(state.ui.relativeDisplay);
+        const restored = findRestorableVersion(state);
+        if (restored) {
+          const draft = normalizeWalkingParams(restored.params);
+          // Hanya mengganti isian yang BELUM disentuh operator.
+          setWalkingParams((current) => (current === initialWalkingDraftRef.current ? draft : current));
+          setActiveWalkingVersionId(restored.id);
+          setWalkingVersionName(restored.name);
+          console.info(`[LOAD] action = ${restored.name}`);
+          console.info(`[LOAD] parameters = ${JSON.stringify(restored.params)}`);
+          sendStatus(`Versi terakhir dipulihkan: ${restored.name} (disimpan ${new Date(restored.updatedAt).toLocaleString()})`);
+        } else {
+          console.info("[LOAD] no persisted data found -> using default");
+        }
+        setWalkingStoreStatus("ready");
+      } catch (error) {
+        if (cancelled) return;
+        console.error("[LOAD] penyimpanan versi di robot tidak terbaca:", error);
+        setWalkingStoreError(error.message);
+        setWalkingStoreStatus("offline");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Menutup Studio dengan isian yang belum di-Save: browser bertanya dulu,
+  // supaya "kukira sudah tersimpan" tidak bisa terjadi diam-diam.
+  useEffect(() => {
+    if (!walkingUnsaved || walkingStoreStatus !== "ready") return undefined;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [walkingUnsaved, walkingStoreStatus]);
 
   // Records that the "dari claude" preset has been offered to this browser, so
   // deleting it makes it stay deleted instead of returning on the next reload.
@@ -1936,6 +2035,7 @@ export default function App() {
     setWalkingParams(params);
     setWalkingCurrentParams(params);
     setWalkingLastAppliedAt(Date.now());
+    console.info(`[APPLY] runtime confirmed = ${JSON.stringify(params)}`);
     sendStatus("Apply walking terkonfirmasi melalui pembacaan runtime");
     return params;
   };
@@ -2130,43 +2230,56 @@ export default function App() {
     setWalkingError("");
   };
 
-  const saveWalkingVersion = () => {
-    if (walkingOperationRef.current) return;
-    const now = Date.now();
-    const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
-    const name = walkingVersionName.trim() || selected?.name || `Walking ${new Date(now).toLocaleString()}`;
-    let params;
+  // SAVE: isian -> versi yang sedang TERBUKA (atau versi baru kalau namanya
+  // lain) -> disk robot -> jawaban server diperiksa KETAT -> baru "tersimpan".
+  // Kalau satu langkah gagal, operator melihat galatnya dan isian tetap
+  // bertanda "belum disimpan"; tidak ada lagi sukses palsu.
+  const saveWalkingVersion = async () => {
+    if (walkingOperationRef.current || walkingSaving) return;
+    if (walkingStoreStatus !== "ready") {
+      setWalkingError(walkingStoreStatus === "loading"
+        ? "Penyimpanan versi masih dibaca; tunggu sebentar lalu Save lagi."
+        : `Save dimatikan: penyimpanan versi di robot tidak terbaca (${walkingStoreError}).`);
+      return;
+    }
+    let plan;
     try {
-      params = validateWalkingParams(walkingParams);
+      plan = planWalkingSave({
+        versions: walkingVersions,
+        activeVersionId: activeWalkingVersionId,
+        name: walkingVersionName,
+        params: validateWalkingParams(walkingParams),
+        now: Date.now(),
+        makeId: makeWalkingVersionId,
+      });
     } catch (error) {
       setWalkingError(error.message);
       return;
     }
-
-    if (selected) {
-      setWalkingVersions((versions) =>
-        versions.map((version) =>
-          version.id === selected.id
-            ? { ...version, name, params, updatedAt: now }
-            : version
-        )
-      );
-      setWalkingVersionName(name);
-      sendStatus(`Walking version updated: ${name}`);
-      return;
+    const { version } = plan;
+    console.info(`[SAVE] action = ${version.name}`);
+    console.info(`[SAVE] walking parameters = ${JSON.stringify(version.params)}`);
+    setWalkingSaving(true);
+    try {
+      const state = await mutateWalkingStore({ op: "upsert", version });
+      const stored = state.versions.find((item) => item.id === version.id);
+      if (!stored || !sameWalkingParams(stored.params, version.params)) {
+        throw new Error("server mengembalikan nilai yang berbeda dari yang dikirim");
+      }
+      takeWalkingStoreState(state);
+      setActiveWalkingVersionId(stored.id);
+      setWalkingVersionName(stored.name);
+      setWalkingParams(normalizeWalkingParams(stored.params));
+      setWalkingError("");
+      console.info(`[SAVE] persisted successfully (revisi ${state.revision}, ${new Date(state.savedAt).toLocaleString()})`);
+      sendStatus(`${plan.mode === "new" ? "Versi baru tersimpan" : "Tersimpan"} di disk robot: ${stored.name}`);
+    } catch (error) {
+      console.error(`[SAVE] GAGAL -- "${version.name}" BELUM tersimpan:`, error);
+      setWalkingError(`Save GAGAL, "${version.name}" BELUM tersimpan: ${error.message}`);
+      sendStatus(`Save gagal: ${error.message}`, true);
+    } finally {
+      setWalkingSaving(false);
     }
-
-    const next = {
-      id: makeWalkingVersionId(),
-      name,
-      createdAt: now,
-      updatedAt: now,
-      params,
-    };
-    setWalkingVersions((versions) => [next, ...versions]);
-    setActiveWalkingVersionId(next.id);
-    setWalkingVersionName(name);
-    sendStatus(`Walking version saved: ${name}`);
   };
 
   // Memuat versi tersimpan: versinya SELALU masuk kotak isian dulu, pembacaan
@@ -2196,10 +2309,14 @@ export default function App() {
       sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
+    if (walkingUnsaved && !window.confirm(`Isian sekarang belum disimpan ke "${selected.name}". `
+      + "Buang perubahan itu dan muat ulang nilai yang tersimpan?")) return;
 
     setWalkingParams(normalizeWalkingParams(selected.params));
     setWalkingVersionName(selected.name);
     setWalkingError("");
+    console.info(`[LOAD] action = ${selected.name}`);
+    console.info(`[LOAD] parameters = ${JSON.stringify(selected.params)}`);
 
     if (rosState !== "connected") {
       sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
@@ -2212,16 +2329,68 @@ export default function App() {
     });
   };
 
-  const deleteWalkingVersion = () => {
+  const deleteWalkingVersion = async () => {
     const selected = walkingVersions.find((version) => version.id === activeWalkingVersionId);
     if (!selected) {
-      sendStatus("Select a walking version first", true);
+      sendStatus("Pilih versi walking terlebih dahulu", true);
       return;
     }
-    setWalkingVersions((versions) => versions.filter((version) => version.id !== selected.id));
-    setActiveWalkingVersionId("");
-    setWalkingVersionName("");
-    sendStatus(`Walking version deleted: ${selected.name}`);
+    if (walkingStoreStatus !== "ready") {
+      setWalkingError("Hapus dimatikan: penyimpanan versi di robot belum terbaca.");
+      return;
+    }
+    if (!window.confirm(`Hapus versi "${selected.name}" dari robot? `
+      + "Salinan sebelum dihapus tetap ada di src/bascorro_studio/data/backup/.")) return;
+    try {
+      const state = await mutateWalkingStore({ op: "delete", id: selected.id });
+      takeWalkingStoreState(state);
+      setActiveWalkingVersionId("");
+      setWalkingVersionName("");
+      console.info(`[SAVE] versi dihapus: ${selected.name} (revisi ${state.revision})`);
+      sendStatus(`Versi dihapus: ${selected.name}`);
+    } catch (error) {
+      setWalkingError(`Hapus gagal: ${error.message}`);
+      sendStatus(`Hapus gagal: ${error.message}`, true);
+    }
+  };
+
+  // Memilih versi di daftar = MEMUATNYA ke isian.
+  //
+  // Dulu pilihan dan isian terpisah: memilih versi hanya mengganti SASARAN,
+  // isian tetap berisi apa pun sebelumnya (default sesudah Studio dibuka, atau
+  // nilai versi lain), dan Save menulis isian itu ke versi yang dipilih. Jadi
+  // "pilih JALAN MENUJU MEKKAH lalu Save" menimpa MEKKAH dengan nilai yang
+  // bukan miliknya, dan "pilih lalu Apply & Start" mengirim nilai itu ke robot.
+  // Pilihan terakhir juga dicatat di disk robot, supaya dibuka lagi saat
+  // Studio dimulai ulang.
+  const selectWalkingVersion = (id) => {
+    if (id === activeWalkingVersionId) return;
+    const target = walkingVersions.find((version) => version.id === id) || null;
+    if (target && walkingUnsaved && !window.confirm(
+      `Isian sekarang belum disimpan${activeWalkingVersion ? ` ke "${activeWalkingVersion.name}"` : ""}. `
+      + `Buang perubahan itu dan buka "${target.name}"?`)) return;
+    setActiveWalkingVersionId(target?.id || "");
+    setWalkingVersionName(target?.name || "");
+    setWalkingError("");
+    if (target) {
+      setWalkingParams(normalizeWalkingParams(target.params));
+      console.info(`[LOAD] action = ${target.name}`);
+      console.info(`[LOAD] parameters = ${JSON.stringify(target.params)}`);
+    }
+    if (walkingStoreStatus === "ready") {
+      mutateWalkingStore({ op: "activate", id: target?.id ?? null })
+        .catch((error) => sendStatus(`Versi aktif belum tercatat di robot: ${error.message}`, true));
+    }
+  };
+
+  // Pilihan tampilan (relatif page 2 / nilai asli ROS) ikut disimpan. Tanpa
+  // itu, angka yang diketik dalam "Nilai asli ROS" terlihat LAIN sesudah
+  // Studio dibuka ulang (tampilan kembali ke relatif), padahal nilainya sama.
+  const setWalkingDisplayMode = (relative) => {
+    setWalkingRelativeDisplay(relative);
+    if (walkingStoreStatus !== "ready") return;
+    mutateWalkingStore({ op: "ui", ui: { relativeDisplay: relative } })
+      .catch((error) => sendStatus(`Pilihan tampilan belum tersimpan: ${error.message}`, true));
   };
 
   // Node mana yang benar-benar hidup di robot.
@@ -2937,38 +3106,45 @@ export default function App() {
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <h3 className="text-sm font-bold text-gray-800">Versi Tersimpan</h3>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
-                Tersimpan di browser
-              </span>
-              {/* Penyimpanan browser dipisah PER ALAMAT: localhost:5173 dan
-                  10.137.x.x:5173 adalah dua kotak yang berbeda isinya. Membuka
-                  Studio lewat alamat lain terlihat persis seperti "versi
-                  tersimpan berubah/hilang", padahal datanya utuh di alamat yang
-                  satunya. Alamatnya ditulis di sini supaya langsung kelihatan. */}
               <span
-                className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-                title="Versi tersimpan terikat pada alamat ini. Membuka Studio lewat alamat lain (localhost vs IP) memperlihatkan daftar yang berbeda — datanya tidak hilang, cuma ada di alamat yang satunya."
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${walkingStoreStatus === "ready" ? "bg-green-50 text-green-700" : walkingStoreStatus === "loading" ? "bg-gray-100 text-gray-500" : "bg-red-50 text-red-700"}`}
+                title="src/bascorro_studio/data/walking_versions.json di PC robot — sama untuk semua browser dan alamat (localhost maupun IP). Salinan sebelum tiap Save: data/backup/."
               >
-                {typeof window === "undefined" ? "—" : window.location.host}
+                {walkingStoreStatus === "ready" ? "Tersimpan di disk robot" : walkingStoreStatus === "loading" ? "Membaca penyimpanan…" : "Penyimpanan robot TIDAK terbaca"}
               </span>
-              <span className="text-[10px] text-gray-400">Muat versi mengisi kotak isian (dan ikut membaca robot) — tetap perlu Apply untuk kirim</span>
+              {walkingStoreStatus === "ready" && (
+                <span
+                  data-testid="walking-save-state"
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${walkingUnsaved ? "bg-yellow-100 text-yellow-800" : "bg-blue-50 text-undip-blue"}`}
+                >
+                  {activeWalkingVersion
+                    ? (walkingUnsaved ? `● Belum disimpan ke "${activeWalkingVersion.name}"` : `✓ Sama dengan "${activeWalkingVersion.name}" yang tersimpan`)
+                    : (walkingUnsaved ? "● Versi baru — belum disimpan" : "Belum ada versi yang dibuka (nilai default)")}
+                </span>
+              )}
+              <span className="text-[10px] text-gray-400">Memilih versi langsung memuatnya ke isian. Save menulis ke versi yang terbuka; nama lain = versi baru. Tetap perlu Apply untuk kirim ke robot.</span>
             </div>
+            {walkingStoreStatus === "offline" && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                <b>Penyimpanan versi di robot tidak terbaca:</b> {walkingStoreError}. Daftar di bawah hanya salinan lama dari browser ini
+                (baca saja); Save dan Delete dimatikan supaya tidak ada simpanan yang hilang. Jalankan Studio lewat
+                <code className="mx-1">scripts/bascorro_studio.sh</code> lalu muat ulang halaman.
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
               <input
                 type="text"
+                aria-label="Nama versi"
                 value={walkingVersionName}
                 onChange={(e) => setWalkingVersionName(e.target.value)}
                 className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none"
                 placeholder="Nama versi…"
               />
               <select
+                aria-label="Versi tersimpan"
                 value={activeWalkingVersionId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  const version = walkingVersions.find((item) => item.id === id);
-                  setActiveWalkingVersionId(id);
-                  setWalkingVersionName(version?.name || "");
-                }}
+                onChange={(e) => selectWalkingVersion(e.target.value)}
+                disabled={walkingStoreStatus === "loading"}
                 className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none"
               >
                 <option value="">— Pilih versi —</option>
@@ -2981,23 +3157,25 @@ export default function App() {
               <button
                 className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
                 onClick={saveWalkingVersion}
-                title="Simpan nilai UI saat ini sebagai versi baru di browser"
+                disabled={walkingStoreStatus !== "ready" || walkingSaving}
+                aria-label="Save versi"
+                title="Simpan isian ke versi yang sedang terbuka (nama lain = versi baru), langsung ke disk robot"
               >
-                <Save size={14} /> Save
+                <Save size={14} /> {walkingSaving ? "Menyimpan…" : "Save"}
               </button>
               <button
                 className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
                 onClick={loadWalkingVersion}
                 disabled={!selectedWalkingVersion || walkingBusy}
-                title="Baca parameter robot, lalu isi kotak isian dengan versi terpilih"
+                title="Muat ulang versi terpilih dari penyimpanan (membuang perubahan yang belum disimpan), lalu baca robot"
               >
                 <RefreshCw size={14} /> Muat versi
               </button>
               <button
                 className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
                 onClick={deleteWalkingVersion}
-                disabled={!selectedWalkingVersion}
-                title="Hapus versi terpilih dari browser"
+                disabled={!selectedWalkingVersion || walkingStoreStatus !== "ready"}
+                title="Hapus versi terpilih dari disk robot (salinan sebelum dihapus tetap ada di data/backup/)"
               >
                 <Trash2 size={14} /> Delete
               </button>
@@ -3026,11 +3204,11 @@ export default function App() {
                 <p className="mt-1 text-xs text-gray-500">Hanya cara membaca dan mengisi offset. Tidak mengubah posisi robot atau isi preset.</p>
               </div>
               <div className="flex flex-wrap gap-2" role="group" aria-label="Tampilan nilai walking">
-                <button type="button" aria-pressed={walkingRelativeDisplay} onClick={() => setWalkingRelativeDisplay(true)}
+                <button type="button" aria-pressed={walkingRelativeDisplay} onClick={() => setWalkingDisplayMode(true)}
                   className={`${walkingButtonBase} ${walkingRelativeDisplay ? "bg-undip-blue text-white" : "bg-gray-100 text-gray-700"}`}>
                   Relatif page 2
                 </button>
-                <button type="button" aria-pressed={!walkingRelativeDisplay} onClick={() => setWalkingRelativeDisplay(false)}
+                <button type="button" aria-pressed={!walkingRelativeDisplay} onClick={() => setWalkingDisplayMode(false)}
                   className={`${walkingButtonBase} ${!walkingRelativeDisplay ? "bg-undip-blue text-white" : "bg-gray-100 text-gray-700"}`}>
                   Nilai asli ROS
                 </button>

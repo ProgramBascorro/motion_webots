@@ -112,3 +112,97 @@ test("App.jsx tidak lagi memakai pola 'refresh in place' yang menimpa slot", () 
   assert.match(teks, /rescueWalkingVersions/,
     "jalur baca wajib menyelamatkan teks yang gagal diurai sebelum tertimpa");
 });
+
+// ---------------------------------------------------------------------------
+// Pemulihan saat startup, Save, dan penanda "belum disimpan".
+import {
+  findRestorableVersion, planWalkingSave, walkingDraftUnsaved, sameWalkingParams,
+} from "../src/walkingVersionStore.js";
+import { fetchWalkingStore, mutateWalkingStore, WALKING_STORE_URL } from "../src/walkingVersionServer.js";
+import { WALKING_KEYS } from "../src/walkingParams.js";
+
+// Satu set lengkap 29 field; isinya tidak penting di sini, kelengkapannya yang penting.
+const penuh = (overrides = {}) => ({
+  ...Object.fromEntries(WALKING_KEYS.map((key) => [key,
+    key === "move_aim_on" || key === "balance_enable" ? false : key === "p_gain" ? 36 : 0.01])),
+  ...overrides,
+});
+
+const MEKKAH = { id: "m", name: "JALAN MENUJU MEKKAH", createdAt: 1, updatedAt: 2, params: penuh({ init_pitch_offset: -0.8 }) };
+const AMBA = { id: "a", name: "AMBA", createdAt: 1, updatedAt: 2, params: penuh({ init_x_offset: -0.03 }) };
+const DEFAULT = penuh({ init_x_offset: -0.02, init_pitch_offset: -0.07 });
+
+test("startup: versi aktif yang tersimpan dipulihkan, BUKAN default", () => {
+  assert.equal(findRestorableVersion({ activeVersionId: "m", versions: [AMBA, MEKKAH] }), MEKKAH);
+});
+
+test("startup: default hanya dipakai kalau memang tidak ada versi aktif", () => {
+  assert.equal(findRestorableVersion({ activeVersionId: null, versions: [AMBA, MEKKAH] }), null);
+  assert.equal(findRestorableVersion({ activeVersionId: "sudah-dihapus", versions: [AMBA] }), null);
+  assert.equal(findRestorableVersion(null), null);
+});
+
+test("Save menulis ke versi yang sedang terbuka, dengan seluruh isian", () => {
+  const params = penuh({ init_pitch_offset: -0.81 });
+  const { mode, version } = planWalkingSave({
+    versions: [AMBA, MEKKAH], activeVersionId: "m", name: "JALAN MENUJU MEKKAH", params, now: 99, makeId: () => "x",
+  });
+  assert.equal(mode, "update");
+  assert.deepEqual(version, { ...MEKKAH, params, updatedAt: 99 });
+});
+
+test("Save dengan nama lain membuat versi BARU; versi yang terbuka tidak diganti nama", () => {
+  const { mode, version } = planWalkingSave({
+    versions: [AMBA, MEKKAH], activeVersionId: "m", name: "MEKKAH 2", params: MEKKAH.params, now: 99, makeId: () => "baru",
+  });
+  assert.equal(mode, "new");
+  assert.equal(version.id, "baru");
+  assert.equal(version.name, "MEKKAH 2");
+});
+
+test("Save tidak bisa menimpa versi LAIN lewat namanya", () => {
+  assert.throws(() => planWalkingSave({
+    versions: [AMBA, MEKKAH], activeVersionId: "m", name: "AMBA", params: MEKKAH.params, now: 99, makeId: () => "x",
+  }), /sudah dipakai versi lain/);
+  assert.throws(() => planWalkingSave({
+    versions: [AMBA, MEKKAH], activeVersionId: "", name: "AMBA", params: DEFAULT, now: 99, makeId: () => "x",
+  }), /sudah dipakai versi lain/);
+});
+
+test("penanda belum-disimpan membandingkan dengan versi yang terbuka", () => {
+  assert.equal(walkingDraftUnsaved({ draft: { ...MEKKAH.params }, activeVersion: MEKKAH, defaults: DEFAULT }), false);
+  assert.equal(walkingDraftUnsaved({ draft: { ...MEKKAH.params, init_pitch_offset: -0.79 }, activeVersion: MEKKAH, defaults: DEFAULT }), true);
+  assert.equal(walkingDraftUnsaved({ draft: { ...MEKKAH.params, init_pitch_offset: "-" }, activeVersion: MEKKAH, defaults: DEFAULT }), true,
+    "angka yang masih diketik dihitung sebagai perubahan");
+  // Pembacaan balik float32 sesudah Apply bukan perubahan:
+  assert.equal(walkingDraftUnsaved({
+    draft: { ...MEKKAH.params, init_pitch_offset: Math.fround(-0.8) }, activeVersion: MEKKAH, defaults: DEFAULT,
+  }), false);
+  assert.equal(walkingDraftUnsaved({ draft: { ...DEFAULT }, activeVersion: null, defaults: DEFAULT }), false);
+});
+
+test("verifikasi sesudah Save itu KETAT, tanpa toleransi", () => {
+  assert.equal(sameWalkingParams(MEKKAH.params, { ...MEKKAH.params }), true);
+  assert.equal(sameWalkingParams(MEKKAH.params, { ...MEKKAH.params, init_pitch_offset: Math.fround(-0.8) }), false);
+  assert.equal(sameWalkingParams(MEKKAH.params, null), false);
+});
+
+test("klien penyimpanan mengirim operasi lewat POST berheader, dan tidak menelan galat", async () => {
+  const calls = [];
+  const ok = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, json: async () => ({ versions: [MEKKAH], activeVersionId: "m" }) };
+  };
+  await mutateWalkingStore({ op: "upsert", version: MEKKAH }, ok);
+  assert.equal(calls[0].url, WALKING_STORE_URL);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["X-Bascorro-Studio"], "1");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { op: "upsert", version: MEKKAH });
+
+  const ditolak = async () => ({ ok: false, status: 409, json: async () => ({ error: "Nama sudah dipakai" }) });
+  await assert.rejects(mutateWalkingStore({ op: "upsert", version: MEKKAH }, ditolak), /Nama sudah dipakai/);
+
+  // Server tanpa plugin menjawab index.html: harus jadi galat, bukan daftar kosong.
+  const html = async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("bukan JSON"); } });
+  await assert.rejects(fetchWalkingStore(html), /tidak melayani penyimpanan/);
+});

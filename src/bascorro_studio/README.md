@@ -55,7 +55,7 @@ jadi Y sudah berupa tambahan lebar terhadap stance yang ditangkap.
 Contoh: ROS `init_x_offset=-0.03` terlihat sebagai `-0.01`, sedangkan
 `init_y_offset=0.028` tetap terlihat sebagai `0.028`.
 
-Load, Apply, Save to Robot, versi tersimpan di browser, dan jalur simulasi tetap
+Load, Apply, Save to Robot, versi tersimpan (di disk robot), dan jalur simulasi tetap
 memakai **nilai asli ROS**. Tidak ada migrasi preset atau penulisan otomatis
 ke robot. Timing, amplitudo langkah, balance, pelvis, dan gain tidak digeser.
 Kartu Walking Tuner di tab Tuning hanya mengedit amplitudo/period sehingga
@@ -68,30 +68,55 @@ Load, Apply, atau pergantian preset dan tidak mengubah mekanisme tersebut.
 Jangan mengganti acuan otomatis dengan runtime terkini atau hasil FK dari
 page 2: itu memerlukan kajian bias/kinematika, bukan sekadar mengganti angka UI.
 
-#### Versi Tersimpan: apa yang menjaganya tetap konsisten
+#### Versi Tersimpan: disimpan di DISK robot, bukan di browser
 
-Tiga hal yang dulu membuat nilai tersimpan "berubah sendiri sesudah keluar lalu
-masuk lagi", dan penjaganya sekarang:
+Sejak 2026-09-12 daftar versi walking disimpan di
+`src/bascorro_studio/data/walking_versions.json`, dilayani oleh server Vite yang
+sama yang menyajikan Studio (`web/server/studioStorePlugin.js`, dijalankan
+`scripts/bascorro_studio.sh`). Sebelum tiap tulis, berkas lama disalin ke
+`data/backup/` (200 salinan terakhir), jadi nilai yang tertimpa Save masih bisa
+dipulihkan.
 
-1. **Semaian preset tidak pernah menimpa slot yang sudah terisi.** Dulu preset
-   bawaan (`dari claude`, `JALAN KE SURGA`) mencari slot dengan NAMA yang sama
-   lalu mengganti isinya. Karena kunci penandanya diturunkan dari
-   `JALAN_WALKING_SEED_REV`, setiap kenaikan revisi menjalankan penimpaan itu
-   lagi di semua browser — hasil Simpan operator hilang tanpa peringatan.
-   Sekarang slot yang sudah ada selalu menang. **Untuk menyebarkan preset baru
-   ke browser yang sudah terisi, pakai nama BARU**, jangan nama yang sama.
-2. **Penyimpanan yang gagal diurai diselamatkan dulu.** Daftar versi ditulis
-   ulang ke `localStorage` tiap kali berubah, termasuk sesaat sesudah halaman
-   dimuat — jadi satu `JSON.parse` yang gagal dulu cukup untuk menghapus semua
-   versi secara permanen. Teks mentahnya kini disalin ke
-   `bascorro.walking_versions.v1.rusak.<timestamp>` sebelum apa pun menimpanya.
-3. **Penyimpanan dipisah per alamat.** `localhost:5173` dan `10.x.x.x:5173`
-   adalah dua kotak berbeda; membuka Studio lewat alamat lain terlihat persis
-   seperti "versi tersimpan hilang". Alamat aktif sekarang ditampilkan sebagai
-   lencana di panel Versi Tersimpan.
+Urutan saat Studio dibuka: **baca disk -> periksa -> pulihkan versi yang
+terakhir dipakai ke isian -> baru tampil**. Default hanya dipakai kalau memang
+tidak ada versi aktif. Tidak ada yang dikirim ke robot saat Studio dibuka;
+Apply tetap tombol operator.
 
-Logika murninya ada di `web/src/walkingVersionStore.js` dengan test perilaku di
-`web/test/walkingVersionStore.test.mjs`.
+Yang dulu membuat nilai tersimpan "berubah" atau "kembali ke default" sesudah
+Studio dibuka ulang, dan penjaganya sekarang:
+
+1. **Isian selalu mulai dari default.** `walkingParams` dibuat dari
+   `WALKING_DEFAULT_PARAMS` dan versi terakhir tidak pernah diingat. Sekarang
+   versi aktif dicatat di disk dan dipulihkan.
+2. **Memilih versi tidak memuatnya, tapi Save menulis ke versi yang dipilih.**
+   "Pilih JALAN MENUJU MEKKAH -> Save" menimpa MEKKAH dengan isi isian (default,
+   atau nilai versi lain). Sekarang memilih = memuat; Save hanya menulis ke versi
+   yang isinya sedang terbuka; nama lain = versi baru (versi lama tidak diganti
+   nama); nama milik versi lain ditolak.
+3. **localStorage penuh dan gagal diam-diam.** `localhost:5173` memakai 97,7%
+   kuota 5 MiB (riwayat Action Editor ~4,5 MB). Saat penuh, `setItem` melempar
+   dan galatnya ditelan: layar bilang "updated", disk tidak berubah. Berkas disk
+   tidak berbagi kuota; Save baru dinyatakan berhasil sesudah server membaca
+   ulang berkasnya dan nilainya cocok persis.
+4. **localStorage terpisah per alamat/browser.** `localhost` dan IP berisi
+   daftar berbeda. Berkas disk sama untuk semua alamat dan browser.
+5. **Pilihan "Relatif page 2 / Nilai asli ROS" tidak diingat**, jadi angka yang
+   sama terlihat lain sesudah dibuka ulang. Sekarang ikut tersimpan.
+6. **Semaian preset menimpa versi bernama sama** (diperbaiki 36197e2).
+
+Lencana di panel Versi Tersimpan memperlihatkan keadaannya: `✓ Sama dengan
+"<versi>"` atau `● Belum disimpan ke "<versi>"`. Menutup Studio dengan isian
+yang belum disimpan memunculkan pertanyaan browser. Kalau server penyimpanan
+tidak terbaca, panel beralih ke baca-saja (Save/Delete mati) dengan pesan merah,
+bukan diam-diam menyimpan ke tempat lain.
+
+Log di konsol browser (F12): `[LOAD] ...` saat dibuka/memilih versi,
+`[SAVE] ...` saat menyimpan, `[APPLY] ...` saat runtime mengonfirmasi. Log
+server (`[walking-store] ...`) muncul di terminal `bascorro_studio.sh`.
+
+`scripts/sync_preset_from_studio.py` membaca berkas disk ini (localStorage lama
+hanya dengan `--dari-browser`). Logika penyimpanan diuji di
+`web/test/walkingVersionFile.test.mjs` dan `web/test/walkingVersionStore.test.mjs`.
 
 ### 4. Action Studio
 A powerful motion editor for creating and refining robot behaviors.

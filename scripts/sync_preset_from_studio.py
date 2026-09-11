@@ -4,14 +4,19 @@
 KENAPA ADA SKRIP INI
 --------------------
 Enam gerakan demo di `op3_demo/config/preset_walking.yaml` disetel operator di
-Bascorro Studio, lalu disalin TANGAN ke berkas itu. Studio menyimpan versinya di
-localStorage browser, bukan di server, jadi tidak ada yang otomatis. Menyalin 29
+Bascorro Studio, lalu disalin TANGAN ke berkas itu. Tidak ada yang otomatis. Menyalin 29
 angka x 6 bagian dengan tangan itu tempat salah ketik bersarang -- dan sudah
 pernah kejadian: `init_x_offset: -0.18` (harusnya -0.018) membuat IK kaki gagal
 total dan log membanjir "IK produced non-finite leg_angle[2]".
 
-Skrip ini membaca versinya langsung dari profil Firefox, membandingkannya dengan
-yaml, DAN memeriksa apakah tiap preset masih terjangkau kaki sebelum menulis.
+Skrip ini membaca versi tersimpan Studio, membandingkannya dengan yaml, DAN
+memeriksa apakah tiap preset masih terjangkau kaki sebelum menulis.
+
+SUMBER: sejak 2026-09-12 Studio menyimpan versinya di DISK robot,
+`src/bascorro_studio/data/walking_versions.json`, dan itu yang dibaca di sini.
+localStorage Firefox (sumber lama) cuma salinan cadangan yang bisa basi --
+kuotanya penuh oleh riwayat Action Editor -- jadi hanya dipakai kalau berkas
+disk belum ada, atau kalau diminta dengan --dari-browser.
 
 PAKAI
 -----
@@ -25,8 +30,8 @@ CATATAN
 -------
 * Nilai localStorage Firefox (LSNG) dipadatkan snappy blok mentah; dekompresornya
   ditulis di sini supaya tidak perlu pustaka tambahan.
-* Browser MENAHAN tulisan sebentar. Kalau versi yang baru disimpan belum muncul,
-  tutup tab Studio (atau Firefox) dulu lalu ulangi.
+* (Hanya --dari-browser) Browser MENAHAN tulisan sebentar. Kalau versi yang baru
+  disimpan belum muncul, tutup tab Studio (atau Firefox) dulu lalu ulangi.
 * Pemeriksaan jangkauan memakai geometri kaki OP3: paha 110,15 + betis 110,00 mm.
   Preset yang tidak terjangkau TIDAK ditulis, kecuali dipaksa dengan --izinkan-mustahil.
 """
@@ -132,6 +137,16 @@ def cari_data_sqlite(port: int) -> str:
     return max(hit, key=os.path.getmtime)
 
 
+BERKAS_VERSI = "src/bascorro_studio/data/walking_versions.json"
+
+
+def baca_versi_disk():
+    """Sumber UTAMA: berkas yang ditulis Studio di disk robot."""
+    with open(BERKAS_VERSI, encoding="utf-8") as f:
+        doc = json.load(f)
+    return BERKAS_VERSI, {v["name"]: v for v in doc["versions"]}
+
+
 def baca_versi(port: int):
     db = cari_data_sqlite(port)
     # disalin dulu: berkasnya bisa terkunci selagi Firefox jalan
@@ -166,6 +181,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true", help="tulis perubahannya")
     ap.add_argument("--port", type=int, default=5173, help="port Studio (bawaan 5173)")
+    ap.add_argument("--dari-browser", action="store_true",
+                    help="baca localStorage Firefox, bukan berkas di disk robot (sumber lama)")
     ap.add_argument("--izinkan-mustahil", action="store_true",
                     help="tulis walaupun preset di luar jangkauan kaki (JANGAN)")
     args = ap.parse_args()
@@ -173,8 +190,12 @@ def main() -> int:
     akar = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     os.chdir(akar)
 
-    db, versi = baca_versi(args.port)
-    print(f"localStorage : {db}\n")
+    if not args.dari_browser and os.path.exists(BERKAS_VERSI):
+        sumber, versi = baca_versi_disk()
+        print(f"sumber       : {sumber} (disk robot)\n")
+    else:
+        sumber, versi = baca_versi(args.port)
+        print(f"localStorage : {sumber}\n")
 
     try:
         import yaml
