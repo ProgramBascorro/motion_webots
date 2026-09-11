@@ -36,6 +36,10 @@ import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
 import WalkingSimPreview from "./WalkingSimPreview.jsx";
+import WalkingOffsetInput from "./WalkingOffsetInput.jsx";
+import {
+  WALKING_POSE_REFERENCE, walkingReferenceOffset, walkingOffsetToDisplay,
+} from "./walkingPoseReference.js";
 import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
@@ -1193,6 +1197,7 @@ export default function App() {
   const [demoCommand, setDemoCommand] = useState("");
   const [demoCommandAt, setDemoCommandAt] = useState(null);
   const [walkingParams, setWalkingParams] = useState(() => normalizeWalkingParams());
+  const [walkingRelativeDisplay, setWalkingRelativeDisplay] = useState(true);
   const [walkingCurrentParams, setWalkingCurrentParams] = useState(null);
   const [walkingLoaded, setWalkingLoaded] = useState(false);
   const walkingDirty = !parametersEqual(walkingParams, walkingCurrentParams || WALKING_DEFAULT_PARAMS, WALKING_KEYS);
@@ -2203,7 +2208,7 @@ export default function App() {
     setWalkingVersionName(selected.name);
     setWalkingError("");
 
-    if (!rosConnected) {
+    if (rosState !== "connected") {
       sendStatus(`Versi "${selected.name}" dimuat ke kotak isian. ROS terputus, jadi belum ada `
         + "pembacaan robot: tekan Load di baris PARAMETER sebelum Apply.", true);
       return;
@@ -2751,9 +2756,12 @@ export default function App() {
   const renderWalking = () => {
     const rosConnected = rosState === "connected";
     const walkingButtonBase = "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+    const displayWalkingValue = (value, field) => formatWalkingValue(
+      walkingOffsetToDisplay(value, walkingReferenceOffset(field.key, walkingRelativeDisplay)), field,
+    );
     const currentValue = (field) => {
       if (!walkingCurrentParams) return "not loaded";
-      return formatWalkingValue(walkingCurrentParams[field.key], field);
+      return displayWalkingValue(walkingCurrentParams[field.key], field);
     };
     const isFieldDirty = (field) => {
       if (!walkingCurrentParams) return false;
@@ -2769,12 +2777,20 @@ export default function App() {
           <div>
             <div className="font-bold text-gray-900">{field.label}</div>
             <div className="mt-1 font-mono text-[11px] text-gray-400">
-              {field.key}{field.unit ? ` | ${field.unit}` : ""} | current {currentValue(field)} | edited {formatWalkingValue(walkingParams[field.key], field)}
+              {field.key}{field.unit ? ` | ${field.unit}` : ""} | current {currentValue(field)} | edited {displayWalkingValue(walkingParams[field.key], field)}
             </div>
           </div>
           <Info size={16} className="mt-0.5 flex-shrink-0 text-undip-blue" />
         </div>
         <div className="mt-3 space-y-2 leading-relaxed text-gray-600">
+          {walkingReferenceOffset(field.key, walkingRelativeDisplay) !== null && (
+            <p className="rounded-lg bg-blue-50 p-2 text-undip-blue">
+              <strong>Δ page 2:</strong> angka tampilan = nilai asli ROS − {WALKING_POSE_REFERENCE.offsets[field.key]} {field.unit}.
+              Nilai asli draft: <span className="font-mono">{formatWalkingValue(walkingParams[field.key], field)}</span>;
+              nilai asli robot: <span className="font-mono">{walkingCurrentParams ? formatWalkingValue(walkingCurrentParams[field.key], field) : "belum dibaca"}</span>.
+              Nol di sini bukan perintah memainkan page 2 atau pembacaan posisi sendi/IMU.
+            </p>
+          )}
           <p><span className="font-bold text-gray-800">Artinya:</span> {field.artinya}</p>
           <p><span className="font-bold text-gray-800">Fungsi:</span> {field.fungsi}</p>
           <p><span className="font-bold text-gray-800">Tuning:</span> {field.tuning}</p>
@@ -2999,6 +3015,44 @@ export default function App() {
             />
           </div>
 
+          <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" aria-label="Acuan angka walking">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-gray-900">Acuan angka: {WALKING_POSE_REFERENCE.label}</h3>
+                <p className="mt-1 text-xs text-gray-500">Hanya cara membaca dan mengisi offset. Tidak mengubah posisi robot atau isi preset.</p>
+              </div>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Tampilan nilai walking">
+                <button type="button" aria-pressed={walkingRelativeDisplay} onClick={() => setWalkingRelativeDisplay(true)}
+                  className={`${walkingButtonBase} ${walkingRelativeDisplay ? "bg-undip-blue text-white" : "bg-gray-100 text-gray-700"}`}>
+                  Relatif page 2
+                </button>
+                <button type="button" aria-pressed={!walkingRelativeDisplay} onClick={() => setWalkingRelativeDisplay(false)}
+                  className={`${walkingButtonBase} ${!walkingRelativeDisplay ? "bg-undip-blue text-white" : "bg-gray-100 text-gray-700"}`}>
+                  Nilai asli ROS
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 space-y-2 text-xs leading-relaxed text-gray-600">
+              <p>Init Pose dan Hip pitch ditampilkan sebagai selisih dari acuan tetap page 2. Kolom Current memakai acuan yang sama.
+                Y tetap tambahan lebar kaki: nilai 0 mengikuti lebar acuan, bukan mengurangi 0.028 m yang tersimpan.
+                Timing, Movement, Balance, dan gain tetap memakai nilai aslinya.</p>
+              <p>Load membaca nilai asli robot; Apply dan Save tetap memakai format asli ROS. Memilih tampilan tidak mengirim perintah.
+                Acuan ini bukan kalibrasi langsung: modul walking masih menangkap pose saat diaktifkan, sehingga nol di layar bukan jaminan pose fisik sama dengan page 2.</p>
+              <p className="font-semibold text-undip-blue">Untuk menyalin angka ke YAML, skrip, atau terminal ROS, pilih Nilai asli ROS terlebih dahulu.</p>
+            </div>
+            <details className="mt-3 text-xs text-gray-600">
+              <summary className="font-semibold text-undip-blue">Lihat nilai nol dalam format ROS</summary>
+              <p className="mt-2 text-gray-500">{WALKING_POSE_REFERENCE.source}. Acuan tidak ikut bergeser saat Load, Apply, atau ganti preset.</p>
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
+                {Object.entries(WALKING_POSE_REFERENCE.offsets).map(([key, value]) => (
+                  <div key={key} className="flex flex-wrap justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                    <span>{key}</span><span>{value} {key.includes("_x_") || key.includes("_y_") || key.includes("_z_") ? "m" : "rad"}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </section>
+
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {WALKING_PARAM_GROUPS.map((group) => (
               <div key={group.title} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
@@ -3014,6 +3068,7 @@ export default function App() {
                 <div className="divide-y divide-gray-100">
                   {group.fields.map((field) => {
                     const dirty = isFieldDirty(field);
+                    const referenceOffset = walkingReferenceOffset(field.key, walkingRelativeDisplay);
                     return (
                       <div key={field.key} className="group/param relative grid grid-cols-1 gap-3 p-4 md:grid-cols-[minmax(170px,1fr)_minmax(180px,220px)_minmax(150px,180px)] md:items-center">
                         <div className="min-w-0">
@@ -3023,6 +3078,7 @@ export default function App() {
                             {dirty && <span className="w-2 h-2 rounded-full bg-yellow-400" title="Changed" />}
                           </div>
                           <div className="mt-1 text-[11px] text-gray-400 font-mono break-all">{field.key}{field.unit ? ` (${field.unit})` : ""}</div>
+                          {referenceOffset !== null && <div className="mt-1 text-[10px] font-semibold text-undip-blue">Δ page 2 · ROS: {formatWalkingValue(walkingParams[field.key], field)}</div>}
                         </div>
 
                         {field.type === "bool" ? (
@@ -3045,11 +3101,10 @@ export default function App() {
                           // comma, a paste), and that empty string used to be applied
                           // to the robot as 0. inputMode keeps the numeric keypad on
                           // touch; normalizeWalkingParams does the parsing.
-                          <input
-                            type="text"
-                            inputMode="decimal"
+                          <WalkingOffsetInput
                             value={walkingParams[field.key]}
-                            onChange={(e) => updateWalkingParam(field.key, e.target.value)}
+                            referenceOffset={referenceOffset}
+                            onChange={(value) => updateWalkingParam(field.key, value)}
                             disabled={walkingBusy}
                             aria-label={field.key}
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-undip-blue/20 focus:border-undip-blue"
@@ -3057,7 +3112,7 @@ export default function App() {
                         )}
 
                         <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-                          <div className="text-[10px] font-bold uppercase text-gray-400">Current</div>
+                          <div className="text-[10px] font-bold uppercase text-gray-400">{referenceOffset !== null ? "Current Δ page 2" : "Current"}</div>
                           <div className="text-xs font-mono text-gray-700 truncate">{currentValue(field)}</div>
                         </div>
                         {renderWalkingHelp(field)}

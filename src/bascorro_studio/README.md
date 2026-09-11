@@ -27,6 +27,47 @@ Tools for configuring locomotion and testing input.
 - **Walking Parameters**: Dynamic tuning of X/Y amplitude, turn angle, and period.
 - **Manual Parameters**: Direct access to set any ROS 2 node parameter.
 
+#### Acuan angka Walking: page 2 (ALPHONSE)
+
+Tab **Walking** secara default menampilkan offset sebagai **Δ terhadap acuan
+page 2 / Walking Ready**. Ini perubahan koordinat angka UI, bukan kalibrasi
+sendi atau perubahan gait. Tombol **Nilai asli ROS** mengembalikan tampilan
+angka lama tanpa menerbitkan perintah atau mengubah draft.
+
+Rumus: `angka tampilan = nilai asli ROS - acuan`; saat operator mengedit,
+`nilai asli ROS = angka tampilan + acuan`. Kolom Current menggunakan rumus
+yang sama terhadap hasil Load terakhir, bukan terhadap draft.
+
+| Field | Nilai asli ROS yang ditampilkan sebagai 0 |
+|---|---:|
+| `init_x_offset` | -0.02 m |
+| `init_y_offset` | 0 m |
+| `init_z_offset` | 0.0408 m |
+| `init_roll_offset` | 0 rad |
+| `init_pitch_offset` | -0.07 rad |
+| `init_yaw_offset` | 0 rad |
+| `hip_pitch_offset` | 0.1396 rad |
+
+Acuan tetap ini disimpan di `web/src/walkingPoseReference.js`, berdasarkan
+konfigurasi ALPHONSE pada 11 September 2026. Y sengaja **bukan 0.028**:
+`computeNeutralLegAngle(..., false)` mengeluarkan Y dari perhitungan bias,
+jadi Y sudah berupa tambahan lebar terhadap stance yang ditangkap.
+Contoh: ROS `init_x_offset=-0.03` terlihat sebagai `-0.01`, sedangkan
+`init_y_offset=0.028` tetap terlihat sebagai `0.028`.
+
+Load, Apply, Save to Robot, versi tersimpan di browser, dan jalur simulasi tetap
+memakai **nilai asli ROS**. Tidak ada migrasi preset atau penulisan otomatis
+ke robot. Timing, amplitudo langkah, balance, pelvis, dan gain tidak digeser.
+Kartu Walking Tuner di tab Tuning hanya mengedit amplitudo/period sehingga
+angkanya juga tetap. **Untuk menyalin angka ke YAML atau terminal ROS, pilih
+Nilai asli ROS terlebih dahulu**; jangan menyalin Δ sebagai nilai native.
+
+Nol UI bukan jaminan pose fisik tepat page 2: modul walking masih menangkap
+pose dan parameter yang aktif saat enable. Acuan tampilan ini tidak mengikuti
+Load, Apply, atau pergantian preset dan tidak mengubah mekanisme tersebut.
+Jangan mengganti acuan otomatis dengan runtime terkini atau hasil FK dari
+page 2: itu memerlukan kajian bias/kinematika, bukan sekadar mengganti angka UI.
+
 ### 4. Action Studio
 A powerful motion editor for creating and refining robot behaviors.
 - **3D Preview**: WebGL-based visualization of the robot (URDF) mirroring the editor state.
