@@ -68,6 +68,31 @@ Load, Apply, atau pergantian preset dan tidak mengubah mekanisme tersebut.
 Jangan mengganti acuan otomatis dengan runtime terkini atau hasil FK dari
 page 2: itu memerlukan kajian bias/kinematika, bukan sekadar mengganti angka UI.
 
+#### Versi Tersimpan: apa yang menjaganya tetap konsisten
+
+Tiga hal yang dulu membuat nilai tersimpan "berubah sendiri sesudah keluar lalu
+masuk lagi", dan penjaganya sekarang:
+
+1. **Semaian preset tidak pernah menimpa slot yang sudah terisi.** Dulu preset
+   bawaan (`dari claude`, `JALAN KE SURGA`) mencari slot dengan NAMA yang sama
+   lalu mengganti isinya. Karena kunci penandanya diturunkan dari
+   `JALAN_WALKING_SEED_REV`, setiap kenaikan revisi menjalankan penimpaan itu
+   lagi di semua browser — hasil Simpan operator hilang tanpa peringatan.
+   Sekarang slot yang sudah ada selalu menang. **Untuk menyebarkan preset baru
+   ke browser yang sudah terisi, pakai nama BARU**, jangan nama yang sama.
+2. **Penyimpanan yang gagal diurai diselamatkan dulu.** Daftar versi ditulis
+   ulang ke `localStorage` tiap kali berubah, termasuk sesaat sesudah halaman
+   dimuat — jadi satu `JSON.parse` yang gagal dulu cukup untuk menghapus semua
+   versi secara permanen. Teks mentahnya kini disalin ke
+   `bascorro.walking_versions.v1.rusak.<timestamp>` sebelum apa pun menimpanya.
+3. **Penyimpanan dipisah per alamat.** `localhost:5173` dan `10.x.x.x:5173`
+   adalah dua kotak berbeda; membuka Studio lewat alamat lain terlihat persis
+   seperti "versi tersimpan hilang". Alamat aktif sekarang ditampilkan sebagai
+   lencana di panel Versi Tersimpan.
+
+Logika murninya ada di `web/src/walkingVersionStore.js` dengan test perilaku di
+`web/test/walkingVersionStore.test.mjs`.
+
 ### 4. Action Studio
 A powerful motion editor for creating and refining robot behaviors.
 - **3D Preview**: WebGL-based visualization of the robot (URDF) mirroring the editor state.

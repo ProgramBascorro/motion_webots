@@ -40,6 +40,7 @@ import WalkingOffsetInput from "./WalkingOffsetInput.jsx";
 import {
   WALKING_POSE_REFERENCE, walkingReferenceOffset, walkingOffsetToDisplay,
 } from "./walkingPoseReference.js";
+import { seedWalkingVersion, parseStoredWalkingVersions } from "./walkingVersionStore.js";
 import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
@@ -510,24 +511,38 @@ function formatWalkingValue(value, field) {
   return formatNumber(numeric, 5);
 }
 
+// Daftar versi ditulis ULANG ke localStorage setiap kali ia berubah, termasuk
+// beberapa milidetik sesudah halaman dimuat. Jadi apa pun yang gagal dibaca di
+// sini akan tertimpa dan HILANG SELAMANYA -- satu JSON.parse yang gagal, atau
+// satu entri yang bentuknya tidak dikenali, cukup untuk menghapus seluruh versi
+// tersimpan operator tanpa jejak. Teks mentahnya disalin dulu ke kunci
+// bertanggal supaya selalu ada yang bisa dipulihkan.
+function rescueWalkingVersions(raw) {
+  try {
+    localStorage.setItem(`${WALKING_VERSION_STORAGE_KEY}.rusak.${Date.now()}`, raw);
+  } catch {
+    // Penyimpanan penuh atau dibatasi -- tidak ada lagi yang bisa dilakukan.
+  }
+}
+
 function readWalkingVersions() {
   if (typeof window === "undefined") return [];
+  let raw = null;
   try {
-    const raw = localStorage.getItem(WALKING_VERSION_STORAGE_KEY);
-    const parsed = JSON.parse(raw || "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item) => item?.id && item?.params)
-      .map((item) => ({
-        id: String(item.id),
-        name: String(item.name || "Untitled"),
-        createdAt: Number(item.createdAt || Date.now()),
-        updatedAt: Number(item.updatedAt || item.createdAt || Date.now()),
-        params: normalizeWalkingParams(item.params),
-      }));
+    raw = localStorage.getItem(WALKING_VERSION_STORAGE_KEY);
   } catch {
+    // Penyimpanan dibatasi (mode privat): jalan tanpa versi tersimpan.
     return [];
   }
+  const { versions, rusak } = parseStoredWalkingVersions(raw);
+  if (rusak) rescueWalkingVersions(rusak);
+  return versions.map((item) => ({
+    id: String(item.id),
+    name: String(item.name || "Untitled"),
+    createdAt: Number(item.createdAt || Date.now()),
+    updatedAt: Number(item.updatedAt || item.createdAt || Date.now()),
+    params: normalizeWalkingParams(item.params),
+  }));
 }
 
 function makeWalkingVersionId() {
@@ -591,6 +606,9 @@ const CLAUDE_WALKING_PARAMS = {
 // fixed so both invocations produce the same entry.
 const CLAUDE_WALKING_VERSION_ID = "claude-walking-preset-v1";
 
+// Semaian TIDAK PERNAH menimpa slot yang sudah terisi -- alasan lengkapnya di
+// walkingVersionStore.js. Yang tersisa di sini hanya penanda localStorage-nya,
+// yang membuat preset yang sudah dihapus operator tetap hilang.
 function seedWalkingVersions(versions) {
   if (typeof window === "undefined") return versions;
   try {
@@ -599,28 +617,11 @@ function seedWalkingVersions(versions) {
     // Private/restricted storage: skip seeding rather than break the page.
     return versions;
   }
-  const now = Date.now();
-  const preset = normalizeWalkingParams(CLAUDE_WALKING_PARAMS);
-
-  // An entry from an earlier seed is refreshed in place rather than duplicated.
-  // Only this preset is touched; every other saved version is left alone.
-  const existing = versions.findIndex((version) => version.name === CLAUDE_WALKING_VERSION_NAME);
-  if (existing !== -1) {
-    const refreshed = versions.slice();
-    refreshed[existing] = { ...versions[existing], params: preset, updatedAt: now };
-    return refreshed;
-  }
-
-  return [
-    {
-      id: CLAUDE_WALKING_VERSION_ID,
-      name: CLAUDE_WALKING_VERSION_NAME,
-      createdAt: now,
-      updatedAt: now,
-      params: preset,
-    },
-    ...versions,
-  ];
+  return seedWalkingVersion(versions, {
+    id: CLAUDE_WALKING_VERSION_ID,
+    name: CLAUDE_WALKING_VERSION_NAME,
+    params: normalizeWalkingParams(CLAUDE_WALKING_PARAMS),
+  });
 }
 
 // Versi tersimpan "JALAN KE SURGA" di Studio.
@@ -639,9 +640,15 @@ function seedWalkingVersions(versions) {
 const JALAN_WALKING_VERSION_NAME = "JALAN KE SURGA";
 const JALAN_WALKING_VERSION_ID = "jalan-ke-surga-v1";
 // Penanda seed diturunkan dari REVISI ISI di bawah, bukan nomor yang dinaikkan
-// manual. Ubah angkanya -> ubah JALAN_WALKING_SEED_REV -> kunci penandanya ikut
-// berubah -> browser mana pun menyegarkan slot itu sekali di muat berikutnya.
-// Dengan begitu tidak bisa lagi terjadi "angkanya sudah diganti tapi Studio diam".
+// manual. Menaikkannya membuat browser yang slotnya MASIH KOSONG mendapat angka
+// baru di muat berikutnya.
+//
+// Dulu kenaikan revisi juga MENIMPA slot yang sudah terisi, supaya "angkanya
+// sudah diganti tapi Studio diam" tidak terjadi. Itu dicabut: harganya adalah
+// menghapus hasil Simpan operator tanpa peringatan, dan itu jauh lebih mahal
+// daripada Studio yang memperlihatkan angka lama. Lihat walkingVersionSlotTaken.
+// Kalau sebuah preset memang harus disebarkan ulang ke browser yang sudah
+// terisi, beri nama BARU -- jangan memakai nama yang sama.
 const JALAN_WALKING_SEED_REV = "2026-09-02";
 const JALAN_WALKING_SEED_FLAG_KEY =
   `bascorro.walking_versions.seeded.jalan_ke_surga.${JALAN_WALKING_SEED_REV}`;
@@ -677,15 +684,16 @@ const JALAN_WALKING_PARAMS = {
   d_gain: 0,
 };
 
-// Menyegarkan versi "JALAN KE SURGA" sekali per browser.
+// Menawarkan versi "JALAN KE SURGA" sekali per browser -- hanya kalau slotnya
+// memang masih kosong.
 //
 // Bentuknya sengaja sama dengan seedWalkingVersions(): MURNI (cuma membaca
 // penanda, tidak pernah menulisnya) karena StrictMode memanggil initializer
 // useState dua kali di mode dev, dan id-nya tetap supaya kedua panggilan
 // menghasilkan entri yang sama. Penandanya ditulis dari useEffect di bawah.
 //
-// Kalau slotnya sudah ada, isinya DITIMPA di tempat -- nama, urutan, dan versi
-// tersimpan lain tidak disentuh. Kalau belum ada, ditambahkan di depan.
+// Kalau slotnya sudah ada -- dari semaian lama maupun dari Simpan operator --
+// ia TIDAK DISENTUH. Kalau belum ada, ditambahkan di depan.
 function seedJalanWalkingVersion(versions) {
   if (typeof window === "undefined") return versions;
   try {
@@ -695,26 +703,11 @@ function seedJalanWalkingVersion(versions) {
     // merusak halaman.
     return versions;
   }
-  const now = Date.now();
-  const preset = normalizeWalkingParams(JALAN_WALKING_PARAMS);
-
-  const existing = versions.findIndex((version) => version.name === JALAN_WALKING_VERSION_NAME);
-  if (existing !== -1) {
-    const refreshed = versions.slice();
-    refreshed[existing] = { ...versions[existing], params: preset, updatedAt: now };
-    return refreshed;
-  }
-
-  return [
-    {
-      id: JALAN_WALKING_VERSION_ID,
-      name: JALAN_WALKING_VERSION_NAME,
-      createdAt: now,
-      updatedAt: now,
-      params: preset,
-    },
-    ...versions,
-  ];
+  return seedWalkingVersion(versions, {
+    id: JALAN_WALKING_VERSION_ID,
+    name: JALAN_WALKING_VERSION_NAME,
+    params: normalizeWalkingParams(JALAN_WALKING_PARAMS),
+  });
 }
 
 // --- Utilities ---
@@ -2946,6 +2939,17 @@ export default function App() {
               <h3 className="text-sm font-bold text-gray-800">Versi Tersimpan</h3>
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
                 Tersimpan di browser
+              </span>
+              {/* Penyimpanan browser dipisah PER ALAMAT: localhost:5173 dan
+                  10.137.x.x:5173 adalah dua kotak yang berbeda isinya. Membuka
+                  Studio lewat alamat lain terlihat persis seperti "versi
+                  tersimpan berubah/hilang", padahal datanya utuh di alamat yang
+                  satunya. Alamatnya ditulis di sini supaya langsung kelihatan. */}
+              <span
+                className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                title="Versi tersimpan terikat pada alamat ini. Membuka Studio lewat alamat lain (localhost vs IP) memperlihatkan daftar yang berbeda — datanya tidak hilang, cuma ada di alamat yang satunya."
+              >
+                {typeof window === "undefined" ? "—" : window.location.host}
               </span>
               <span className="text-[10px] text-gray-400">Muat versi mengisi kotak isian (dan ikut membaca robot) — tetap perlu Apply untuk kirim</span>
             </div>
