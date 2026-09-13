@@ -53,7 +53,9 @@ test("gait start always clears the servo speed limit, unconditionally", () => {
 test("both walking start paths go through initThenEnableWalking", () => {
   const teks = readFileSync(SUMBER, "utf8");
   for (const nama of ["applyWalkingAndStart", "startWalkingNow"]) {
-    assert.match(badanFungsi(teks, nama), /initThenEnableWalking\(context\)/,
+    // Boleh membawa draft sebagai argumen kedua (acuan pose dipatok di sana);
+    // yang wajib cuma: kedua jalur start benar-benar melewatinya.
+    assert.match(badanFungsi(teks, nama), /initThenEnableWalking\(context[,)]/,
       `${nama} harus lewat initThenEnableWalking, kalau tidak batasnya tidak dilepas`);
   }
 });

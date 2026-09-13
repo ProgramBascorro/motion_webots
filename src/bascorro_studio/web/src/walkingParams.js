@@ -198,3 +198,39 @@ export async function applyWalkingDraft({ draft, baseline, read, publish, check,
   }
   throw new Error("Apply belum terkonfirmasi. Runtime berbeda; periksa demo/teleop yang juga menulis walking.");
 }
+
+// Enam field yang MASUK perhitungan walking_bias_ (computeNeutralLegAngle di
+// op3_walking_module.cpp). init_y_offset sengaja TIDAK ikut: penangkapan bias
+// memanggilnya dengan with_y_offset = false, jadi y tidak pernah masuk acuan.
+export const WALKING_BIAS_FIELDS = [
+  "init_x_offset", "init_z_offset", "init_roll_offset",
+  "init_pitch_offset", "init_yaw_offset", "hip_pitch_offset",
+];
+
+// Seberapa jauh offset boleh dari acuan page 2 sebelum operator diperingatkan.
+// Longgar sengaja: ini penjaga supaya robot tidak tiba-tiba condong jauh, bukan
+// batas tuning. 0,09 rad ~ 5 derajat.
+const WALKING_POSE_WARN = {
+  init_x_offset: 0.02, init_z_offset: 0.02, init_roll_offset: 0.09,
+  init_pitch_offset: 0.09, init_yaw_offset: 0.09, hip_pitch_offset: 0.09,
+};
+
+// Offset mana saja yang jauh dari acuan page 2.
+//
+// Sebelum acuannya dipatok, angka-angka ini tidak pernah benar-benar terasa di
+// awal sesi (bias ditangkap dengan nilai yang sama, jadi saling meniadakan),
+// sehingga operator terus menaikkannya tiap sesi. Begitu acuannya tetap, angka
+// yang sama menggeser pose SEPENUHNYA -- jadi nilai lama yang sudah terlanjur
+// besar perlu diperingatkan sekali sebelum dikirim.
+export function walkingPoseFarFromReference(params, reference) {
+  const jauh = [];
+  for (const key of WALKING_BIAS_FIELDS) {
+    const acuan = reference?.[key];
+    if (typeof acuan !== "number") continue;
+    const nilai = parseWalkingNumber(params?.[key], NaN);
+    if (!Number.isFinite(nilai)) continue;
+    const selisih = nilai - acuan;
+    if (Math.abs(selisih) > WALKING_POSE_WARN[key]) jauh.push({ key, selisih, nilai, acuan });
+  }
+  return jauh;
+}

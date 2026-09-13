@@ -296,3 +296,58 @@ test("runtime yang bergeser tidak mengubah last saved state, hanya menandainya",
   // Dan kalau operator memang menarik runtime ke isian (tombol Load), itu terlihat.
   assert.equal(walkingDraftUnsaved({ draft: B, activeVersion: tersimpan, defaults: DEFAULT }), true);
 });
+
+// ---------------------------------------------------------------------------
+// Acuan pose dipatok sebelum walking_module dinyalakan.
+import { walkingPoseFarFromReference, WALKING_BIAS_FIELDS } from "../src/walkingParams.js";
+import { WALKING_POSE_REFERENCE } from "../src/walkingPoseReference.js";
+
+const REF = WALKING_POSE_REFERENCE.offsets;
+
+test("enam field yang menentukan walking_bias_, tanpa init_y_offset", () => {
+  // computeNeutralLegAngle dipanggil dengan with_y_offset=false saat bias
+  // direkam, jadi y TIDAK pernah masuk acuan dan tidak boleh ikut digeser.
+  assert.deepEqual([...WALKING_BIAS_FIELDS].sort(), [
+    "hip_pitch_offset", "init_pitch_offset", "init_roll_offset",
+    "init_x_offset", "init_yaw_offset", "init_z_offset",
+  ]);
+  assert.equal(WALKING_BIAS_FIELDS.includes("init_y_offset"), false);
+});
+
+test("offset yang jauh dari page 2 dilaporkan, yang dekat tidak", () => {
+  assert.deepEqual(walkingPoseFarFromReference({ ...REF }, REF), []);
+  const jauh = walkingPoseFarFromReference({ ...REF, init_pitch_offset: -0.5, hip_pitch_offset: 0 }, REF);
+  assert.deepEqual(jauh.map((x) => x.key).sort(), ["hip_pitch_offset", "init_pitch_offset"]);
+  assert.ok(Math.abs(jauh.find((x) => x.key === "init_pitch_offset").selisih + 0.43) < 1e-9);
+  // Perubahan kecil tidak mengganggu operator dengan dialog.
+  assert.deepEqual(walkingPoseFarFromReference({ ...REF, init_pitch_offset: REF.init_pitch_offset - 0.05 }, REF), []);
+});
+
+test("acuan pose diterbitkan SEBELUM walking_module dinyalakan", () => {
+  // Kalau urutannya terbalik, biasnya menangkap nilai operator sendiri dan
+  // offsetnya meniadakan diri lagi -- persis bug "sesi 2 bentuknya balik".
+  const badan = badanFungsi(readFileSync(SUMBER, "utf8"), "initThenEnableWalking");
+  const acuan = badan.indexOf("publishWalkingPoseReference(");
+  const nyala = badan.indexOf('data: "walking_module"');
+  assert.ok(acuan !== -1, "acuan pose harus diterbitkan di sini");
+  assert.ok(nyala !== -1, "modul harus dinyalakan di sini");
+  assert.ok(acuan < nyala, "acuan WAJIB mendarat sebelum modul menyala");
+});
+
+test("Apply & Start menyalakan modul dulu, baru mengirim nilai operator", () => {
+  const badan = badanFungsi(readFileSync(SUMBER, "utf8"), "applyWalkingAndStart");
+  const nyala = badan.indexOf("initThenEnableWalking(");
+  const kirim = badan.indexOf("applyWalkingWithContext(");
+  assert.ok(nyala !== -1 && kirim !== -1);
+  assert.ok(nyala < kirim, "kalau nilai operator dikirim dulu, ia jadi acuannya sendiri");
+});
+
+test("Start mengirim ulang nilai operator sesudah acuan diterbitkan", () => {
+  // initThenEnableWalking menaruh ACUAN di runtime; tanpa kirim ulang, robot
+  // akan berjalan memakai acuan itu, bukan versi yang dipilih operator.
+  const badan = badanFungsi(readFileSync(SUMBER, "utf8"), "startWalkingNow");
+  const nyala = badan.indexOf("initThenEnableWalking(");
+  const kirim = badan.indexOf("applyWalkingWithContext(");
+  assert.ok(nyala !== -1 && kirim !== -1, "Start harus menyalakan modul dan mengirim nilainya");
+  assert.ok(nyala < kirim, "kirim ulang harus SESUDAH modul menyala");
+});

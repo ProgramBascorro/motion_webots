@@ -49,7 +49,7 @@ import RobotBlueprint from "./RobotBlueprint.jsx";
 import {
   parseWalkingNumber, WALKING_KEYS, WALKING_INT_FIELDS, WALKING_BOOL_FIELDS,
   parameterValuesEqual, parametersEqual, validateWalkingParams, applyWalkingDraft,
-  snapWalkingRuntime,
+  snapWalkingRuntime, WALKING_BIAS_FIELDS, walkingPoseFarFromReference,
 } from "./walkingParams.js";
 import {
   KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
@@ -2099,9 +2099,9 @@ export default function App() {
   const applyWalkingTuner = async (draft, baseline, start) => {
     let params;
     const successful = await runRobotOperation("walking", async (context) => {
+      if (start) await initThenEnableWalking(context, draft);
       params = await applyWalkingWithContext(context, draft, baseline);
       if (start) {
-        await initThenEnableWalking(context);
         context.check();
         sendWalkingCommand("start");
       }
@@ -2163,7 +2163,60 @@ export default function App() {
     return selesai;
   };
 
-  const initThenEnableWalking = async (context) => {
+  // ACUAN POSE DIPATOK SEBELUM MODUL DINYALAKAN.
+  //
+  // walking_bias_ direkam SEKALI, pada tick pertama sesudah walking_module
+  // diaktifkan (op3_walking_module.cpp:608-620):
+  //
+  //   walking_bias_ = pose_page_2 - neutral(nilai yang hidup saat itu)
+  //   pose robot    = walking_bias_ + neutral(nilai sekarang)
+  //                 = page 2 + neutral(sekarang) - neutral(saat direkam)
+  //
+  // Studio dulu mengirim parameter DULU baru menyalakan modul, jadi "saat
+  // direkam" == "sekarang" dan seluruh offset init saling meniadakan: sesi
+  // baru selalu berdiri persis di page 2, berapa pun angkanya. Di dalam satu
+  // sesi modulnya sudah menyala, jadi perubahan berikutnya terasa penuh.
+  // Akibatnya operator melihat "sesi 1 benar, sesi 2 bentuknya balik lagi",
+  // dan angkanya terus dinaikkan tiap sesi tanpa pernah menetap.
+  //
+  // Sekarang acuannya dipatok ke offset page 2 yang tetap (sama dengan yang
+  // dipakai tampilan Delta, dan sama dengan yang diterbitkan demo lewat
+  // publishPoseReference()). Dengan begitu neutral(saat direkam) selalu sama,
+  // jadi angka yang sama SELALU memberi bentuk yang sama -- di sesi mana pun.
+  const publishWalkingPoseReference = async (context, draft) => {
+    const payload = validateWalkingParams(draft);
+    for (const key of WALKING_BIAS_FIELDS) payload[key] = WALKING_POSE_REFERENCE.offsets[key];
+    for (let percobaan = 0; percobaan < 4; percobaan += 1) {
+      context.check();
+      walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
+      await context.wait(120);
+      context.check();
+      const runtime = await readWalkingRuntime(context);
+      if (WALKING_BIAS_FIELDS.every((key) => parameterValuesEqual(runtime[key], payload[key]))) {
+        console.info(`[APPLY] acuan pose dipatok sebelum modul menyala = ${JSON.stringify(
+          Object.fromEntries(WALKING_BIAS_FIELDS.map((key) => [key, payload[key]])))}`);
+        return;
+      }
+    }
+    throw new Error("Acuan pose belum mendarat di walking_module. Start dibatalkan supaya "
+      + "bentuk gerakannya tidak jadi acak seperti sebelum perbaikan acuan.");
+  };
+
+  // Nilai lama operator disetel saat offset init tidak pernah benar-benar
+  // terasa, jadi banyak yang sudah terlanjur jauh. Sekarang angka itu menggeser
+  // pose sepenuhnya -- tanyakan sekali sebelum robot bergerak.
+  const confirmWalkingPoseOffset = (draft) => {
+    const jauh = walkingPoseFarFromReference(draft, WALKING_POSE_REFERENCE.offsets);
+    if (!jauh.length) return true;
+    const daftar = jauh.map(({ key, selisih }) => `  ${key}: ${selisih > 0 ? "+" : ""}${Number(selisih.toPrecision(3))} dari page 2`).join("\n");
+    return window.confirm(
+      "Offset ini jauh dari page 2:\n" + daftar
+      + "\n\nSejak acuannya dipatok, angka ini benar-benar menggeser pose robot "
+      + "(sebelumnya tidak terasa di awal sesi). Robot bisa condong jauh.\n\n"
+      + "Pegang robot dulu. Lanjutkan?");
+  };
+
+  const initThenEnableWalking = async (context, draft = walkingParams) => {
     context.check();
     // TANPA SYARAT. torqueLimitActive cuma state React: hilang begitu halaman
     // dimuat ulang, sementara batasnya hidup di RAM servo sampai daya servo
@@ -2175,6 +2228,9 @@ export default function App() {
     context.check();
     if (!await walkingOwnsLegs(context)) {
       context.check();
+      // Harus mendarat SEBELUM modul menyala: biasnya direkam di tick pertama.
+      await publishWalkingPoseReference(context, draft);
+      context.check();
       walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "walking_module" }));
       await context.wait(WALKING_ENABLE_SETTLE_MS);
       if (!await walkingOwnsLegs(context)) throw new Error("Walking module belum menguasai semua sendi kaki; Start dibatalkan");
@@ -2182,21 +2238,34 @@ export default function App() {
     context.check();
   };
 
-  const applyWalkingAndStart = () => runRobotOperation("walking", async (context) => {
-    await applyWalkingWithContext(context);
-    await initThenEnableWalking(context);
-    context.check();
-    sendWalkingCommand("start", "Start dikirim setelah Apply dan modul walking terkonfirmasi");
-  });
+  // Urutannya dibalik: modul dinyalakan dengan ACUAN yang hidup, baru nilai
+  // operator dikirim. Kalau dibalik lagi, biasnya kembali menangkap nilai
+  // operator sendiri dan offsetnya meniadakan diri seperti dulu.
+  const applyWalkingAndStart = () => {
+    if (!confirmWalkingPoseOffset(walkingParams)) return undefined;
+    return runRobotOperation("walking", async (context) => {
+      await initThenEnableWalking(context);
+      await applyWalkingWithContext(context);
+      context.check();
+      sendWalkingCommand("start", "Start dikirim setelah acuan dipatok, Apply, dan modul walking terkonfirmasi");
+    });
+  };
 
-  const startWalkingNow = () => runRobotOperation("walking", async (context) => {
-    if (!walkingLoaded || walkingDirty) throw new Error("Load lalu Apply perubahan terlebih dahulu, atau gunakan Apply & Start");
-    const current = await readWalkingRuntime(context);
-    if (!parametersEqual(current, walkingParams, WALKING_KEYS)) throw new Error("Runtime berubah; Load ulang sebelum Start");
-    await initThenEnableWalking(context);
-    context.check();
-    sendWalkingCommand("start");
-  });
+  const startWalkingNow = (expected = walkingParams) => {
+    if (!confirmWalkingPoseOffset(expected)) return undefined;
+    return runRobotOperation("walking", async (context) => {
+      const current = await readWalkingRuntime(context);
+      if (!parametersEqual(current, expected, WALKING_KEYS)) {
+        throw new Error("Robot belum memakai nilai ini. Tekan Apply (atau Apply & Start) dulu.");
+      }
+      // Menyalakan modul menerbitkan ACUAN dulu, jadi runtime sempat berisi
+      // acuan itu -- nilai operator harus dikirim lagi sesudahnya.
+      await initThenEnableWalking(context, expected);
+      await applyWalkingWithContext(context, expected);
+      context.check();
+      sendWalkingCommand("start");
+    });
+  };
 
   // ===== SIM-ONLY walking pipeline =====
   // Publishes through the same rosbridge as the real-robot path, but on the
@@ -3111,7 +3180,7 @@ export default function App() {
             {/* Control group — runtime commands */}
             <div className="px-5 py-3 flex flex-wrap items-center gap-2">
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-1">Kontrol</span>
-              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={startWalkingNow} disabled={!rosConnected || walkingBusy} title="Mulai jalan dengan parameter yang sudah di-Apply">
+              <button className={`${walkingButtonBase} bg-green-50 text-green-700 border border-green-100 hover:bg-green-100`} onClick={() => startWalkingNow()} disabled={!rosConnected || walkingBusy} title="Mulai jalan dengan parameter yang sudah di-Apply">
                 <Play size={14} /> Start
               </button>
               <button className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`} onClick={() => sendWalkingCommand("stop")} disabled={!rosConnected} title="Berhenti jalan (parameter tetap aktif)">
