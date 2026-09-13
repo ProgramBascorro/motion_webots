@@ -21,6 +21,8 @@
  *      Author: zerom
  */
 
+#include <cmath>
+
 #include <yaml-cpp/yaml.h>
 #include "robotis_controller/robotis_controller.h"
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -1961,11 +1963,13 @@ void RobotisController::syncWriteItemCallback(const robotis_controller_msgs::msg
   for (int i = 0; i < msg->joint_name.size(); i++)
   {
     Device *device;
+    Dynamixel *dxl = NULL;
 
     auto d_it1 = robot_->dxls_.find(msg->joint_name[i]);
     if (d_it1 != robot_->dxls_.end())
     {
       device = d_it1->second;
+      dxl = d_it1->second;
     }
     else
     {
@@ -2000,6 +2004,69 @@ void RobotisController::syncWriteItemCallback(const robotis_controller_msgs::msg
       continue;
 
     queue_mutex_.lock();
+
+    // TORSI MENYALA TANPA LOMPATAN.
+    //
+    // Selagi torsi mati, goal_position_ berhenti di pose terakhir yang
+    // diperintahkan modul, sementara robot melorot ke tempat lain. Begitu
+    // torque_enable = 1 ditulis, register Goal Position servo MASIH berisi pose
+    // lama itu, dan nilainya TIDAK berubah -- servo hanya menghitung profil
+    // ketika Goal Position berubah, jadi tidak ada profil yang dibuat dan ia
+    // menarik ke sana dengan tenaga penuh. profile_velocity yang sudah dipasang
+    // Studio tepat sebelumnya sama sekali tidak berpengaruh di detik itu.
+    // Itulah "robot kaget / melompat ke suatu nilai".
+    //
+    // Jadi sebelum torsi menyala, tulis goal = posisi NYATA. Entri ini masuk
+    // antrean lebih dulu daripada torque_enable, dan direct_sync_write_ dikirim
+    // berurutan sesuai urutan masuk (lihat process()), jadi servo menyala
+    // sambil menahan tempatnya sendiri: nol lompatan.
+    //
+    // Siklus berikutnya modul mengirimkan pose lamanya lagi. Karena kali ini
+    // nilainya BERUBAH, servo membuat profil, dan perjalanan pulang ke pose itu
+    // mengikuti profile_velocity -- pelan dan halus sejak awal.
+    if (dxl != NULL && msg->value[i] == 1
+        && dxl->torque_enable_item_ != NULL && dxl->goal_position_item_ != NULL
+        && item->item_name_ == dxl->torque_enable_item_->item_name_)
+    {
+      const double present = dxl->dxl_state_->present_position_;
+
+      // Pembacaan yang rusak tidak boleh jadi perintah posisi. Kalau bulk read
+      // sedang kacau, lebih baik perilakunya seperti sebelum perbaikan ini
+      // daripada mengirim sudut ngawur ke 20 servo.
+      if (std::isfinite(present) && present >= dxl->min_radian_ && present <= dxl->max_radian_)
+      {
+        dxl->dxl_state_->goal_position_ = present;
+
+        const uint32_t pos_data =
+            dxl->convertRadian2Value(present + dxl->dxl_state_->position_offset_ * offset_ratio_);
+
+        int slot = 0;
+        for (slot = 0; slot < direct_sync_write_.size(); slot++)
+        {
+          if (direct_sync_write_[slot]->getPortHandler() == port
+              && direct_sync_write_[slot]->getPacketHandler() == packet_handler
+              && direct_sync_write_key_[slot].first == dxl->goal_position_item_->address_
+              && direct_sync_write_key_[slot].second == dxl->goal_position_item_->data_length_)
+            break;
+        }
+
+        if (slot == direct_sync_write_.size())
+        {
+          direct_sync_write_.push_back(new dynamixel::GroupSyncWrite(port, packet_handler,
+                                                                     dxl->goal_position_item_->address_,
+                                                                     dxl->goal_position_item_->data_length_));
+          direct_sync_write_key_.push_back(std::make_pair(dxl->goal_position_item_->address_,
+                                                          dxl->goal_position_item_->data_length_));
+        }
+
+        uint8_t goal_data[4] = { 0 };
+        goal_data[0] = DXL_LOBYTE(DXL_LOWORD(pos_data));
+        goal_data[1] = DXL_HIBYTE(DXL_LOWORD(pos_data));
+        goal_data[2] = DXL_LOBYTE(DXL_HIWORD(pos_data));
+        goal_data[3] = DXL_HIBYTE(DXL_HIWORD(pos_data));
+        direct_sync_write_[slot]->addParam(dxl->id_, goal_data);
+      }
+    }
 
     // Reuse an existing packet only when it targets the SAME register. Matching
     // on the port alone meant that two different items queued inside one control
