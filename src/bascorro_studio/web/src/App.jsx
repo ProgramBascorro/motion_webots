@@ -1327,6 +1327,18 @@ export default function App() {
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
   const torquePubRef = useRef(null);
+  // Daftar sendi CADANGAN, langsung dari robot.
+  //
+  // Torque ON/OFF dan batas kecepatannya dulu hanya memakai metrics.joint_names
+  // dari studio_agent. Begitu agent itu mati -- dan ia memang mati tiap boot
+  // karena NameError di studio_agent.py -- metrics jadi null, writeSyncItem()
+  // berhenti sebelum menerbitkan apa pun, dan tombol Torque cuma menjawab
+  // "Torque command unavailable". Batas kecepatan yang membuat torsi menyala
+  // dengan santai ikut tidak pernah terkirim. /robotis/present_joint_states
+  // datang dari robotis_controller sendiri, jadi selama robotnya hidup daftar
+  // ini ada.
+  const robotJointNamesRef = useRef(null);
+  const jointNameSubRef = useRef(null);
   const headModulePubRef = useRef(null);
   const walkingModulePubRef = useRef(null);
   const walkingModuleEnabledRef = useRef(false);
@@ -1579,6 +1591,19 @@ export default function App() {
         const payload = JSON.parse(msg.data);
         if (Array.isArray(payload.events)) setEvents(payload.events);
       } catch (e) { console.error(e); }
+    });
+
+    // Cuma untuk mengambil DAFTAR NAMA sendi, bukan sudutnya: 2 detik sekali
+    // sudah lebih dari cukup, dan rosbridge yang membatasi di sisi server.
+    jointNameSubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/present_joint_states",
+      messageType: "sensor_msgs/JointState",
+      throttle_rate: 2000,
+      queue_length: 1,
+    });
+    jointNameSubRef.current.subscribe((msg) => {
+      if (Array.isArray(msg.name) && msg.name.length) robotJointNamesRef.current = msg.name;
     });
 
     joySubRef.current = new ROSLIB.Topic({
@@ -2084,13 +2109,19 @@ export default function App() {
     return successful ? params : null;
   };
 
+  // Nama sendi dari studio_agent kalau ada, kalau tidak dari robot langsung.
+  const walkingJointNames = () => {
+    if (metrics?.joint_names?.length) return metrics.joint_names;
+    return robotJointNamesRef.current?.length ? robotJointNamesRef.current : null;
+  };
+
   const writeSyncItem = (itemName, value) => {
-    if (!rosRef.current?.isConnected || !torquePubRef.current || !metrics?.joint_names?.length) return false;
-    const values = metrics.joint_names.map(() => value);
+    const names = walkingJointNames();
+    if (!rosRef.current?.isConnected || !torquePubRef.current || !names) return false;
     torquePubRef.current.publish(new ROSLIB.Message({
       item_name: itemName,
-      joint_name: metrics.joint_names,
-      value: values,
+      joint_name: names,
+      value: names.map(() => value),
     }));
     return true;
   };
@@ -2532,8 +2563,8 @@ export default function App() {
 
   const handleTorque = (enable) => {
     cancelPendingMotion();
-    if (!torquePubRef.current || !metrics?.joint_names?.length) {
-      sendStatus("Torque command unavailable", true);
+    if (!torquePubRef.current || !walkingJointNames()) {
+      sendStatus("Torque belum bisa dikirim: daftar sendi robot belum terbaca", true);
       return;
     }
     if (!enable) {

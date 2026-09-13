@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import socket
@@ -270,7 +271,7 @@ class StudioAgent(Node):
 
     def _status_cb(self, msg: StatusMsg) -> None:
         self._mark_heartbeat("/robotis/status")
-        match = re.search(r"Present Volt\\s*:\\s*([0-9.]+)", msg.status_msg)
+        match = re.search(r"Present Volt\s*:\s*([0-9.]+)", msg.status_msg)
         if not match:
             return
         try:
