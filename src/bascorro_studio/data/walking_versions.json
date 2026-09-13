@@ -1,9 +1,9 @@
 {
   "format": "bascorro-studio/walking-versions",
   "formatVersion": 1,
-  "revision": 35,
-  "savedAt": "2026-09-11T18:51:36.856Z",
-  "activeVersionId": "9ec2a876-bfef-44f6-9696-f12f68fff40b",
+  "revision": 40,
+  "savedAt": "2026-09-13T12:45:42.118Z",
+  "activeVersionId": "471aacf7-fd22-48aa-95fb-00a3001dafbf",
   "ui": {
     "relativeDisplay": false
   },
@@ -12,7 +12,7 @@
       "id": "471aacf7-fd22-48aa-95fb-00a3001dafbf",
       "name": "JALAN MENUJU MEKKAH",
       "createdAt": 1788784920036,
-      "updatedAt": 1789152446002,
+      "updatedAt": 1789303542110,
       "params": {
         "init_x_offset": -0.039,
         "init_y_offset": 0.028,
