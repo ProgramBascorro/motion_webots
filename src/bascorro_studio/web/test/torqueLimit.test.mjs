@@ -104,3 +104,84 @@ test("Apply no longer refuses when the robot has not been read yet", () => {
   assert.match(badan, /baseline: baseline \?\? draft/,
     "draft dipakai sebagai baseline-nya sendiri saat belum ada pembacaan");
 });
+
+// ---------------------------------------------------------------------------
+// TORQUE ON MENAHAN DI TEMPAT (2026-09-13).
+//
+// Keluhan berurutan dari operator: Torque ON "melompat ke suatu nilai", lalu
+// sesudah percobaan perbaikan di controller "malah kecepatan dan servonya
+// mati". Akarnya: selagi torsi mati, goal controller berhenti di pose lama
+// sementara robot melorot, dan modul yang masih memegang sendi terus mengirim
+// pose lama itu. Menyalakan torsi berarti menarik robot ke sana -- cepat
+// (menyentak) atau pelan (beban penuh berkepanjangan -> overload).
+//
+// Urutan yang benar: batas kecepatan -> lepas modul (TUNGGU terkonfirmasi) ->
+// goal := posisi nyata -> torsi. Test di bawah menjaga urutan itu.
+const posisiDi = (badan, pola) => {
+  const m = badan.match(pola);
+  return m ? m.index : -1;
+};
+
+test("Torque ON: batas kecepatan, lepas modul, samakan goal, BARU torsi", () => {
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "handleTorque"));
+  const batas = posisiDi(badan, /\["profile_velocity",\s*preset\.velocity\]/);
+  const lepas = posisiDi(badan, /data:\s*"none"/);
+  const tunggu = posisiDi(badan, /waitForJointsReleased\(/);
+  const baca = posisiDi(badan, /readPresentJointsOnce\(/);
+  const goal = posisiDi(badan, /setJointStatesPubRef\.current\.publish\(/);
+  const torsi = posisiDi(badan, /writeSyncItem\("torque_enable",\s*1\)/);
+  for (const [nama, i] of Object.entries({ batas, lepas, tunggu, baca, goal, torsi })) {
+    assert.ok(i >= 0, `langkah "${nama}" hilang dari handleTorque`);
+  }
+  assert.ok(batas < lepas, "batas kecepatan dipasang sebelum apa pun bergerak");
+  assert.ok(lepas < tunggu, "pelepasan modul harus ditunggu, bukan ditebak dengan jeda");
+  assert.ok(tunggu < baca, "posisi dibaca SESUDAH tidak ada modul yang menimpa goal");
+  assert.ok(baca < goal, "goal diisi dari pembacaan yang baru");
+  assert.ok(goal < torsi, "torsi WAJIB menyala paling akhir, sesudah goal = posisi nyata");
+});
+
+test("Torque ON tidak menyalakan torsi di dalam urutan batas kecepatan", () => {
+  // Dulu torque_enable ikut dikirim bersama profile_velocity/acceleration, jadi
+  // torsi menyala sementara goal masih pose lama.
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "handleTorque"));
+  const batch = badan.match(/writeSyncItemsAwaited\(\[([\s\S]*?)\]\)/);
+  assert.ok(batch, "batas kecepatan harus dikirim lewat writeSyncItemsAwaited");
+  assert.doesNotMatch(batch[1], /torque_enable/, "torque_enable tidak boleh ada di urutan batas");
+  assert.equal((badan.match(/"torque_enable",\s*1/g) || []).length, 1, "torsi dinyalakan tepat SATU kali");
+});
+
+test("Torque ON batal TANPA menyalakan torsi kalau pelepasan atau pembacaan gagal", () => {
+  // Menyalakan torsi dengan goal lama adalah persis sentakan yang dihindari, jadi
+  // kegagalan di tengah jalan harus berhenti sebelum torque_enable.
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "handleTorque"));
+  const torsi = posisiDi(badan, /writeSyncItem\("torque_enable",\s*1\)/);
+  const cekLepas = posisiDi(badan, /if \(!await waitForJointsReleased\([^)]*\)\) \{[\s\S]*?return;/);
+  const cekBaca = posisiDi(badan, /if \(!posisi\) \{[\s\S]*?return;/);
+  assert.ok(cekLepas >= 0 && cekLepas < torsi, "gagal melepas modul harus keluar sebelum torsi");
+  assert.ok(cekBaca >= 0 && cekBaca < torsi, "gagal membaca posisi harus keluar sebelum torsi");
+});
+
+test("pelepasan modul dianggap selesai hanya kalau SEMUA sendi 'none'", () => {
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "waitForJointsReleased"));
+  assert.match(badan, /modul\.length === names\.length/, "jumlah sendi yang menjawab harus lengkap");
+  assert.match(badan, /modul\.every\(\(nama\) => nama === "none"\)/, "setiap sendi wajib 'none'");
+  assert.match(badan, /MODULE_RELEASE_TIMEOUT_MS/, "harus ada batas waktu, bukan menunggu selamanya");
+});
+
+test("posisi untuk goal dibaca SEGAR, bukan dari snapshot langganan 2 detik", () => {
+  const teks = readFileSync(SUMBER, "utf8");
+  const baca = tanpaKomentar(badanFungsi(teks, "readPresentJointsOnce"));
+  assert.match(baca, /\/robotis\/present_joint_states/);
+  assert.doesNotMatch(baca, /throttle_rate/, "pembacaan untuk goal tidak boleh dibatasi laju");
+  const torsi = tanpaKomentar(badanFungsi(teks, "handleTorque"));
+  assert.doesNotMatch(torsi, /robotJointNamesRef\.current\s*\)?\s*\.?position/,
+    "snapshot nama sendi tidak boleh dipakai sebagai sumber posisi");
+});
+
+test("Torque OFF tetap satu tulisan torque_enable 0 (sudah benar menurut operator)", () => {
+  const badan = tanpaKomentar(badanFungsi(readFileSync(SUMBER, "utf8"), "handleTorque"));
+  const off = badan.match(/if \(!enable\) \{([\s\S]*?)\n    \}/);
+  assert.ok(off, "cabang Torque OFF harus ada");
+  assert.match(off[1], /writeSyncItem\("torque_enable",\s*0\)/);
+  assert.doesNotMatch(off[1], /"none"|setJointStates|profile_/, "Torque OFF tidak boleh ikut berubah");
+});

@@ -109,6 +109,15 @@ const WALKING_READY_PLAY_MS = 1800;
 // Time for op3_manager to load the walking_module control_module before we
 // publish "start"; otherwise the start command is dropped silently.
 const WALKING_ENABLE_SETTLE_MS = 1200;
+// Torque ON: melepas modul menunggu modul yang sedang berjalan BERHENTI dulu
+// (setCtrlModuleThread: while isRunning -> usleep), jadi lamanya tidak tetap --
+// sampai sekitar satu langkah kalau robot sedang berjalan. Ditunggu sampai
+// terkonfirmasi lewat layanan, bukan ditebak dengan jeda.
+const MODULE_RELEASE_TIMEOUT_MS = 5000;
+const MODULE_RELEASE_POLL_MS = 150;
+// Sesudah goal disamakan: beberapa siklus kontrol 8 ms supaya nilai barunya
+// sudah terkirim ke servo sebelum torsi dinyalakan.
+const GOAL_SYNC_SETTLE_MS = 80;
 const WALKING_LEG_JOINTS = [
   "r_hip_yaw", "l_hip_yaw", "r_hip_roll", "l_hip_roll", "r_hip_pitch", "l_hip_pitch",
   "r_knee", "l_knee", "r_ank_pitch", "l_ank_pitch", "r_ank_roll", "l_ank_roll",
@@ -1339,6 +1348,7 @@ export default function App() {
   // ini ada.
   const robotJointNamesRef = useRef(null);
   const jointNameSubRef = useRef(null);
+  const setJointStatesPubRef = useRef(null);
   const headModulePubRef = useRef(null);
   const walkingModulePubRef = useRef(null);
   const walkingModuleEnabledRef = useRef(false);
@@ -1668,6 +1678,16 @@ export default function App() {
       ros,
       name: "/robotis/enable_ctrl_module",
       messageType: "std_msgs/String",
+    });
+
+    // Menyetel goal_position_ controller langsung, dalam RADIAN -- controller
+    // yang mengubahnya ke satuan servo berikut offset per sendi. Hanya
+    // berpengaruh pada sendi yang modulnya "none" (robotis_controller.cpp:2082),
+    // dan itu memang keadaan yang dipakai Torque ON di bawah.
+    setJointStatesPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/set_joint_states",
+      messageType: "sensor_msgs/JointState",
     });
 
     yoloSetServiceRef.current = new ROSLIB.Service({
@@ -2630,9 +2650,107 @@ export default function App() {
     sendWalkingCommand("stop", "Soft Stop Sent");
   };
 
-  const handleTorque = (enable) => {
+  // SATU pembacaan SEGAR posisi sendi.
+  //
+  // Langganan daftar nama dibatasi 2 detik, dan snapshot seumur itu tidak boleh
+  // dipakai di sini: kalau operator baru saja menggeser robot dengan tangan,
+  // goal akan diisi pose dua detik lalu dan robot menyentak ke sana -- persis
+  // yang sedang dihindari.
+  const readPresentJointsOnce = (timeoutMs = 2000) => new Promise((resolve) => {
+    const ros = rosRef.current;
+    if (!ros?.isConnected) {
+      resolve(null);
+      return;
+    }
+    const topic = new ROSLIB.Topic({
+      ros, name: "/robotis/present_joint_states",
+      messageType: "sensor_msgs/JointState", queue_length: 1,
+    });
+    let selesai = false;
+    const tutup = (nilai) => {
+      if (selesai) return;
+      selesai = true;
+      try { topic.unsubscribe(); } catch { /* sudah lepas */ }
+      resolve(nilai);
+    };
+    topic.subscribe((msg) => {
+      if (Array.isArray(msg.name) && msg.name.length === msg.position?.length) {
+        tutup({ name: msg.name, position: msg.position });
+      }
+    });
+    window.setTimeout(() => tutup(null), timeoutMs);
+  });
+
+  const writeSyncItemsAwaited = (items) => new Promise((resolve) => {
+    writeSyncItemsSequential(items, resolve);
+  });
+
+  // TORQUE ON = MENAHAN DI TEMPAT, bukan kembali ke pose lama.
+  //
+  // Selagi torsi mati, goal_position_ berhenti di pose terakhir yang
+  // diperintahkan modul sementara robot melorot / digeser tangan. Apa pun yang
+  // menutup jarak itu sesudah torsi menyala pasti bermasalah:
+  //   - dibiarkan cepat  -> robot menyentak (keluhan awal operator);
+  //   - diperlambat      -> servo menahan beban penuh jauh LEBIH LAMA saat kaki
+  //                         mentok lantai, dan overload shutdown justru dipicu
+  //                         oleh torsi tinggi yang BERKEPANJANGAN -- servo mati.
+  //
+  // Jadi jaraknya tidak ditutup dengan menggerakkan robot, melainkan dengan
+  // memindahkan GOAL-nya ke robot:
+  //   1. lepas kepemilikan modul ("none") supaya tidak ada yang menimpa goal;
+  //   2. goal := posisi NYATA yang baru dibaca (controller yang mengonversi);
+  //   3. pasang batas kecepatan untuk gerakan BERIKUTNYA;
+  //   4. baru torsi dinyalakan.
+  // Torsi menyala sambil menahan tempatnya sendiri: nol sentakan, nol beban
+  // berkepanjangan. Untuk berdiri, operator menekan Walking Ready seperti biasa
+  // -- itu memainkan trayektori page 2 yang memang halus.
+  // Menunggu sampai SEMUA sendi benar-benar dilepas ke "none". Tanpa ini
+  // set_joint_states diabaikan untuk sendi yang masih dipegang modul
+  // (robotis_controller.cpp:2082 hanya menerima sendi "none"), dan sendi itu
+  // tetap membawa goal lama saat torsi menyala.
+  const waitForJointsReleased = async (names, dibatalkan) => {
+    const batas = Date.now() + MODULE_RELEASE_TIMEOUT_MS;
+    while (Date.now() < batas) {
+      if (dibatalkan()) return false;
+      try {
+        const hasil = await callRosService(walkingModuleGetRef.current, { joint_name: names }, { timeoutMs: 2000 });
+        const modul = hasil?.module_name || [];
+        if (modul.length === names.length && modul.every((nama) => nama === "none")) return true;
+      } catch {
+        // Layanan belum menjawab; coba lagi sampai batas waktu.
+      }
+      await new Promise((r) => window.setTimeout(r, MODULE_RELEASE_POLL_MS));
+    }
+    return false;
+  };
+
+  // TORQUE ON = MENAHAN DI TEMPAT, bukan kembali ke pose lama.
+  //
+  // Selagi torsi mati, goal_position_ controller berhenti di pose terakhir
+  // modul, sementara robot melorot atau digeser tangan. Apa pun yang menutup
+  // jarak itu dengan MENGGERAKKAN robot sesudah torsi menyala pasti buruk:
+  //   - dibiarkan cepat -> robot menyentak ke "suatu nilai tertentu";
+  //   - diperlambat     -> servo menahan beban penuh jauh lebih lama sambil
+  //                        mengangkat badan, dan justru torsi tinggi yang
+  //                        BERKEPANJANGAN itu yang memicu overload shutdown.
+  // Jalur lama juga membawa modul yang masih memegang sendi mengirim pose
+  // lamanya tiap 8 ms, jadi servo langsung ditarik ke sana.
+  //
+  // Jaraknya ditutup dengan memindahkan GOAL ke robot, bukan robot ke goal:
+  //   1. batas kecepatan dipasang dulu (RAM, aman saat torsi mati) untuk
+  //      gerakan BERIKUTNYA;
+  //   2. semua modul dilepas ke "none" dan DITUNGGU sampai terkonfirmasi,
+  //      supaya tidak ada yang menimpa goal lagi;
+  //   3. goal := posisi NYATA yang baru dibaca (bukan snapshot 2 detik);
+  //   4. baru torsi dinyalakan.
+  // Robot mengeras di tempatnya sendiri: nol sentakan, nol beban berkepanjangan.
+  // Karena dxl_state_->goal_position_ ikut jadi posisi nyata, Init Pose
+  // sesudahnya juga mulai dari sana (action_module mengambil titik awalnya dari
+  // situ, action_module.cpp:97/274), bukan dari pose lama.
+  const handleTorque = async (enable) => {
     cancelPendingMotion();
-    if (!torquePubRef.current || !walkingJointNames()) {
+    const names = walkingJointNames();
+    if (!torquePubRef.current || !names) {
       sendStatus("Torque belum bisa dikirim: daftar sendi robot belum terbaca", true);
       return;
     }
@@ -2641,20 +2759,47 @@ export default function App() {
       sendStatus("Torque OFF");
       return;
     }
+    if (!walkingModulePubRef.current || !setJointStatesPubRef.current || !walkingModuleGetRef.current) {
+      sendStatus("Torque ON dibatalkan: kanal modul/joint state belum siap", true);
+      return;
+    }
     const preset = TORQUE_SPEED_PRESETS.find(p => p.key === torqueSpeedKey) || TORQUE_SPEED_PRESETS[1];
-    writeSyncItemsSequential(
-      [
-        ["profile_velocity", preset.velocity],
-        ["profile_acceleration", preset.accel],
-        ["torque_enable", 1],
-      ],
-      () => {
-        setTorqueLimitActive(true);
-        sendStatus(
-          `Torque ON (${preset.label}, ~${preset.approxDegPerSec} deg/s) — batas tetap terpasang sampai dilepas`
-        );
+    const urutan = motionSequenceRef.current;
+    const dibatalkan = () => urutan !== motionSequenceRef.current || !rosRef.current?.isConnected;
+
+    sendStatus("Torque ON: memasang batas kecepatan dan menyamakan posisi…");
+    const batasTerpasang = await writeSyncItemsAwaited([
+      ["profile_velocity", preset.velocity],
+      ["profile_acceleration", preset.accel],
+    ]);
+    if (!batasTerpasang || dibatalkan()) return;
+
+    walkingModuleEnabledRef.current = false;
+    walkingModulePubRef.current.publish(new ROSLIB.Message({ data: "none" }));
+    if (!await waitForJointsReleased(names, dibatalkan)) {
+      if (!dibatalkan()) {
+        sendStatus("Torque ON dibatalkan: modul belum melepas semua sendi, torsi TIDAK dinyalakan supaya robot tidak menyentak", true);
       }
-    );
+      return;
+    }
+
+    const posisi = await readPresentJointsOnce();
+    if (dibatalkan()) return;
+    if (!posisi) {
+      sendStatus("Torque ON dibatalkan: posisi sendi tidak terbaca, torsi TIDAK dinyalakan supaya robot tidak menyentak", true);
+      return;
+    }
+    setJointStatesPubRef.current.publish(new ROSLIB.Message({
+      name: posisi.name, position: posisi.position, velocity: [], effort: [],
+    }));
+    await new Promise((r) => window.setTimeout(r, GOAL_SYNC_SETTLE_MS));
+    if (dibatalkan()) return;
+
+    writeSyncItem("torque_enable", 1);
+    setTorqueLimitActive(true);
+    sendStatus(`Torque ON — robot menahan posisinya sendiri, tanpa menyentak. `
+      + `Batas ${preset.label} (~${preset.approxDegPerSec} deg/s) terpasang untuk gerakan berikutnya. `
+      + `Tekan Init Pose untuk berdiri.`);
   };
 
   // Dipasang ULANG tepat sebelum gerakan yang dimulai dari Studio, bukan
