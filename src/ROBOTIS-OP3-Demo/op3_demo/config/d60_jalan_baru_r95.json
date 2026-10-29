@@ -1,0 +1,48 @@
+{
+  "format": "bascorro-studio/walking-versions",
+  "formatVersion": 1,
+  "revision": 123,
+  "savedAt": "2026-10-29T15:55:31.565Z",
+  "activeVersionId": "aa26f1e7-8bb1-4c0e-bbe1-1ce67edd6aa8",
+  "ui": {},
+  "versions": [
+    {
+      "id": "aa26f1e7-8bb1-4c0e-bbe1-1ce67edd6aa8",
+      "name": "JALAN BARU",
+      "createdAt": 1789753062104,
+      "updatedAt": 1793289107068,
+      "params": {
+        "init_x_offset": 0.0163,
+        "init_y_offset": 0.025,
+        "init_z_offset": 0.042,
+        "init_roll_offset": 0,
+        "init_pitch_offset": 0.0138,
+        "init_yaw_offset": 0,
+        "period_time": 0.65,
+        "dsp_ratio": 0.18,
+        "step_fb_ratio": 0.25,
+        "soft_start_time": 0.65,
+        "x_move_amplitude": 0.013,
+        "y_move_amplitude": 0.003,
+        "z_move_amplitude": 0.05,
+        "angle_move_amplitude": -0.015,
+        "angle_move_amplitude_turn_in": 0,
+        "move_aim_on": false,
+        "balance_enable": false,
+        "balance_hip_roll_gain": 0.35,
+        "balance_knee_gain": 0.4,
+        "balance_ankle_roll_gain": 0.7,
+        "balance_ankle_pitch_gain": 0.9,
+        "y_swap_amplitude": 0,
+        "z_swap_amplitude": 0,
+        "arm_swing_gain": 0,
+        "pelvis_offset": 0.08,
+        "hip_pitch_offset": 0.19,
+        "p_gain": 36,
+        "i_gain": 0,
+        "d_gain": 0
+      }
+    }
+  ],
+  "poseReferenceId": "page2-ef907cce549f"
+}
