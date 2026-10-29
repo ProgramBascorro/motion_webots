@@ -18,6 +18,7 @@ import {
   X,
   ScrollText,
   BicepsFlexed,
+  Brain,
   Footprints,
   Gamepad2,
   Crosshair,
@@ -35,6 +36,7 @@ import ActionEditor from "./ActionEditor.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
+import RlTrainingPage from "./RlTrainingPage.jsx";
 import WalkingSimPreview from "./WalkingSimPreview.jsx";
 import WalkingOffsetInput from "./WalkingOffsetInput.jsx";
 import {
@@ -1171,6 +1173,7 @@ const STUDIO_PAGE_DETAILS = {
   vision: { title: "Vision", description: "Pantau kamera dan hasil deteksi objek.", group: "Monitor" },
   tuning: { title: "Tuning", description: "Sesuaikan offset sendi dan kontrol robot.", group: "Kontrol robot" },
   walking: { title: "Walking", description: "Kelola preset, periksa parameter, dan atur langkah robot.", group: "Kontrol robot" },
+  rl: { title: "RL Training", description: "Latih parameter walking di robot asli dengan penilaian operator.", group: "Kontrol robot" },
   tendangan: { title: "Tendangan", description: "Periksa posisi bola dan parameter kesiapan tendangan.", group: "Kontrol robot" },
   demo: { title: "Demo", description: "Pilih mode dan kendalikan rangkaian demo robot.", group: "Kontrol robot" },
   teleop: { title: "Teleop", description: "Kendali gerakan dan pemantauan input joystick.", group: "Kontrol robot" },
@@ -2346,6 +2349,17 @@ export default function App() {
     sendStatus("Walking module terkonfirmasi aktif; Start belum dikirim");
   });
 
+  // Tab RL Training: urutan yang sama dengan Apply & Start (page 2 -> acuan
+  // dipatok -> modul), dengan stance percobaan sebagai draft. runRobotOperation
+  // menolak diam-diam kalau operasi walking lain masih jalan, jadi dikatakan di sini.
+  const enableWalkingForRl = (stance) => {
+    if (walkingOperationRef.current) {
+      sendStatus("RL: operasi walking lain masih berjalan; tunggu selesai", true);
+      return Promise.resolve(false);
+    }
+    return runRobotOperation("walking", (context) => initThenEnableWalking(context, stance));
+  };
+
   const applyWalkingPreset = (preset) => {
     if (walkingOperationRef.current) return;
     const presetParams = {
@@ -3101,6 +3115,14 @@ export default function App() {
           >
             <Footprints size={20} className={activeTab === "walking" ? "text-accent-yellow" : ""} />
             <span>Walking</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "rl" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("rl"); setSidebarOpen(false); }}
+            aria-current={activeTab === "rl" ? "page" : undefined}
+          >
+            <Brain size={20} className={activeTab === "rl" ? "text-accent-yellow" : ""} />
+            <span>RL Training</span>
           </button>
           <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "tendangan" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
@@ -5101,6 +5123,19 @@ export default function App() {
           </div>
           <div className={activeTab === "walking" ? "h-full" : "hidden"}>
             {renderWalking()}
+          </div>
+          <div className={activeTab === "rl" ? "h-full" : "hidden"}>
+            <RlTrainingPage
+              ros={rosRef.current}
+              rosState={rosState}
+              sendStatus={sendStatus}
+              studioParams={walkingParams}
+              studioVersionName={walkingVersions.find((v) => v.id === activeWalkingVersionId)?.name || ""}
+              walkingVersions={walkingVersions}
+              normalizeParams={normalizeWalkingParams}
+              enableWalking={enableWalkingForRl}
+              cancelWalking={cancelPendingMotion}
+            />
           </div>
           <div className={activeTab === "tendangan" ? "h-full" : "hidden"}>
             {renderKick()}

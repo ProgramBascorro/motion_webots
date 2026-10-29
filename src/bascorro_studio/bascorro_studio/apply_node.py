@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Dict, Tuple
 
 import rclpy
@@ -165,6 +166,12 @@ class ActionWebNode(Node):
                 self.publish_result(result)
             elif action == "delete":
                 self.delete_bin(target, request_id)
+            elif action == "rl_get":
+                self.rl_get(request_id)
+            elif action == "rl_add_trial":
+                self.rl_add_trial(payload.get("trial"), request_id)
+            elif action == "rl_delete_trial":
+                self.rl_delete_trial(payload.get("id"), request_id)
             else:
                 self.publish_result(
                     {
@@ -337,6 +344,76 @@ class ActionWebNode(Node):
             return {"ok": True, "bins": bins, "active": active}
         except OSError as exc:
             return {"ok": False, "bins": [], "active": active, "message": f"List error: {exc}"}
+
+    #-- RL Training (tab "RL Training" di Studio) ------------------------------
+    # Tiap percobaan yang sudah dinilai operator disimpan di robot, bukan di
+    # localStorage (localStorage dipisah per origin -- lihat walking_versions).
+    # Satu berkas untuk semua sesi; nomor percobaan dihitung per sesi DI SINI,
+    # jadi dua peramban yang terbuka bersamaan tidak memberi nomor kembar.
+    # Percobaan lama dari menu Training masuk lewat scripts/rl_impor_training.py.
+    def rl_path(self) -> str:
+        ws = os.environ.get("OP3_WS", "/ros2_ws")
+        return os.path.join(ws, "rl_runs", "studio", "trials.json")
+
+    def rl_load(self) -> list:
+        try:
+            with open(self.rl_path(), "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return []
+        trials = data.get("trials") if isinstance(data, dict) else None
+        return trials if isinstance(trials, list) else []
+
+    def rl_save(self, trials: list) -> None:
+        path = self.rl_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"trials": trials}, handle, indent=2)
+        os.replace(tmp, path)
+
+    def rl_get(self, request_id=None) -> None:
+        self.publish_result(
+            {"ok": True, "action": "rl_get", "trials": self.rl_load(), "path": self.rl_path(),
+             "request_id": request_id}
+        )
+
+    def rl_add_trial(self, trial, request_id=None) -> None:
+        if not isinstance(trial, dict) or not isinstance(trial.get("params"), dict):
+            self.publish_result({"ok": False, "action": "rl_add_trial",
+                                 "message": "trial harus berisi params", "request_id": request_id})
+            return
+        trials = self.rl_load()
+        session = str(trial.get("session") or "default")
+        trial["session"] = session
+        trial["no"] = 1 + max((int(t.get("no", 0)) for t in trials if t.get("session") == session),
+                              default=0)
+        trial.setdefault("at", int(time.time() * 1000))
+        trials.append(trial)
+        try:
+            self.rl_save(trials)
+        except OSError as exc:
+            self.publish_result({"ok": False, "action": "rl_add_trial",
+                                 "message": f"Write error: {exc}", "request_id": request_id})
+            return
+        self.publish_result({"ok": True, "action": "rl_add_trial", "trial": trial,
+                             "trials": trials, "request_id": request_id})
+
+    def rl_delete_trial(self, trial_id, request_id=None) -> None:
+        trials = self.rl_load()
+        kept = [t for t in trials if t.get("id") != trial_id]
+        if len(kept) == len(trials):
+            self.publish_result({"ok": False, "action": "rl_delete_trial",
+                                 "message": "percobaan tidak ditemukan", "request_id": request_id})
+            return
+        try:
+            self.rl_save(kept)
+        except OSError as exc:
+            self.publish_result({"ok": False, "action": "rl_delete_trial",
+                                 "message": f"Write error: {exc}", "request_id": request_id})
+            return
+        self.publish_result({"ok": True, "action": "rl_delete_trial", "trials": kept,
+                             "request_id": request_id})
 
     def delete_bin(self, target, request_id=None) -> None:
         path, err = self.resolve_target(target, must_exist=True)
