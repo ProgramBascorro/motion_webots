@@ -155,15 +155,59 @@ def _launch_setup(context, *args, **kwargs):
     # usb_cam membuka perangkat (OnProcessStart + jeda) supaya setelan kita
     # yang mendarat terakhir; `|| true` supaya kamera yang tidak punya kontrol
     # ini tidak menggagalkan launch.
+    #
+    # --- auto-exposure: FIRMWARE, bukan perangkat lunak (terukur 2026-11-02) --
+    # Sudah dicoba mengatur pajan+gain sendiri (auto_exposure=1, manual) dengan
+    # node pengendali. DIBATALKAN karena kamera ini dalam mode manual jauh lebih
+    # gelap: di lab yang sama, pajan 40 ms + gain 255 cuma luma 82, sedangkan AE
+    # firmware di pajan 40 ms memberi luma 110-115 TANPA gain. Firmware memakai
+    # penguat internal yang tidak terekspos sebagai kontrol V4L2; `gain`
+    # diabaikan sama sekali selama AE hidup (0..255 -> luma 114-116, pajan
+    # tetap). Pajan manual juga cuma punya ~3 tingkat nyata (10/20/40 ms).
+    #
+    # Jadi kenop trade-off yang BENAR-BENAR dipatuhi kamera ini cuma dua:
+    #
+    # 1. power_line_frequency=1 (50 Hz, listrik PLN). Bawaannya 2 (60 Hz) --
+    #    salah untuk Indonesia: lampu TL/LED berkedip 100 Hz, dan pajan yang
+    #    bukan kelipatan 10 ms memberi pita gelap-terang + kecerahan naik-turun
+    #    antar-frame. Dengan 50 Hz, AE mengunci pajan ke kelipatan 10 ms
+    #    (terukur: 41,6 -> 39,9 ms di 24 FPS, luma 115 -> 110).
+    #
+    # 2. framerate di camera_param.yaml = BATAS PAJAN = batas blur. Terukur
+    #    di lab (AE firmware + 50 Hz + exposure_dynamic_framerate=0):
+    #        20 FPS -> pajan 50 ms, luma 120
+    #        24 FPS -> pajan 40 ms, luma 114   <- dipakai
+    #        30 FPS -> pajan 30 ms, luma 101
+    #    Firmware menebus pajan pendek dengan penguat internalnya, jadi 30 FPS
+    #    cuma sedikit lebih gelap tapi blurnya 25% lebih pendek. Pilih dengan
+    #    ukuran deteksi, bukan dengan mata: scripts/sweep_camera_fps.py.
+    #
+    # auto_exposure=3 dipasang EKSPLISIT karena op3_camera_setting_tool (opsional)
+    # bisa meninggalkan kamera di mode manual, dan usb_cam 0.8.1 memakai nama
+    # kontrol lama (exposure_auto) sehingga `autoexposure: true` di
+    # camera_param.yaml tidak sampai ke kamera kernel 6.x.
+    #
+    # Tiap kontrol satu panggilan v4l2-ctl: dalam SATU panggilan, satu kontrol
+    # yang ditolak (EACCES karena "inactive") menggagalkan semuanya.
     camera_device = LaunchConfiguration('camera_device').perform(context)
+    power_line = LaunchConfiguration('power_line_frequency').perform(context)
+    camera_controls = [
+        'auto_exposure=3',
+        'exposure_dynamic_framerate=0',
+        'power_line_frequency=%s' % power_line,
+    ]
+    tune_script = ' ; '.join(
+        'v4l2-ctl -d {dev} -c {c} || echo "[kamera] GAGAL menyetel {c}"'
+        .format(dev=camera_device, c=c) for c in camera_controls)
+    tune_script += (' ; echo "[kamera] AE firmware, rem laju dilepas, '
+                    'anti-flicker power_line_frequency=%s: $(v4l2-ctl -d %s '
+                    '-C exposure_time_absolute 2>/dev/null)"'
+                    % (power_line, camera_device))
     uncap_fps = RegisterEventHandler(
         OnProcessStart(
             target_action=usb_cam_node,
             on_start=[TimerAction(period=2.0, actions=[ExecuteProcess(
-                cmd=['bash', '-c',
-                     'v4l2-ctl -d %s -c exposure_dynamic_framerate=0 '
-                     '&& echo "[kamera] rem laju dilepas '
-                     '(exposure_dynamic_framerate=0)" || true' % camera_device],
+                cmd=['bash', '-c', tune_script + ' ; true'],
                 output='screen',
             )])],
         ),
@@ -183,10 +227,17 @@ def generate_launch_description():
             description='Image topic the detector subscribes to (image_in).'),
         DeclareLaunchArgument(
             'camera_device', default_value='/dev/video0',
-            description='V4L2 device the frame-rate uncap (v4l2-ctl '
-                        'exposure_dynamic_framerate=0) is applied to. Must '
+            description='V4L2 device the exposure settings (v4l2-ctl '
+                        'auto_exposure / exposure_dynamic_framerate / '
+                        'power_line_frequency) are applied to. Must '
                         'match video_device in camera_param.yaml. Only used '
                         'when use_usb_cam is true.'),
+        DeclareLaunchArgument(
+            'power_line_frequency', default_value='1',
+            description='Anti-flicker for the firmware auto-exposure: 1 = '
+                        '50 Hz (PLN mains, the default), 2 = 60 Hz, 0 = off. '
+                        'With 50 Hz the AE locks exposure to multiples of '
+                        '10 ms so fluorescent/LED lights do not band.'),
         # The next three default to "" = use whatever the OpenVINO YAML says.
         # Pass a value only to override the YAML for this run.
         DeclareLaunchArgument(

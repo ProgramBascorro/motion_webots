@@ -245,10 +245,11 @@ report_camera_exposure() {
     warn "v4l2-ctl tidak ada di host; lewati pemeriksaan pajan kamera"
     return 0
   fi
-  local dyn exp gain
+  local dyn exp ae plf
+  ae="$(v4l2-ctl -d "$dev" -C auto_exposure 2>/dev/null | awk '{print $2}')"
+  plf="$(v4l2-ctl -d "$dev" -C power_line_frequency 2>/dev/null | awk '{print $2}')"
   dyn="$(v4l2-ctl -d "$dev" -C exposure_dynamic_framerate 2>/dev/null | awk '{print $2}')"
   exp="$(v4l2-ctl -d "$dev" -C exposure_time_absolute 2>/dev/null | awk '{print $2}')"
-  gain="$(v4l2-ctl -d "$dev" -C gain 2>/dev/null | awk '{print $2}')"
 
   if [ -n "$exp" ] && [ "$exp" -gt 0 ] 2>/dev/null; then
     # exposure_time_absolute satuannya 100 us.
@@ -266,10 +267,25 @@ report_camera_exposure() {
     *) warn "exposure_dynamic_framerate tidak terbaca (kamera mungkin tidak punya kontrol ini)" ;;
   esac
 
-  if [ "$gain" = "255" ]; then
-    warn "gain = 255 (MENTOK) -- sensor tak punya cadangan cahaya lagi;"
-    warn "memperpendek pajan pasti menggelapkan gambar. Tambah penerangan lapangan."
-  fi
+  # Mode manual di kamera ini jauh lebih gelap daripada AE firmware (40 ms +
+  # gain 255 = luma 82 vs AE 110-115, terukur 2026-11-02) -- lihat komentar
+  # di launch/yolo_ball_detector_openvino.launch.py.
+  case "$ae" in
+    3) ok "auto_exposure = 3 (AE firmware)" ;;
+    1) bad "auto_exposure = 1 (MANUAL) -- gambar jauh lebih gelap daripada AE firmware."
+       bad "  v4l2-ctl -d $dev -c auto_exposure=3   (launch detektor juga menyetelnya)" ;;
+    *) warn "auto_exposure tidak terbaca" ;;
+  esac
+  # Listrik PLN 50 Hz: lampu berkedip 100 Hz. 60 Hz (bawaan kamera) = pajan
+  # bukan kelipatan 10 ms = pita gelap-terang dan kecerahan naik-turun.
+  case "$plf" in
+    1) ok "power_line_frequency = 1 (50 Hz, cocok dengan listrik PLN)" ;;
+    2) warn "power_line_frequency = 2 (60 Hz) -- salah untuk listrik 50 Hz; launch detektor menyetelnya ke 1."
+       warn "  v4l2-ctl -d $dev -c power_line_frequency=1" ;;
+    0) warn "power_line_frequency = 0 (anti-flicker MATI)" ;;
+  esac
+  # Catatan: gain DIABAIKAN selama AE firmware hidup, jadi angkanya di sini
+  # tidak berarti apa-apa kecuali dalam mode manual.
 }
 
 cmd_doctor() {

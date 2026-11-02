@@ -52,6 +52,16 @@
       # launch/yolo_ball_detector_openvino.launch.py lewat
       # `v4l2-ctl -c exposure_dynamic_framerate=0`. Tanpa itu, angka di sini
       # cuma PERMINTAAN: kamera tetap boleh memperlambat diri jadi 15 FPS.
+      #
+      # 2026-11-02: angka di atas DIUKUR ULANG dengan AE firmware + anti-flicker
+      # 50 Hz (power_line_frequency=1, dipasang launch). Firmware menebus pajan
+      # pendek dengan penguat internal, jadi harganya jauh lebih kecil daripada
+      # tebakan -0,68 EV di atas:
+      #   20 FPS -> pajan 50 ms, luma 120
+      #   24 FPS -> pajan 40 ms, luma 114
+      #   30 FPS -> pajan 30 ms, luma 101   (blur 25% lebih pendek)
+      # Bandingkan pada deteksi bola sungguhan sebelum mengganti angka ini:
+      #   scripts/sweep_camera_fps.py
       image_width: 640
       image_height: 360
       camera_name: "camera"
@@ -60,9 +70,16 @@
       contrast: -1
       saturation: -1
       sharpness: -1
+      # gain DIABAIKAN kamera selama auto-exposure hidup (terukur 0..255 ->
+      # luma sama, pajan sama); firmware memakai penguat internalnya sendiri.
       gain: -1
       auto_white_balance: true
       white_balance: 4000
+      # autoexposure/exposure praktis NO-OP: usb_cam 0.8.1 memakai nama kontrol
+      # lama (exposure_auto/exposure_absolute) yang tidak dikenal kernel 6.x.
+      # Mode AE yang sebenarnya dipasang launch (v4l2-ctl auto_exposure=3).
+      # Mode manual JANGAN dipakai di kamera ini: 40 ms + gain 255 = luma 82,
+      # AE firmware di 40 ms = luma 110-115.
       autoexposure: true
       exposure: 100
       autofocus: true

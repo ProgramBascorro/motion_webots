@@ -63,7 +63,7 @@ from rclpy.executors import ExternalShutdownException
 
 from ament_index_python.packages import get_package_share_directory
 
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool, Float32, Float32MultiArray
 from sensor_msgs.msg import Image, CompressedImage
 from geometry_msgs.msg import Point, PointStamped
 from op3_ball_detector_msgs.msg import CircleSetStamped
@@ -242,6 +242,23 @@ class YoloBallDetector(Node):
         self.circles_pub = self.create_publisher(
             CircleSetStamped, 'circle_set', 10)
         self.fps_pub = self.create_publisher(Float32, 'fps', 10)
+        # Statistik kecerahan kamera, untuk memantau AE firmware di lapangan
+        # (`ros2 topic echo /ball_detector_node/frame_stats`) dan untuk
+        # scripts/sweep_camera_fps.py. Luma lapangan dan luma bola itulah yang
+        # dilihat model; laju topik tidak mengatakan apa-apa soal itu.
+        # Susunan data, semuanya 0..255 kecuali disebut lain:
+        #   [0] luma rata-rata 2/3 BAWAH frame (lapangan; atap/lampu tak ikut)
+        #   [1] fraksi piksel terbakar (>250) di seluruh frame, 0..1
+        #   [2] 1.0 kalau bola terlihat di frame ini, 0.0 kalau tidak
+        #   [3] luma rata-rata kotak bola (-1 kalau tidak ada bola)
+        #   [4] luma rata-rata seluruh frame
+        # Dihitung dari subsampel [::8, ::8] frame yang SUDAH di-decode,
+        # jadi ongkosnya praktis nol. Dibatasi ~frame_stats_rate Hz.
+        self.frame_stats_rate = float(
+            self.declare_parameter('frame_stats_rate', 5.0).value)
+        self.frame_stats_pub = self.create_publisher(
+            Float32MultiArray, 'frame_stats', 10)
+        self._last_stats_pub = 0.0
         # Absolute topic (leading '/') stays global regardless of the node's
         # namespace, so head_tracking_node finds it at /vision/yolo/ball_center.
         if self.ball_center_topic:
@@ -555,6 +572,44 @@ class YoloBallDetector(Node):
         """Mean brightness over a cheap subsample of the frame (0..255)."""
         return float(cv_img[::8, ::8].mean())
 
+    def _maybe_publish_frame_stats(self, cv_img, circles):
+        """Terbitkan frame_stats (lihat susunannya di __init__), dibatasi laju."""
+        if self.frame_stats_rate <= 0.0:
+            return
+        now = time.monotonic()
+        if (now - self._last_stats_pub) < (1.0 / self.frame_stats_rate):
+            return
+        self._last_stats_pub = now
+
+        sub = cv_img[::8, ::8].astype('float32')
+        # BGR -> luma (BT.601), sama dengan yang dilihat sensor sebagai "terang".
+        luma = sub[..., 0] * 0.114 + sub[..., 1] * 0.587 + sub[..., 2] * 0.299
+        rows = luma.shape[0]
+        field = luma[rows // 3:, :]
+        full_mean = float(luma.mean())
+        field_mean = float(field.mean()) if field.size else full_mean
+        clipped = float((luma > 250.0).mean())
+
+        ball_seen = 1.0 if circles else 0.0
+        ball_luma = -1.0
+        if circles:
+            height, width = cv_img.shape[:2]
+            nx, ny, radius = circles[0][0], circles[0][1], circles[0][2]
+            cx = (nx + 1.0) * 0.5 * width
+            cy = (ny + 1.0) * 0.5 * height
+            x1 = max(0, int(cx - radius))
+            x2 = min(width, int(cx + radius) + 1)
+            y1 = max(0, int(cy - radius))
+            y2 = min(height, int(cy + radius) + 1)
+            if x2 > x1 and y2 > y1:
+                step = max(1, int(radius) // 8)
+                box = cv_img[y1:y2:step, x1:x2:step].astype('float32')
+                ball_luma = float((box[..., 0] * 0.114 + box[..., 1] * 0.587
+                                   + box[..., 2] * 0.299).mean())
+
+        self.frame_stats_pub.publish(Float32MultiArray(
+            data=[field_mean, clipped, ball_seen, ball_luma, full_mean]))
+
     def _check_image_flow(self):
         """Say out loud when nothing is arriving on image_in."""
         now = time.monotonic()
@@ -612,6 +667,8 @@ class YoloBallDetector(Node):
             # Mirror the C++ detector: do not publish circles while disabled,
             # but still stream the (raw) image for debugging.
             self._publish_image(cv_img, header)
+            # Kamera tetap perlu diatur pajannya walau deteksi dimatikan.
+            self._maybe_publish_frame_stats(cv_img, [])
             return
 
         try:
@@ -635,6 +692,7 @@ class YoloBallDetector(Node):
         circles = self._select_target(circles)
         self._publish_circles(circles, header)
         self._publish_annotated(results, cv_img, header)
+        self._maybe_publish_frame_stats(cv_img, circles)
 
         # Periodic FRAME-RATE readout. Ultralytics only reports per-stage
         # milliseconds (results[].speed); those say how expensive one frame is
