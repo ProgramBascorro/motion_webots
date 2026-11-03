@@ -28,29 +28,24 @@ head_tracking_node:
     lock_hold_sec: 2.0
 
     # POLA SAPUAN, searah keliling dan DIAWALI MENUNDUK KE DEPAN (permintaan
-    # operator 2026-09-04):
+    # operator 2026-09-04). head_tilt POSITIF = MENUNDUK (diverifikasi
+    # 2026-09-15, lihat scan_tilt_down_rad):
     #
-    #   1. (pan   0, tilt +25,2)  <- awal: lantai tepat di depan kaki
-    #   2. (pan -55, tilt +10,0)
-    #   3. (pan -55, tilt +10,0)  <- sasaran SAMA: kepala DIAM di sini
-    #   4. (pan +55, tilt +10,0)
-    #   5. (pan +55, tilt +10,0)  <- sasaran SAMA -> balik ke 1
+    #   1. (pan   0, tilt +25,2)  <- awal: lantai tepat di depan kaki = BATAS BAWAH
+    #   2. (pan -55, tilt  -6,9)  <- BATAS ATAS
+    #   3. (pan -55, tilt  -6,9)  <- sasaran SAMA: kepala DIAM di sini
+    #   4. (pan +55, tilt  -6,9)
+    #   5. (pan +55, tilt  -6,9)  <- sasaran SAMA -> balik ke 1
     #
     # Urutan ini BUKAN sekadar selera. Sasaran pan +-55 harus bertahan DUA
     # langkah berturut-turut (titik 2-3 dan 4-5), kalau tidak kepala diperintah
     # pergi sebelum sampai -- lihat tabel waktu di scan_period_sec.
     #
     # 2026-09-08: titik 3 dan 4 DULU menengadah (-26,9 deg) dan itu yang bikin
-    # bola "tidak ke-detect-detect" -- lihat scan_tilt_forward_rad. Sekarang
-    # keduanya memakai sudut yang sama dengan tetangganya, jadi langkah itu
+    # bola "tidak ke-detect-detect" -- lihat scan_tilt_upper_rad. Sejak itu
+    # keempat titik ujung memakai sudut yang sama, jadi langkah 2->3 dan 4->5
     # tidak menggerakkan kepala sama sekali: jadi waktu DIAM, dan frame yang
     # diam itulah yang paling mudah dikenali YOLO.
-    #
-    # When no ball is seen, sweep the head through forward + downward positions.
-    # CATATAN: sejak 2026-08-25 baris DEPAN memang menengadah sedikit di atas
-    # cakrawala (-6,9 deg), atas permintaan lapangan. Aslinya sudut menengadah
-    # sengaja dihindari karena bolanya di lantai -- lihat tabel jarak di bawah
-    # untuk tahu persis apa yang ditukar.
     scan_enabled: true
     # Satu titik sapuan per periode ini. Diturunkan 1,8 -> 1,6 bersamaan dengan
     # angle_unit 30 -> 35 deg/s di op3_manager.launch.py: KEDUANYA harus naik
@@ -148,102 +143,57 @@ head_tracking_node:
     # baris bawah. Turunkan lagi ke 0.7 kalau bola dekat kaki jadi sering
     # terlewat.
     scan_pan_down_ratio: 1.0
-    # NOTE on this robot the head_tilt sign for the absolute scan command is
-    # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
-    # Kedua sudut ini DINAIKKAN tiga kali (2026-08-25) karena kepala masih
-    # terasa terlalu menunduk:
-    #   depan  0,25 -> 0,12 -> 0,05 -> -0,12
-    #   bawah  0,55 -> 0,40 -> 0,26 ->  0,09
-    # Langkah terakhir mengangkat KEDUANYA 0,17 rad (9,7 deg) sekaligus.
-    # Offset head_tilt di offset.yaml NOL, jadi sudut ini benar-benar sudut
-    # sendi -- bukan salah kalibrasi yang perlu digeser-geser.
-    # Dengan setengah-FOV tegak 21,6 deg dan kamera di ketinggian ~40 cm,
-    # sudut tunduk d menaruh pusat pandang di 0,4/tan(d) dan tepi BAWAH
-    # bingkai di 0,4/tan(d+21,6):
-    #                    pusat pandang   tepi bawah (batas dekat)
-    #   depan  +14,3 deg      1,6 m           0,52 m   <- asli
-    #   depan   +6,9 deg      3,3 m           0,74 m
-    #   depan   +2,9 deg      7,9 m           0,88 m
-    #   depan   -6,9 deg      (di atas        1,53 m   <- s/d 2026-09-03
-    #                          cakrawala)
-    #   bawah  +31,5 deg      0,65 m          0,30 m   <- asli, itu kakinya
-    #   bawah  +22,9 deg      0,95 m          0,41 m
-    #   bawah  +14,9 deg      1,50 m          0,54 m
-    #   bawah   +5,2 deg      4,40 m          0,79 m   <- s/d 2026-09-03
-    #
-    # Keluhan lama yang tertulis di sini -- lantai terdekat saat menyapu cuma
-    # 0,79 m, sehingga bola yang menggelinding sampai dekat kaki tidak pernah
-    # ketemu lewat sapuan -- SUDAH SELESAI oleh pelebaran 2026-09-04 di bawah:
-    # baris bawah sekarang mulai dari 0,38 m.
-    #
-    # 2026-09-04: KEDUA baris DIPERLUAS 20 derajat ke arahnya masing-masing atas
-    # permintaan operator -- baris depan 20 deg lebih MENENGADAH, baris bawah
-    # 20 deg lebih MENUNDUK. Rentang tegak sapuan jadi 12,1 -> 52,1 derajat.
-    #
-    #   depan  -6,9 -> -26,9 deg   (-0,12 -> -0,4691 rad)
-    #   bawah  +5,2 -> +25,2 deg   ( 0,09 ->  0,4391 rad)
-    #
-    # Batas sendi head_tilt -30 (mendongak) .. +75 (menunduk), jadi -26,9 masih
-    # muat dengan sisa 3,1 derajat saja -- JANGAN diperluas lagi ke atas tanpa
-    # menaikkan head_tilt_min_deg, nanti dijepit diam-diam oleh modul.
-    #
-    # Yang berubah di lapangan, dengan kamera ~40 cm dan setengah-FOV 21,6 deg:
-    #   baris DEPAN  (-26,9): seluruh bingkai di ATAS cakrawala -- baris ini
-    #                         tidak lagi melihat lantai sama sekali.
-    #   baris BAWAH  (+25,2): lantai 0,38 m .. 6,4 m, pusat 0,85 m.
-    # Jadi sekarang baris BAWAH yang memikul seluruh pencarian bola di lantai,
-    # dan jangkauannya justru jauh lebih lengkap daripada sebelumnya (dulu
-    # 0,79 m ke jauh, sekarang mulai 0,38 m -- bola di dekat kaki ikut ketemu).
-    #
-    # 2026-09-08: -0,4691 (-26,9 deg, MENENGADAH) -> 0,1745 (+10,0 deg,
-    # menunduk). Ini akar keluhan operator "bola tidak ke-detect-detect".
-    #
-    # Sudut ini dipakai titik 3 dan 4, yaitu KEDUA ujung pan, dan lintasan
-    # antara keduanya adalah gerak TERPANJANG dalam satu putaran (dulu 150 deg,
-    # 4,29 detik dari total 11,0 detik). Dengan tilt -26,9 deg dan setengah-FOV
-    # tegak 21,6 deg, seluruh bingkai berada 5,3 sampai 48,5 derajat DI ATAS
-    # cakrawala: lantai tidak pernah masuk bingkai sama sekali.
-    #
-    # Artinya 39 % dari setiap putaran pencarian dihabiskan menyapu LANGIT,
-    # sementara bolanya di lantai. Itu bukan dugaan, itu konsekuensi langsung
-    # dari angka yang sudah tertulis di komentar di bawah ini sejak 2026-09-04
-    # ("baris ini tidak lagi melihat lantai sama sekali").
-    #
-    # Sekarang nilainya disamakan dengan scan_tilt_down_side_rad, sehingga:
-    #   - kedua ujung pan melihat LANTAI (0,85 m sampai cakrawala);
-    #   - langkah 2->3 dan 4->5 tidak menggerakkan kepala sama sekali, jadi
-    #     berubah jadi waktu DIAM 26 % per putaran -- frame diam jauh lebih
-    #     mudah dikenali YOLO daripada frame yang di-blur gerakan.
-    #
-    # Isi angka yang BERBEDA dari scan_tilt_down_side_rad kalau mau dua baris
-    # tegak di ujung pan lagi. Ongkosnya: tiap perbedaan sudut menambah dua
-    # gerak lagi, masing-masing kena lantai 1,0 detik dari head_control_module,
-    # jadi waktu diamnya habis dan satu putaran kembali memanjang ~2 detik.
-    # JANGAN mengisinya lebih menunduk daripada +10 deg: di ujung pan, tunduk
-    # dalam membuat BAHU robot masuk bingkai (itu sebabnya ujung dipisah dari
-    # titik depan pada 2026-09-04).
-    scan_tilt_forward_rad: 0.1745    # ujung pan ikut menunduk (+10,0 deg)
-    scan_tilt_down_rad: 0.4391       # down tilt (+25,2 deg, lantai 0,38..6,4 m)
 
-    # TUNDUK DI UJUNG PAN, dipisah 2026-09-04 (kedua) atas laporan operator:
-    # menunduk +25,2 deg SAMBIL menoleh +-75 deg membuat BAHU robot masuk ke
-    # bingkai. Bahunya cuma menghalangi kalau kepala menoleh jauh, jadi yang
-    # dikurangi hanya titik ujung -- tunduk penuh tetap dipakai di titik DEPAN
-    # (pan 0), yang jalur pandangnya bebas.
+    # ARAH head_tilt DI ROBOT INI: POSITIF = MENUNDUK, NEGATIF = MENDONGAK.
+    # Diverifikasi 2026-09-15 dalam SATU run, kepala saja (pan 0, badan diam,
+    # pelacak INACTIVE): perintah absolut -0,12 / +0,1745 / +0,4391 rad, satu
+    # frame kamera tiap sudut sesudah head_tilt terbaca -6,5 / +10,1 / +25,3 deg.
+    # Pemandangannya bergeser dari lantai 2-3 m di depan ke lantai tepat di
+    # depan kaki (tangan robot sendiri masuk bingkai). Offset head_tilt di
+    # offset.yaml NOL, jadi derajat servo 20 = 180 + sudut ini.
     #
-    #   titik depan  (pan   0) : +25,2 deg  <- tetap, lantai mulai 0,38 m
-    #   titik ujung  (pan +-75): +10,0 deg  <- turun 15,2 deg dari itu
+    #   BATAS BAWAH sapuan = angka TERBESAR = scan_tilt_down_rad  (titik depan)
+    #   BATAS ATAS  sapuan = angka TERKECIL = scan_tilt_upper_rad (ujung pan)
     #
-    # +10,0 deg masih 4,8 deg lebih menunduk daripada nilai lama sebelum
-    # pelebaran (+5,2 deg), yang dulu dipakai berbulan-bulan pada pan +-40 deg
-    # tanpa pernah kena bahu. Kalau bahunya MASIH kelihatan, turunkan lagi ke
-    # 0.09 (+5,2 deg) -- itu angka yang sudah terbukti aman.
-    scan_tilt_down_side_rad: 0.1745  # +10,0 deg
+    # Riwayat batas BAWAH (titik depan, pan 0):
+    #   2026-08-25  0,55 -> 0,40 -> 0,26 -> 0,09 rad, dinaikkan tiga kali
+    #   2026-09-04  0,09 -> 0,4391 rad (+5,2 -> +25,2 deg) atas permintaan
+    #               operator, supaya bola di dekat kaki ikut ketemu
+    # Batas sendi head_tilt di head_control_module -30 .. +75 deg.
+    scan_tilt_down_rad: 0.4391       # BATAS BAWAH: +25,2 deg, servo 20 205,2 deg
 
-    # Pose istirahat sesudah perintah "stop". SENGAJA tidak ikut diperluas:
-    # kalau ia memakai scan_tilt_forward_rad, kepala akan mendongak 27 derajat
-    # tiap kali pelacakan dihentikan. Ini menjaganya tetap di sudut depan yang
-    # lama.
+    # BATAS ATAS sapuan, dipakai keempat titik ujung pan (+-55 deg). Ubah angka
+    # INI SAJA untuk mengatur seberapa tinggi kepala melihat saat menyapu:
+    #   lebih tinggi / lebih jauh ke depan -> KURANGI angkanya
+    #   lebih rendah                       -> TAMBAH angkanya
+    # Rentang yang diterima node: -0,5061 rad (-29,0 deg, servo 20 151,0 deg)
+    # sampai scan_tilt_down_rad. -29,0 deg masih di dalam sudut yang sudah
+    # terbukti dicapai kepala (servo 20 terbaca 150,8 deg = -29,2 deg di pose
+    # INIT D58 2026-09-15); head_control_module sendiri menjepit di -30 deg.
+    # Angka di luar rentang dijepit dan dicatat ERROR di log head_tracking_node.
+    #
+    # 2026-09-15: +0,1745 -> -0,12 rad (+10,0 -> -6,9 deg; servo 20 190,0 ->
+    # 173,1 deg) atas laporan operator "kepala terlalu menunduk saat scanning
+    # bersama MENCARI CELAH". Menggantikan scan_tilt_forward_rad dan
+    # scan_tilt_down_side_rad, yang keduanya 0,1745 dan memang harus sama.
+    # Kenapa -0,12:
+    #   - angka itu sudah ada di konfigurasi ini: pose istirahat
+    #     scan_neutral_tilt_rad, dan baris depan sapuan s/d 2026-09-03;
+    #   - frame 2026-09-15 pada -6,5 deg masih berisi LANTAI sampai tepi atas
+    #     bingkai (orang yang duduk di lantai 2-3 m terpotong setinggi dada),
+    #     jadi tepi atasnya sudah dekat cakrawala. Naik jauh lebih tinggi mulai
+    #     membuang bingkai ke dinding -- pelajaran 2026-09-08, saat -26,9 deg
+    #     menghabiskan 39 % tiap putaran menyapu langit.
+    # Waktu sapuan TIDAK berubah: gerak titik depan <-> ujung tetap ditentukan
+    # pan 55 deg (55/35 = 1,57 s); tilt kini 32,0 deg (0,92 s). Yang berubah
+    # cuma laju puncak tilt di lintasan miring itu, 18 -> 38 deg/s. Waktu diam
+    # di ujung pan sama.
+    # JANGAN mengisinya lebih MENUNDUK dari +0,1745 (+10 deg): di ujung pan,
+    # tunduk dalam membuat BAHU robot masuk bingkai (laporan 2026-09-04).
+    scan_tilt_upper_rad: -0.12       # BATAS ATAS: -6,9 deg, servo 20 173,1 deg
+
+    # Pose istirahat sesudah perintah "stop". Terpisah dari sudut sapuan supaya
+    # mengubah sapuan tidak ikut memindahkan pose istirahat kepala.
     scan_neutral_tilt_rad: -0.12
 
     # Camera field of view copied from the original tracker
@@ -262,6 +212,53 @@ head_tracking_node:
     # Sign multipliers — set to -1.0 to invert a direction if head moves wrong way
     pan_sign: 1.0
     tilt_sign: -1.0
+
+    # =====================================================================
+    # SAPUAN 7 TAHAP (17 Sep 2026) -- HANYA D60. D56 dan D58 tetap memakai
+    # titik sapuan lama di atas (scan_mode "legacy"). D60 memilih mode ini
+    # dengan perintah "scan_stages" di /ball_tracker/command sebelum "start",
+    # dan mengembalikan "scan_legacy" saat berhenti.
+    scan_mode: legacy
+    #
+    # Satuan: servo 19 dalam PERSEN (0 = paling kiri = head_pan +85 deg,
+    # 100 = paling kanan = -85 deg, 50 = lurus), servo 20 dalam DERAJAT SERVO
+    # (180 = lurus, lebih besar = MENUNDUK). Konversi yang sama dengan D58/D60.
+    #
+    # Mulai dari (50 %, 207) lalu siklus:
+    #   1 (70 %, 207)  2 (100 %, 180)  3 (100 %, 135)  4 (0 %, 135)
+    #   5 (0 %, 180)   6 (30 %, 207)   7 (50 %, 207)  -> kembali ke 1
+    # Setiap tahap: interpolasi linier kedua servo bersamaan, lamanya = sumbu
+    # terjauh / scan_speed_deg_s, TANPA jeda diam; setpoint dikirim sebagai
+    # offset 20 Hz ke head_control_module. Batas menunduk mengikuti pan
+    # (207 di tengah, 180 di ujung) dijaga head_control_module (amplop).
+    #
+    # Catatan penerjemahan permintaan operator: "70 derajat" pada tahap 1
+    # dibaca 70 PERSEN (arah sapuan 50 -> 70 -> 100 konsisten; 70 deg sendi =
+    # 8,8 % justru berlawanan arah), dan "0 %" servo 20 pada tahap 2 dibaca
+    # 180 deg (batas menunduk di ujung 100 %, simetris dengan tahap 5).
+    scan_pan_left_limit_deg: 85.0
+    scan_pan_right_limit_deg: -85.0
+    scan_start_pan_percent: 50.0
+    # 19 Sep 2026: 207 -> 210 (butuh amplop tengah 30 deg di op3_manager.launch.py).
+    scan_start_tilt_servo_deg: 210.0
+    # Pra-awal: pertama kali / sesudah halaman action kepala ke (50 %, 180) dulu,
+    # baru perlahan (laju sama) ke (50 %, 207), baru siklus tahap 1..7.
+    scan_prestart_tilt_servo_deg: 180.0
+    # Mode "walk" (D60 SEARCH_BALL: bola TIDAK terdeteksi + badan MENCARI CELAH):
+    # servo 20 tetap 169, servo 19 bolak-balik 0 % <-> 100 %, laju scan_speed_deg_s.
+    scan_walk_percent_servo: [0.0, 169.0, 100.0, 169.0]
+    # Mode "hold" (D60, 19 Sep 2026): diam pertama sesudah D60 ditekan, kepala ditahan
+    # di (50 %, servo 20 135) tanpa menyapu; bola terdeteksi = langsung dilacak.
+    scan_hold_percent_servo: [50.0, 135.0]
+    # 19 Sep 2026: 10 langkah (kanan -> tengah menunduk -> kiri -> tengah menunduk), laju sama, tanpa jeda.
+    scan_stages_percent_servo: [70.0, 207.0, 100.0, 180.0, 100.0, 135.0, 50.0, 135.0, 50.0, 207.0, 30.0, 207.0, 0.0, 180.0, 0.0, 135.0, 50.0, 135.0, 50.0, 207.0]
+    scan_speed_deg_s: 30.0
+    scan_min_stage_sec: 0.2
+
+    # Pose PARKIR sesudah perintah "stop" = posisi kepala saat halaman action
+    # (tendang/bangun) dimulai: servo 19 di 0 deg sendi (50 %), servo 20 200.
+    park_pan_deg: 0.0
+    park_tilt_servo_deg: 200.0
 
     # Joint Names
     head_pan_joint: head_pan

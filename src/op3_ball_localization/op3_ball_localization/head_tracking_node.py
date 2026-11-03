@@ -19,6 +19,16 @@ from std_msgs.msg import String
 
 from robotis_controller_msgs.msg import JointCtrlModule
 
+from op3_ball_localization.head_scan_pattern import (
+    build_scan_positions,
+    resolve_scan_tilt_upper,
+)
+
+# Servo 19 (head_pan): persen 0 = paling KIRI (+pan_left_limit), 100 = paling
+# KANAN (pan_right_limit). Servo 20 (head_tilt): derajat servo = 180 + sudut
+# sendi (POSITIF = MENUNDUK di robot ini). Konvensi yang sama dengan mode D58/D60.
+SERVO_CENTER_DEG = 180.0
+
 
 class HeadTrackingNode(Node):
     """Head-only ball tracker - no walking or kicking."""
@@ -58,9 +68,6 @@ class HeadTrackingNode(Node):
         self._scan_enabled = bool(self.declare_parameter("scan_enabled", True).value)
         self._scan_period_sec = float(self.declare_parameter("scan_period_sec", 2.5).value)
         self._scan_pan_rad = float(self.declare_parameter("scan_pan_rad", 0.7).value)
-        self._scan_tilt_forward_rad = float(
-            self.declare_parameter("scan_tilt_forward_rad", -0.10).value
-        )
         self._scan_tilt_down_rad = float(
             self.declare_parameter("scan_tilt_down_rad", -0.35).value
         )
@@ -70,20 +77,90 @@ class HeadTrackingNode(Node):
         self._scan_pan_down_ratio = float(
             self.declare_parameter("scan_pan_down_ratio", 1.0).value
         )
-        # Sudut tunduk untuk titik sapuan yang ada di UJUNG pan (+-75 deg).
-        # Sengaja lebih dangkal daripada scan_tilt_down_rad: menunduk dalam
-        # SAMBIL menoleh jauh membuat bahu robot masuk ke bingkai. Tunduk yang
-        # dalam hanya dipakai di titik depan (pan 0), yang tidak punya bahu di
-        # jalur pandangnya.
-        self._scan_tilt_down_side_rad = float(
-            self.declare_parameter("scan_tilt_down_side_rad", 0.1745).value
+        # BATAS ATAS sapuan (paling mendongak), dipakai keempat titik ujung pan.
+        # head_tilt POSITIF = MENUNDUK di robot ini, jadi kepala melihat lebih
+        # tinggi kalau angka ini DIKURANGI. Menggantikan scan_tilt_forward_rad
+        # dan scan_tilt_down_side_rad (2026-09-15), yang dulu harus selalu
+        # diisi sama. Dijepit ke rentang terverifikasi di head_scan_pattern.py.
+        self._scan_tilt_upper_rad = float(
+            self.declare_parameter("scan_tilt_upper_rad", -0.12).value
         )
         # Sudut tilt pose istirahat sesudah perintah "stop". Dipisah dari
-        # scan_tilt_forward_rad: sejak sapuan diperluas ke atas, memakai sudut
-        # sapuan di sini akan membuat kepala mendongak tiap kali dihentikan.
+        # sudut sapuan supaya mengubah sapuan tidak ikut memindahkan pose
+        # istirahat kepala.
         self._scan_neutral_tilt_rad = float(
             self.declare_parameter("scan_neutral_tilt_rad", -0.12).value
         )
+        # POSE PARKIR sesudah "stop" = posisi awal kepala setiap halaman action
+        # (tendang/bangun) dimulai: servo 19 di 0 deg sendi (50 %), servo 20 di
+        # 200 deg. Ketiga demo (D56/D58/D60) memarkir lewat perintah "stop" ini
+        # SEBELUM menyerahkan kepala ke action_module.
+        self._park_pan_deg = float(self.declare_parameter("park_pan_deg", 0.0).value)
+        self._park_tilt_servo_deg = float(
+            self.declare_parameter("park_tilt_servo_deg", 200.0).value
+        )
+        # SAPUAN BARU (17 Sep 2026): siklus 7 tahap berbasis waktu, kedua servo
+        # diinterpolasi bersama, tanpa jeda diam antar tahap. Dinyatakan dalam
+        # persen servo 19 dan derajat servo 20; diawali dari titik awal.
+        self._scan_pan_left_limit_deg = float(
+            self.declare_parameter("scan_pan_left_limit_deg", 85.0).value
+        )
+        self._scan_pan_right_limit_deg = float(
+            self.declare_parameter("scan_pan_right_limit_deg", -85.0).value
+        )
+        self._scan_start_pan_percent = float(
+            self.declare_parameter("scan_start_pan_percent", 50.0).value
+        )
+        self._scan_start_tilt_servo_deg = float(
+            self.declare_parameter("scan_start_tilt_servo_deg", 207.0).value
+        )
+        # Titik PRA-AWAL: saat sapuan mulai (pertama kali / sesudah halaman
+        # action) kepala dibawa dulu ke (50 %, 180), baru perlahan ke titik awal
+        # (50 %, 207) dengan laju yang sama, baru siklus tahap 1..7.
+        self._scan_prestart_tilt_servo_deg = float(
+            self.declare_parameter("scan_prestart_tilt_servo_deg", 180.0).value
+        )
+        # Daftar datar [pan_persen, tilt_servo_deg, ...] tahap 1..N, diulang.
+        self._scan_stages_raw = [
+            float(v)
+            for v in self.declare_parameter(
+                "scan_stages_percent_servo",
+                [70.0, 207.0, 100.0, 180.0, 100.0, 135.0, 0.0, 135.0,
+                 0.0, 180.0, 30.0, 207.0, 50.0, 207.0],
+            ).value
+        ]
+        # Laju sapuan, deg/s, sumbu yang bergerak paling jauh; sumbu lain
+        # mengikuti proporsional supaya keduanya sampai bersamaan.
+        self._scan_speed_deg_s = float(
+            self.declare_parameter("scan_speed_deg_s", 30.0).value
+        )
+        self._scan_min_stage_sec = float(
+            self.declare_parameter("scan_min_stage_sec", 0.2).value
+        )
+        # Mode sapuan: "legacy" = titik sapuan lama (scan_pan_rad / scan_tilt_*
+        # / scan_period_sec, dipakai D56 dan D58), "stages" = siklus 7 tahap di
+        # atas (HANYA D60). Dipilih lewat /ball_tracker/command "scan_stages" /
+        # "scan_legacy"; D60 mengirim scan_stages sebelum start dan scan_legacy
+        # saat berhenti, jadi demo lain tidak terpengaruh.
+        self._scan_mode = str(self.declare_parameter("scan_mode", "legacy").value)
+        # Mode "walk" (D60 SEARCH_BALL: bola tidak terdeteksi + badan MENCARI CELAH):
+        # servo 20 tetap, servo 19 bolak-balik antar titik di daftar ini
+        # [pan_persen, tilt_servo_deg, ...], laju sama (scan_speed_deg_s).
+        self._scan_walk_raw = [
+            float(v)
+            for v in self.declare_parameter(
+                "scan_walk_percent_servo", [0.0, 169.0, 100.0, 169.0]
+            ).value
+        ]
+        # Mode "hold" (D60, diam PERTAMA sesudah D60 ditekan): kepala ditahan di
+        # titik ini [pan_persen, tilt_servo_deg], tidak menyapu; bola terdeteksi
+        # tetap langsung dilacak seperti mode lain.
+        self._scan_hold_raw = [
+            float(v)
+            for v in self.declare_parameter(
+                "scan_hold_percent_servo", [50.0, 135.0]
+            ).value
+        ]
         self._head_enable_retry_sec = float(
             self.declare_parameter("head_enable_retry_sec", 1.5).value
         )
@@ -143,6 +220,13 @@ class HeadTrackingNode(Node):
         self._joint_ctrl_pub = self.create_publisher(
             JointCtrlModule, "/robotis/set_joint_ctrl_modules", 10
         )
+        # Status EKSPLISIT node ini, tiap tick kendali: INACTIVE, SCANNING,
+        # HOLD (bola sempat terkunci lalu hilang sesaat, kepala ditahan), atau
+        # TRACKING. Hanya melaporkan; tidak mengubah sapuan maupun pelacakan.
+        # Dipakai mode otomatis D60 supaya "kepala sedang menyapu" tidak pernah
+        # tertukar dengan "kepala sedang mengunci bola" -- sudut servo saja
+        # tidak bisa membedakan keduanya.
+        self._status_pub = self.create_publisher(String, "/ball_tracker/status", 10)
 
         self.create_subscription(
             PointStamped,
@@ -164,6 +248,20 @@ class HeadTrackingNode(Node):
             self._ctrl_modules_callback,
             10,
         )
+
+        # Goal kepala dari controller (rad), untuk offset sapuan = setpoint - goal.
+        self.create_subscription(
+            JointState, "/robotis/goal_joint_states", self._goal_joints_callback, 10
+        )
+        self._goal_pan_rad: Optional[float] = None
+        self._goal_tilt_rad: Optional[float] = None
+        # Segmen sapuan yang sedang berjalan: (pan0, tilt0) -> (pan1, tilt1) rad,
+        # mulai t0, lama dur. Indeks -1 = segmen menuju titik awal.
+        self._scan_seg_from = (0.0, 0.0)
+        self._scan_seg_to = (0.0, 0.0)
+        self._scan_seg_t0 = 0.0
+        self._scan_seg_dur = 0.0
+        self._scan_stage_idx = -1
 
         self._last_ball_time: Optional[float] = None
         self._last_ball_x: Optional[float] = None
@@ -193,32 +291,31 @@ class HeadTrackingNode(Node):
         self._head_lost_since: Optional[float] = None
 
         # Pola sapuan, searah keliling dan DIAWALI MENUNDUK KE DEPAN (pan 0).
-        # Titik depan itu satu-satunya yang memakai tunduk penuh: di sana tidak
-        # ada bahu yang menghalangi. Begitu kepala menoleh ke ujung, tunduknya
-        # dangkal (scan_tilt_down_side_rad) supaya bahu tidak masuk bingkai.
+        # Titik depan itu satu-satunya yang memakai batas BAWAH: di sana tidak
+        # ada bahu yang menghalangi. Begitu kepala menoleh ke ujung, ia naik ke
+        # batas ATAS.
         #
-        #   1. (  0, tunduk dalam)  <- awal, melihat lantai tepat di depan
-        #   2. (-75, tunduk dangkal)
-        #   3. (-75, menengadah)
-        #   4. (+75, menengadah)
-        #   5. (+75, tunduk dangkal)  -> balik ke 1
+        #   1. (    0, batas bawah)  <- awal, melihat lantai tepat di depan
+        #   2. (-pan , batas atas)
+        #   3. (-pan , batas atas)   <- sasaran sama: kepala diam
+        #   4. (+pan , batas atas)
+        #   5. (+pan , batas atas)   <- sasaran sama -> balik ke 1
         #
-        # Urutannya BUKAN sekadar selera: sasaran pan +-75 harus bertahan dua
+        # Urutannya BUKAN sekadar selera: sasaran pan ujung harus bertahan dua
         # langkah berturut-turut, kalau tidak kepala diperintah pergi sebelum
         # sampai dan sapuannya tidak pernah selebar yang tertulis. Lihat tabel
         # waktu di head_tracking.yaml.
-        p = self._scan_pan_rad
-        pd = p * self._scan_pan_down_ratio
-        fw = self._scan_tilt_forward_rad
-        dn = self._scan_tilt_down_rad
-        dns = self._scan_tilt_down_side_rad
-        self._scan_positions = [
-            (0.0, dn),
-            (-pd, dns),
-            (-p, fw),
-            (+p, fw),
-            (+pd, dns),
-        ]
+        self._scan_tilt_upper_rad, upper_problem = resolve_scan_tilt_upper(
+            self._scan_tilt_upper_rad, self._scan_tilt_down_rad
+        )
+        if upper_problem:
+            self.get_logger().error(upper_problem)
+        self._scan_positions = build_scan_positions(
+            self._scan_pan_rad,
+            self._scan_pan_down_ratio,
+            self._scan_tilt_upper_rad,
+            self._scan_tilt_down_rad,
+        )
 
         self.create_timer(1.0 / self._control_rate, self._control_loop)
         if self._active:
@@ -234,25 +331,46 @@ class HeadTrackingNode(Node):
         self.get_logger().info(f"  Scan enabled: {self._scan_enabled}")
         self.get_logger().info(
             "  Sapuan: pan +-%.1f deg (total %.0f deg, baris bawah %.0f%%), "
-            "tilt depan %+.1f deg / tunduk %+.1f deg (di ujung pan %+.1f deg), "
-            "istirahat %+.1f deg, periode %.1f s, satu putaran %.1f s"
+            "tilt batas ATAS %+.1f deg (servo 20 %.1f) .. batas BAWAH %+.1f deg "
+            "(servo 20 %.1f), istirahat %+.1f deg, periode %.1f s, satu putaran %.1f s"
             % (math.degrees(self._scan_pan_rad), 2 * math.degrees(self._scan_pan_rad),
                self._scan_pan_down_ratio * 100.0,
-               math.degrees(self._scan_tilt_forward_rad),
+               math.degrees(self._scan_tilt_upper_rad),
+               180.0 + math.degrees(self._scan_tilt_upper_rad),
                math.degrees(self._scan_tilt_down_rad),
-               math.degrees(self._scan_tilt_down_side_rad),
+               180.0 + math.degrees(self._scan_tilt_down_rad),
                math.degrees(self._scan_neutral_tilt_rad),
                self._scan_period_sec,
                len(self._scan_positions) * self._scan_period_sec)
         )
+        stages = self._scan_stages()
         self.get_logger().info(
-            "  Titik sapuan (mulai dari menunduk ke depan): %s"
-            % " -> ".join("(%+.0f,%+.0f)" % (math.degrees(a), math.degrees(b))
-                          for a, b in self._scan_positions)
+            "  SAPUAN 7 TAHAP [mode D60, aktif lewat perintah scan_stages; sekarang: %s] (persen servo 19 / "
+            "servo 20 deg), awal (%.0f%%, %.0f) lalu: %s | laju %.0f deg/s, tanpa jeda antar tahap | "
+            "parkir (\"stop\") pan %+.0f deg, servo 20 %.0f"
+            % (self._scan_mode, self._scan_start_pan_percent, self._scan_start_tilt_servo_deg,
+               " -> ".join("(%.0f%%, %.0f)" % (p, t) for p, t in stages),
+               self._scan_speed_deg_s, self._park_pan_deg, self._park_tilt_servo_deg)
+        )
+        self.get_logger().info(
+            "  dalam sudut sendi: %s"
+            % " -> ".join("(%+.1f, %+.1f)" % (math.degrees(a), math.degrees(b))
+                          for a, b in (self._percent_servo_to_rad(p, t) for p, t in stages))
         )
 
     def _tracker_command_callback(self, msg: String) -> None:
         cmd = msg.data.strip().lower()
+        if cmd in ("scan_stages", "scan_legacy", "scan_walk", "scan_hold"):
+            mode = {"scan_stages": "stages", "scan_legacy": "legacy", "scan_walk": "walk",
+                    "scan_hold": "hold"}[cmd]
+            if mode != self._scan_mode:
+                self._scan_mode = mode
+                self._scan_active = False
+                self._last_scan_cmd_time = 0.0
+                self._scan_stage_idx = -1
+                self._scan_idx = 0
+                self.get_logger().info(f"[CMD] mode sapuan -> {mode}")
+            return
         if cmd == "start" and not self._active:
             self._active = True
             self._reset_pid()
@@ -263,23 +381,40 @@ class HeadTrackingNode(Node):
             self._ball_unused = False
             self._last_head_enable_time = 0.0
             self._joint_ctrl_modules_sent = False
+            self._scan_stage_idx = -1
             self._ensure_head_module_enabled(force=True)
             self.get_logger().info("[CMD] activated by start command")
-        elif cmd == "stop" and self._active:
+        elif (cmd == "stop" or cmd.startswith("stop:")) and self._active:
+            # "stop:<servo20>" = sama dengan stop, tetapi servo 20 diparkir ke sudut
+            # itu (D60 OFF: 170). "stop" biasa tetap park_tilt_servo_deg (200,
+            # pose awal halaman action).
+            park_tilt_servo = self._park_tilt_servo_deg
+            if cmd.startswith("stop:"):
+                try:
+                    park_tilt_servo = float(cmd.split(":", 1)[1])
+                except ValueError:
+                    self.get_logger().warn(f"[CMD] '{cmd}' tidak sah; parkir servo 20 {park_tilt_servo:.0f}")
             self._active = False
             self._reset_pid()
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
             self._locked = False
             self._ball_unused = False
-            # Snap the head to a neutral forward pose so it doesn't keep
-            # executing the last SCAN target after the stop.
+            self._scan_stage_idx = -1
+            # PARKIR: pose awal setiap halaman action (pan 0 deg, servo 20 200).
+            # Dikirim absolut, jadi sapuan/tracking yang masih berjalan diganti.
+            park_pan, park_tilt = self._percent_servo_to_rad(
+                self._pan_deg_to_percent(self._park_pan_deg), park_tilt_servo
+            )
             neutral = JointState()
             neutral.name = [self._head_pan_joint, self._head_tilt_joint]
-            neutral.position = [0.0, self._scan_neutral_tilt_rad]
+            neutral.position = [park_pan, park_tilt]
             neutral.header.stamp = self.get_clock().now().to_msg()
             self._head_abs_pub.publish(neutral)
-            self.get_logger().info("[CMD] deactivated by stop command")
+            self.get_logger().info(
+                "[CMD] deactivated by stop command; kepala diparkir ke pan %+.0f deg, servo 20 %.0f"
+                % (self._park_pan_deg, park_tilt_servo)
+            )
 
     def _ball_center_callback(self, msg: PointStamped) -> None:
         """Track the latest normalized YOLO center point."""
@@ -307,8 +442,12 @@ class HeadTrackingNode(Node):
         self._last_ball_time = time.monotonic()
         self._ball_unused = True
 
+    def _publish_status(self, status: str) -> None:
+        self._status_pub.publish(String(data=status))
+
     def _control_loop(self) -> None:
         if not self._active:
+            self._publish_status("INACTIVE")
             return
 
         now = time.monotonic()
@@ -322,6 +461,7 @@ class HeadTrackingNode(Node):
         )
 
         if ball_visible:
+            self._publish_status("TRACKING")
             self._track_ball(now)
         elif (
             self._locked
@@ -332,9 +472,11 @@ class HeadTrackingNode(Node):
             # kaki, satu frame meleset, bola diam di pinggir bingkai. Kepala
             # DITAHAN di tempat, tidak menyapu: sekali menyapu kuncinya lepas
             # dan bolanya baru ketemu lagi satu putaran kemudian.
+            self._publish_status("HOLD")
             self._reset_pid()
             self._ensure_head_module_enabled(now)
         else:
+            self._publish_status("SCANNING" if self._scan_enabled else "IDLE")
             self._locked = False
             self._reset_pid()
             self._ensure_head_module_enabled(now)  # retry only when idle
@@ -348,6 +490,7 @@ class HeadTrackingNode(Node):
         if self._scan_active:
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
+            self._scan_stage_idx = -1
             # Sapuan meninggalkan trajektori ABSOLUT yang MASIH BERJALAN di
             # head_control_module -- satu segmen bisa 2,7 detik. Koreksi di
             # bawah belum tentu jadi diterbitkan (bola sudah di dalam
@@ -500,11 +643,77 @@ class HeadTrackingNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         self._head_offset_pub.publish(msg)
 
+    # ---- konversi persen / derajat servo <-> sudut sendi -------------------
+    def _pan_percent_to_rad(self, percent: float) -> float:
+        left = self._scan_pan_left_limit_deg
+        right = self._scan_pan_right_limit_deg
+        percent = max(0.0, min(100.0, percent))
+        return math.radians(left - percent / 100.0 * (left - right))
+
+    def _pan_deg_to_percent(self, pan_deg: float) -> float:
+        left = self._scan_pan_left_limit_deg
+        right = self._scan_pan_right_limit_deg
+        return (left - pan_deg) / (left - right) * 100.0
+
+    def _percent_servo_to_rad(self, pan_percent: float, tilt_servo_deg: float):
+        return (self._pan_percent_to_rad(pan_percent), math.radians(tilt_servo_deg - SERVO_CENTER_DEG))
+
+    def _scan_stages(self):
+        raw = self._scan_stages_raw
+        stages = [(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)]
+        if not stages:
+            stages = [(self._scan_start_pan_percent, self._scan_start_tilt_servo_deg)]
+        return stages
+
+    def _goal_joints_callback(self, msg: JointState) -> None:
+        n = min(len(msg.name), len(msg.position))
+        for i in range(n):
+            if msg.name[i] == self._head_pan_joint:
+                self._goal_pan_rad = float(msg.position[i])
+            elif msg.name[i] == self._head_tilt_joint:
+                self._goal_tilt_rad = float(msg.position[i])
+
+    # ---- sapuan berbasis waktu ------------------------------------------------
+    def _begin_scan_segment(self, now: float, target, stage_idx: int) -> None:
+        """Mulai segmen menuju target (rad) dari setpoint/goal saat ini."""
+        if self._scan_active and self._scan_seg_dur > 0.0:
+            origin = self._scan_seg_to
+        elif self._goal_pan_rad is not None and self._goal_tilt_rad is not None:
+            origin = (self._goal_pan_rad, self._goal_tilt_rad)
+        else:
+            origin = target
+        d_pan = abs(math.degrees(target[0] - origin[0]))
+        d_tilt = abs(math.degrees(target[1] - origin[1]))
+        speed = max(1.0, self._scan_speed_deg_s)
+        # Kedua sumbu sampai BERSAMAAN: lamanya dari sumbu yang paling jauh.
+        dur = max(self._scan_min_stage_sec, max(d_pan, d_tilt) / speed)
+        self._scan_seg_from = origin
+        self._scan_seg_to = target
+        self._scan_seg_t0 = now
+        self._scan_seg_dur = dur
+        self._scan_stage_idx = stage_idx
+        self._scan_active = True
+        self.get_logger().info(
+            "[SCAN] tahap %s -> pan %+.1f deg (%.0f%%), servo 20 %.1f, %.2f s"
+            % ("pra-awal" if stage_idx == -2 else "awal" if stage_idx < 0 else str(stage_idx + 1),
+               math.degrees(target[0]), self._pan_deg_to_percent(math.degrees(target[0])),
+               SERVO_CENTER_DEG + math.degrees(target[1]), dur)
+        )
+
     def _ensure_scan_mode(self, now: Optional[float] = None) -> None:
+        if self._scan_mode == "stages":
+            self._ensure_scan_stages(now)
+        elif self._scan_mode == "walk":
+            self._ensure_scan_walk(now)
+        elif self._scan_mode == "hold":
+            self._ensure_scan_walk(now, self._scan_hold_raw)
+        else:
+            self._ensure_scan_legacy(now)
+
+    def _ensure_scan_legacy(self, now: Optional[float] = None) -> None:
+        """Sapuan LAMA (D56/D58): titik absolut tiap scan_period_sec."""
         if now is None:
             now = time.monotonic()
-        # Custom sweep: move head through forward + down positions only (no
-        # ceiling-facing poses), dwelling at each so YOLO has time to detect.
         if (now - self._last_scan_cmd_time) < self._scan_period_sec:
             return
         pan, tilt = self._scan_positions[self._scan_idx]
@@ -521,6 +730,96 @@ class HeadTrackingNode(Node):
             f"[SCAN] move to ({math.degrees(pan):+.0f}°, {math.degrees(tilt):+.0f}°)",
             throttle_duration_sec=1.0,
         )
+
+    def _ensure_scan_walk(self, now: Optional[float] = None, raw=None) -> None:
+        """Sapuan mode walk (D60 SEARCH_BALL): servo 19 bolak-balik 0 <-> 100 %,
+        servo 20 tetap 169, laju scan_speed_deg_s, tanpa jeda; dikirim sebagai
+        offset seperti mode stages. Dimulai dari ujung yang lebih dekat."""
+        if now is None:
+            now = time.monotonic()
+        if raw is None:
+            raw = self._scan_walk_raw
+        points = [(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)] or [(50.0, 169.0)]
+        if not self._scan_active:
+            start = 0
+            if self._goal_pan_rad is not None and len(points) > 1:
+                start = min(range(len(points)),
+                            key=lambda k: abs(self._pan_percent_to_rad(points[k][0]) - self._goal_pan_rad))
+            self._begin_scan_segment(now, self._percent_servo_to_rad(*points[start]), start)
+        guard = 0
+        while now - self._scan_seg_t0 >= self._scan_seg_dur and guard < len(points) + 1:
+            leftover = now - self._scan_seg_t0 - self._scan_seg_dur
+            next_idx = (max(self._scan_stage_idx, 0) + 1) % len(points)
+            self._begin_scan_segment(now - leftover, self._percent_servo_to_rad(*points[next_idx]), next_idx)
+            guard += 1
+        u = 0.0 if self._scan_seg_dur <= 0.0 else min(1.0, (now - self._scan_seg_t0) / self._scan_seg_dur)
+        sp_pan = self._scan_seg_from[0] + u * (self._scan_seg_to[0] - self._scan_seg_from[0])
+        sp_tilt = self._scan_seg_from[1] + u * (self._scan_seg_to[1] - self._scan_seg_from[1])
+        if self._goal_pan_rad is None or self._goal_tilt_rad is None:
+            if (now - self._last_scan_cmd_time) >= 0.5:
+                msg = JointState()
+                msg.name = [self._head_pan_joint, self._head_tilt_joint]
+                msg.position = [sp_pan, sp_tilt]
+                msg.header.stamp = self.get_clock().now().to_msg()
+                self._head_abs_pub.publish(msg)
+                self._last_scan_cmd_time = now
+            return
+        self._publish_offset(sp_pan - self._goal_pan_rad, sp_tilt - self._goal_tilt_rad)
+        self._last_scan_cmd_time = now
+
+    def _ensure_scan_stages(self, now: Optional[float] = None) -> None:
+        """Sapuan 7 tahap berbasis waktu, non-blocking, dijalankan tiap tick (D60).
+
+        Setpoint diinterpolasi linier di dalam tiap segmen (kedua servo
+        bersamaan), lalu dikirim sebagai OFFSET = setpoint - goal kepala saat
+        ini, sehingga head_control_module (moving_time 0,1 s) mengikuti dengan
+        halus dan tanpa jeda diam antar tahap. Tahap terakhir langsung
+        disambung ke tahap 1 (siklus). Batas menunduk mengikuti pan dijaga
+        head_control_module (amplop), jadi target di luar amplop dijepit di sana.
+        """
+        if now is None:
+            now = time.monotonic()
+        stages = self._scan_stages()
+        if not self._scan_active:
+            # Mulai: ke PRA-AWAL (50 %, 180) dulu dari mana pun kepala berada,
+            # lalu (segmen berikutnya) perlahan ke titik awal (50 %, 207).
+            self._begin_scan_segment(
+                now,
+                self._percent_servo_to_rad(self._scan_start_pan_percent, self._scan_prestart_tilt_servo_deg),
+                -2,
+            )
+
+        # Segmen selesai -> langsung tahap berikutnya (tanpa jeda).
+        # Urutan: -2 (pra-awal 180) -> -1 (awal 207) -> 0..N-1 -> 0 ...
+        guard = 0
+        while now - self._scan_seg_t0 >= self._scan_seg_dur and guard < len(stages) + 2:
+            leftover = now - self._scan_seg_t0 - self._scan_seg_dur
+            if self._scan_stage_idx == -2:
+                next_idx = -1
+                p, t = self._scan_start_pan_percent, self._scan_start_tilt_servo_deg
+            else:
+                next_idx = (self._scan_stage_idx + 1) % len(stages)
+                p, t = stages[next_idx]
+            self._begin_scan_segment(now - leftover, self._percent_servo_to_rad(p, t), next_idx)
+            guard += 1
+
+        u = 0.0 if self._scan_seg_dur <= 0.0 else min(1.0, (now - self._scan_seg_t0) / self._scan_seg_dur)
+        sp_pan = self._scan_seg_from[0] + u * (self._scan_seg_to[0] - self._scan_seg_from[0])
+        sp_tilt = self._scan_seg_from[1] + u * (self._scan_seg_to[1] - self._scan_seg_from[1])
+
+        if self._goal_pan_rad is None or self._goal_tilt_rad is None:
+            # Goal kepala belum diterima: kirim absolut sekali supaya tetap bergerak.
+            if (now - self._last_scan_cmd_time) >= 0.5:
+                msg = JointState()
+                msg.name = [self._head_pan_joint, self._head_tilt_joint]
+                msg.position = [sp_pan, sp_tilt]
+                msg.header.stamp = self.get_clock().now().to_msg()
+                self._head_abs_pub.publish(msg)
+                self._last_scan_cmd_time = now
+            return
+
+        self._publish_offset(sp_pan - self._goal_pan_rad, sp_tilt - self._goal_tilt_rad)
+        self._last_scan_cmd_time = now
 
     def _reset_pid(self) -> None:
         self._prev_pan_error = 0.0
