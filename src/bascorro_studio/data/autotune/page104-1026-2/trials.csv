@@ -1,0 +1,4 @@
+n,jenis,generasi,skor,gagal,label,durasi_s,volt,pitch_hip_deg,pitch_ankle_deg,roll_hip_deg,roll_ankle_deg,gyro_rms_dps,tilt_max_deg,settle_dev_deg,settle_gyro_dps,yaw_abs_deg
+1,baseline,,5.0000,1,hampir,6.50,12.564,0.0,0.0,0.0,0.0,26.210,22.875,0.190,0.631,8.685
+2,baseline,,5.0000,1,hampir,6.50,12.564,0.0,0.0,0.0,0.0,44.815,24.099,1.777,14.981,5.489
+3,baseline,,5.0000,1,hampir,6.50,12.564,0.0,0.0,0.0,0.0,38.034,22.979,0.979,7.330,13.901

@@ -84,7 +84,7 @@ def main():
     ap.add_argument("--trials", default=os.path.join(WS, "rl_runs/studio/trials.json"))
     ap.add_argument("--sesi", required=True)
     ap.add_argument("--data-awal", required=True, help="base_name percobaan, mis. 'JALAN BARU'")
-    ap.add_argument("--target", required=True, help="maju | mutar | geser_kanan | geser_kiri")
+    ap.add_argument("--target", required=True, help="maju | mutar | putar_kiri | putar_kanan | geser_kanan | geser_kiri")
     ap.add_argument("--dari-no", type=int, default=0, help="abaikan percobaan bernomor lebih kecil")
     ap.add_argument("--kecuali", default="", help="nomor dikeluarkan, mis. '29,31'")
     ap.add_argument("--tulis", action="store_true", help="simpan kandidat teratas sebagai versi baru")

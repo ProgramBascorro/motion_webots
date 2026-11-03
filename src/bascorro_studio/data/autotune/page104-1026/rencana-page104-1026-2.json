@@ -1,0 +1,42 @@
+{
+ "format": "bascorro-studio/training-plan",
+ "created_at": "2026-10-26T13:16:04Z",
+ "kind": "kick",
+ "notes": [],
+ "matches": [],
+ "rules": [],
+ "factors": {},
+ "unmatched_notes": [],
+ "weights_before": {
+  "gyro_rms_dps": 0.3,
+  "tilt_max_deg": 0.25,
+  "settle_dev_deg": 0.2,
+  "settle_gyro_dps": 0.1,
+  "yaw_abs_deg": 0.15
+ },
+ "weights": {
+  "gyro_rms_dps": 0.3,
+  "tilt_max_deg": 0.25,
+  "settle_dev_deg": 0.2,
+  "settle_gyro_dps": 0.1,
+  "yaw_abs_deg": 0.15
+ },
+ "params_before": [
+  "pitch_hip_deg",
+  "pitch_ankle_deg",
+  "roll_hip_deg",
+  "roll_ankle_deg"
+ ],
+ "params": [
+  "pitch_hip_deg",
+  "pitch_ankle_deg",
+  "roll_hip_deg",
+  "roll_ankle_deg"
+ ],
+ "source": {
+  "session": "page104-1026",
+  "trial": 5,
+  "score": 0.7234,
+  "result_id": "page104-1026-n005"
+ }
+}

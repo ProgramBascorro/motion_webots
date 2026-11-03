@@ -220,3 +220,16 @@ tes_ball_*.mp4
 # Salinan otomatis sebelum tiap Save versi walking Studio (berkas utamanya
 # src/bascorro_studio/data/walking_versions.json sengaja TIDAK diabaikan).
 src/bascorro_studio/data/backup/
+src/bascorro_studio/data/backup_walking_ready/
+# Sesi training (menu Training: autotune_walking.py + autotune_action.py): rekaman MENTAH
+# tiap percobaan diabaikan (~100 KB/percobaan); state.json, trials.csv, feedback.jsonl,
+# hasil.json, export/, rencana-*.json, dan dataset.csv SENGAJA ikut repo sebagai bekal
+# tuning berikutnya. running.json = kunci "sesi sedang berjalan" milik satu proses.
+# training_export/ = salinan hasil yang diekspor operator ke luar sesi (training.py bundle).
+src/bascorro_studio/data/autotune/*/raw/
+src/bascorro_studio/data/autotune/*/running.json
+/training_export/
+# Cadangan otomatis, bukan sumber: state.json sebelum --rescore (menu Training) dan
+# kalibrasi yaw lama yang disimpan calib_imu_yaw.py. Yang aktif tetap ikut repo.
+src/bascorro_studio/data/autotune/*/state.*sebelum*
+src/ROBOTIS-OP3/op3_manager/config/yaw_calibration_history/

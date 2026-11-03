@@ -33,6 +33,7 @@ memanaskan servo — mintalah robot digantung/dipegang sebelum uji pertama.
 |---|---|
 | Memasang repo ini di robot baru | `SETUP_ROBOT_BARU.md` |
 | Parameter walking, tab Walking di Bascorro Studio | `PANDUAN_PARAMETER_WALKING.md` |
+| Menu Training (`./script.sh` → Training): melatih preset Studio / page Action Editor, hasil terbaik, feedback manual yang langsung jadi perubahan + iterasi berikutnya, apa yang dioptimasi di page, simpan hasil / kirim ke robot | `PANDUAN_TRAINING.md` |
 | Menurunkan nilai `x/y/z_offset` dari page 2, teori FK | `ROBOT1_WALKING_HANDOFF.md` |
 | Serial/OpenCR tidak terdeteksi | `TROUBLESHOOT_OPENCR_POWER.md`, lalu `scripts/op3_docker.sh doctor` |
 
