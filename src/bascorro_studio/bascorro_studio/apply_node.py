@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Dict, Tuple
@@ -110,6 +111,7 @@ class ActionWebNode(Node):
         )
 
         self._busy = False
+        self._action_train = None
         self.get_logger().info("Studio action node ready")
         self.get_logger().info(f"Action file: {self.action_file}")
 
@@ -172,6 +174,14 @@ class ActionWebNode(Node):
                 self.rl_add_trial(payload.get("trial"), request_id)
             elif action == "rl_delete_trial":
                 self.rl_delete_trial(payload.get("id"), request_id)
+            elif action == "act_get":
+                self.rl_get(request_id, store="action", action=action)
+            elif action == "act_add_trial":
+                self.rl_add_trial(payload.get("trial"), request_id, store="action", action=action)
+            elif action == "act_delete_trial":
+                self.rl_delete_trial(payload.get("id"), request_id, store="action", action=action)
+            elif action.startswith("act_"):
+                self.action_train(action, payload, request_id)
             else:
                 self.publish_result(
                     {
@@ -351,39 +361,42 @@ class ActionWebNode(Node):
     # Satu berkas untuk semua sesi; nomor percobaan dihitung per sesi DI SINI,
     # jadi dua peramban yang terbuka bersamaan tidak memberi nomor kembar.
     # Percobaan lama dari menu Training masuk lewat scripts/rl_impor_training.py.
-    def rl_path(self) -> str:
+    # Percobaan yang sudah dinilai: tab RL Training di rl_runs/studio, tab Action
+    # Training di rl_runs/action (aksi act_get/act_add_trial/act_delete_trial).
+    def rl_path(self, store="studio") -> str:
         ws = os.environ.get("OP3_WS", "/ros2_ws")
-        return os.path.join(ws, "rl_runs", "studio", "trials.json")
+        return os.path.join(ws, "rl_runs", store, "trials.json")
 
-    def rl_load(self) -> list:
+    def rl_load(self, store="studio") -> list:
         try:
-            with open(self.rl_path(), "r", encoding="utf-8") as handle:
+            with open(self.rl_path(store), "r", encoding="utf-8") as handle:
                 data = json.load(handle)
         except (OSError, json.JSONDecodeError):
             return []
         trials = data.get("trials") if isinstance(data, dict) else None
         return trials if isinstance(trials, list) else []
 
-    def rl_save(self, trials: list) -> None:
-        path = self.rl_path()
+    def rl_save(self, trials: list, store="studio") -> None:
+        path = self.rl_path(store)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump({"trials": trials}, handle, indent=2)
         os.replace(tmp, path)
 
-    def rl_get(self, request_id=None) -> None:
+    def rl_get(self, request_id=None, store="studio", action="rl_get") -> None:
         self.publish_result(
-            {"ok": True, "action": "rl_get", "trials": self.rl_load(), "path": self.rl_path(),
+            {"ok": True, "action": action, "trials": self.rl_load(store), "path": self.rl_path(store),
              "request_id": request_id}
         )
 
-    def rl_add_trial(self, trial, request_id=None) -> None:
-        if not isinstance(trial, dict) or not isinstance(trial.get("params"), dict):
-            self.publish_result({"ok": False, "action": "rl_add_trial",
-                                 "message": "trial harus berisi params", "request_id": request_id})
+    def rl_add_trial(self, trial, request_id=None, store="studio", action="rl_add_trial") -> None:
+        field = "values" if store == "action" else "params"
+        if not isinstance(trial, dict) or not isinstance(trial.get(field), dict):
+            self.publish_result({"ok": False, "action": action,
+                                 "message": f"trial harus berisi {field}", "request_id": request_id})
             return
-        trials = self.rl_load()
+        trials = self.rl_load(store)
         session = str(trial.get("session") or "default")
         trial["session"] = session
         trial["no"] = 1 + max((int(t.get("no", 0)) for t in trials if t.get("session") == session),
@@ -391,29 +404,68 @@ class ActionWebNode(Node):
         trial.setdefault("at", int(time.time() * 1000))
         trials.append(trial)
         try:
-            self.rl_save(trials)
+            self.rl_save(trials, store)
         except OSError as exc:
-            self.publish_result({"ok": False, "action": "rl_add_trial",
+            self.publish_result({"ok": False, "action": action,
                                  "message": f"Write error: {exc}", "request_id": request_id})
             return
-        self.publish_result({"ok": True, "action": "rl_add_trial", "trial": trial,
+        self.publish_result({"ok": True, "action": action, "trial": trial,
                              "trials": trials, "request_id": request_id})
 
-    def rl_delete_trial(self, trial_id, request_id=None) -> None:
-        trials = self.rl_load()
+    def rl_delete_trial(self, trial_id, request_id=None, store="studio", action="rl_delete_trial") -> None:
+        trials = self.rl_load(store)
         kept = [t for t in trials if t.get("id") != trial_id]
         if len(kept) == len(trials):
-            self.publish_result({"ok": False, "action": "rl_delete_trial",
+            self.publish_result({"ok": False, "action": action,
                                  "message": "percobaan tidak ditemukan", "request_id": request_id})
             return
         try:
-            self.rl_save(kept)
+            self.rl_save(kept, store)
         except OSError as exc:
-            self.publish_result({"ok": False, "action": "rl_delete_trial",
+            self.publish_result({"ok": False, "action": action,
                                  "message": f"Write error: {exc}", "request_id": request_id})
             return
-        self.publish_result({"ok": True, "action": "rl_delete_trial", "trials": kept,
+        self.publish_result({"ok": True, "action": action, "trials": kept,
                              "request_id": request_id})
+
+    # Tab Action Training: semua yang menyentuh .bin ada di scripts/training_action_web.py
+    # (satu rumus dengan menu Training). Robotnya dijalankan dari browser.
+    def action_train_module(self):
+        if self._action_train is None:
+            scripts = os.path.join(os.environ.get("OP3_WS", "/ros2_ws"), "scripts")
+            if scripts not in sys.path:
+                sys.path.insert(0, scripts)
+            import training_action_web
+            self._action_train = training_action_web
+        return self._action_train
+
+    def action_train(self, action, payload, request_id=None) -> None:
+        try:
+            web = self.action_train_module()
+            if action == "act_pages":
+                result = web.page_list()
+            elif action == "act_page":
+                result = web.page_detail(payload.get("page"))
+            elif action == "act_load":
+                result = web.load(payload.get("page"), payload.get("sha"), payload.get("values") or {})
+            elif action == "act_restore":
+                result = web.restore()
+            elif action == "act_metrics":
+                result = web.trial_metrics(payload.get("samples") or [], payload.get("marks") or {},
+                                           str(payload.get("profile") or "kick"))
+            elif action == "act_deploy":
+                result = web.deploy_result(payload.get("page"), payload.get("sha"), payload.get("values") or {},
+                                           payload.get("target"), payload.get("name") or None,
+                                           bool(payload.get("overwrite")))
+            else:
+                raise ValueError(f"Unknown action: {action}")
+        # SystemExit juga: alat terminal di scripts/ melapor galat dengannya, dan node ini
+        # tidak boleh ikut mati karena satu permintaan.
+        except (Exception, SystemExit) as exc:
+            self.get_logger().error(f"{action}: {exc}")
+            self.publish_result({"ok": False, "action": action, "message": str(exc), "request_id": request_id})
+            return
+        self.publish_result({"ok": True, "action": action, "request_id": request_id, **result})
 
     def delete_bin(self, target, request_id=None) -> None:
         path, err = self.resolve_target(target, must_exist=True)

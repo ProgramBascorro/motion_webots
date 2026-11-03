@@ -38,18 +38,25 @@ Rumus: `angka tampilan = nilai asli ROS - acuan`; saat operator mengedit,
 `nilai asli ROS = angka tampilan + acuan`. Kolom Current menggunakan rumus
 yang sama terhadap hasil Load terakhir, bukan terhadap draft.
 
-| Field | Nilai asli ROS yang ditampilkan sebagai 0 |
+| Field | Nilai asli ROS yang ditampilkan sebagai 0 (acuan 23 Okt 2026) |
 |---|---:|
-| `init_x_offset` | -0.02 m |
+| `init_x_offset` | 0.0103 m |
 | `init_y_offset` | 0 m |
-| `init_z_offset` | 0.0408 m |
+| `init_z_offset` | 0.0407 m |
 | `init_roll_offset` | 0 rad |
-| `init_pitch_offset` | -0.07 rad |
+| `init_pitch_offset` | 0.0361 rad |
 | `init_yaw_offset` | 0 rad |
 | `hip_pitch_offset` | 0.1396 rad |
 
-Acuan tetap ini disimpan di `web/src/walkingPoseReference.js`, berdasarkan
-konfigurasi ALPHONSE pada 11 September 2026. Y sengaja **bukan 0.028**:
+Angka di tabel hanya contoh; sumbernya `data/walking_ready_reference.json`,
+hasil FK page 2 `WALKING_READY` di `ALPHONSE.bin` lewat IK walking_module
+(`scripts/walking_ready_fk.py`). Berkas yang sama dibaca demo D60 dan disalin
+ke `param.yaml`. Sesudah page 2 di-teach ulang: tutup Studio, jalankan
+`python3 scripts/walking_ready_fk.py --write` (ia juga menggeser semua versi
+tersimpan supaya angka relatifnya tetap, lalu menandainya `poseReferenceId`),
+buka lagi Studio. Apply & Start memutar page 2 dulu kalau walking_module belum
+memegang kaki, jadi semua kolom 0 = berdiri persis di page 2. Sampai 23 Okt
+acuannya x -0.02 / pitch -0.07 (isi param.yaml 3 Sep, bukan FK). Y sengaja **bukan 0.028**:
 `computeNeutralLegAngle(..., false)` mengeluarkan Y dari perhitungan bias,
 jadi Y sudah berupa tambahan lebar terhadap stance yang ditangkap.
 Contoh: ROS `init_x_offset=-0.03` terlihat sebagai `-0.01`, sedangkan

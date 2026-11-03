@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import YAML from "js-yaml";
+import { SYNCED_DRAFT_KEY, draftReloadDecision, syncedRecord } from "./actionDraftSync.js";
 import ROSLIB from "roslib";
 import * as THREE from "three";
 import URDFLoader from "urdf-loader";
@@ -367,6 +368,10 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
   // the user can see which bin "Apply/Upload" writes to and whether it changed
   // since this draft was loaded (prevents overwriting newer edits with a stale draft).
   const [binInfo, setBinInfo] = useState(null);
+  // Teks yang dikirim Apply -- dicatat sebagai "sinkron dengan .bin" saat sukses
+  // (callback hasil memegang yamlText lama, jadi lewat ref).
+  const appliedYamlRef = useRef("");
+  const draftSyncCheckedRef = useRef(false);
   const [showUploadConfirm, setShowUploadConfirm] = useState(false);
   // Bin File picker: all *.bin files in the action data dir, which one the editor
   // currently targets, and the launch-active bin (protected from deletion).
@@ -903,8 +908,10 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
         if (payload.action === "export" && payload.yaml) {
           setYamlText(payload.yaml);
           setLastSyncMs(payload.mtime ? payload.mtime * 1000 : Date.now());
+          rememberSyncedDraft(payload.yaml, payload.action_file, payload.mtime);
         }
         if (payload.action === "apply" && payload.ok) {
+          rememberSyncedDraft(appliedYamlRef.current, payload.action_file, payload.mtime);
           try {
             localStorage.removeItem(ACTION_DRAFT_KEY);
             localStorage.removeItem(ACTION_DRAFT_META_KEY);
@@ -1140,6 +1147,7 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
   };
   const confirmApply = () => {
     setShowUploadConfirm(false);
+    appliedYamlRef.current = yamlText;
     sendRequest({ action: "apply", yaml: yamlText, ...targetArg() });
     setStatus("Applying..."); setStatusError(false);
   };
@@ -1189,6 +1197,45 @@ export default function ActionEditor({ isActive = true, rosUrl = "" }) {
     sendRequest({ action: "delete", target: selectedTarget });
     setStatus(`Deleting ${selectedTarget}...`); setStatusError(false);
   };
+
+  // Draft = .bin pada saat ini: sidik teks + waktu .bin (lihat actionDraftSync.js).
+  function rememberSyncedDraft(text, binPath, mtimeSec) {
+    if (!text || !binPath || !mtimeSec) return;
+    try {
+      localStorage.setItem(SYNCED_DRAFT_KEY, JSON.stringify(syncedRecord(text, binPath, mtimeSec * 1000)));
+    } catch {
+      // Kuota penuh: tanpa catatan, draft hanya tidak dimuat ulang otomatis.
+    }
+  }
+
+  // SEKALI per buka Studio, begitu waktu .bin aktif diketahui: draft yang belum
+  // diedit tapi .bin-nya diubah di luar Studio langsung diganti isi .bin. Draft
+  // yang sudah diedit TIDAK disentuh -- cuma diberi tahu.
+  useEffect(() => {
+    if (draftSyncCheckedRef.current || !binInfo?.mtime) return;
+    if (selectedTarget && binActiveName && selectedTarget !== binActiveName) return;
+    draftSyncCheckedRef.current = true;
+    let synced = null;
+    try {
+      synced = JSON.parse(localStorage.getItem(SYNCED_DRAFT_KEY) || "null");
+    } catch {
+      synced = null;
+    }
+    const decision = draftReloadDecision({
+      draftText: yamlText, hasDraft: hasLocalDraft, binPath: binInfo.path, binMtimeMs: binInfo.mtime, synced,
+    });
+    if (decision === "load" || decision === "reload") {
+      sendRequest({ action: "export", pages: exportPages, ...targetArg() });
+      setStatus(decision === "reload"
+        ? `${binInfo.name} diubah di luar Studio (${new Date(binInfo.mtime).toLocaleString()}) dan draft belum diedit -- dimuat ulang dari bin`
+        : `Memuat ${binInfo.name}...`);
+      setStatusError(false);
+    } else if (decision === "edited") {
+      setStatus(`${binInfo.name} di disk lebih baru, tapi draft ini sudah diedit -- TIDAK dimuat ulang. `
+        + "Tekan Reload kalau mau isi bin.");
+      setStatusError(true);
+    }
+  }, [binInfo, binActiveName, selectedTarget, hasLocalDraft, yamlText]);
 
   // staleness check for the upload confirmation: was the target bin changed on
   // disk AFTER this draft was generated? (e.g. edited via the terminal editor)

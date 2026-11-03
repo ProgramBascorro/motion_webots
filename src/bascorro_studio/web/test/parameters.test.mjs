@@ -6,10 +6,6 @@ import {
   validateWalkingParams, parametersEqual, mergeWalkingEdits, applyWalkingDraft,
   snapFloat32, snapWalkingRuntime, legReachNeeded, checkLegReach, LEG_REACH_M,
 } from "../src/walkingParams.js";
-import {
-  KICK_DEFAULT_PARAMS, KICK_PARAM_KEYS, validateKickParams,
-  decodeKickParameters, makeKickParameters,
-} from "../src/kickParams.js";
 
 function walkingParams(overrides = {}) {
   return {
@@ -114,53 +110,10 @@ test("a competing walking writer produces an error, not false success", async ()
   }), /belum terkonfirmasi/);
 });
 
-test("kick reference and keys match the current launch", () => {
-  const launch = readFileSync(new URL("../../../ROBOTIS-OP3-Demo/op3_demo/launch/demo.launch.xml", import.meta.url), "utf8");
-  for (const key of KICK_PARAM_KEYS) {
-    const match = launch.match(new RegExp('<arg name="' + key + '" default="([^"]+)"'));
-    assert.ok(match, key);
-    assert.equal(Number(match[1]), KICK_DEFAULT_PARAMS[key], key);
-  }
-});
 
-test("kick rejects invalid geometry and values that the controller would silently clamp", () => {
-  for (const invalid of [
-    { kick_distance: "" }, { kick_distance: 0 }, { kick_camera_height: 0.05 },
-    { kick_camera_pitch_offset_deg: -60.01 }, { kick_camera_pitch_offset_deg: 60.01 },
-    { kick_camera_pitch_offset_deg: NaN }, { kick_camera_pitch_offset_deg: Infinity },
-    { kick_fov_width_deg: 90 }, { kick_ball_radius_margin: 1 }, { kick_head_tilt_sign: 0 },
-    { kick_distance_filter_n: 2.5 }, { kick_radius_ready_enable: 0.5 }, { kick_ball_radius_px: -1 },
-    { kick_distance_filter_n: 2147483648 },
-  ]) assert.throws(() => validateKickParams({ ...KICK_DEFAULT_PARAMS, ...invalid }));
-});
 
-test("missing kick parameters never become fake loaded defaults", () => {
-  const values = KICK_PARAM_KEYS.map((key) => ({ type: 3, double_value: KICK_DEFAULT_PARAMS[key] }));
-  assert.deepEqual(decodeKickParameters({ values }).params, KICK_DEFAULT_PARAMS);
-  assert.throws(() => decodeKickParameters({ values: values.slice(1) }));
-  assert.throws(() => decodeKickParameters({ values: [{ type: 0 }, ...values.slice(1)] }));
-  assert.throws(() => decodeKickParameters({ values: [{ type: 3, double_value: NaN }, ...values.slice(1)] }));
-});
 
-test("camera pitch correction preserves its sign and numeric ROS type", () => {
-  const types = Object.fromEntries(KICK_PARAM_KEYS.map((key) => [key, 3]));
-  for (const offset of [-60, 0, 30.84, 60]) {
-    const params = { ...KICK_DEFAULT_PARAMS, kick_camera_pitch_offset_deg: offset };
-    assert.equal(validateKickParams(params).kick_camera_pitch_offset_deg, offset);
-    const written = makeKickParameters(params, types).find(({ name }) => name === "kick_camera_pitch_offset_deg");
-    assert.deepEqual(written.value, { type: 3, double_value: offset });
-  }
-});
 
-test("kick writes preserve declared double/integer types", () => {
-  const types = Object.fromEntries(KICK_PARAM_KEYS.map((key) => [key, 3]));
-  types.kick_ready_count = 2;
-  const parameters = makeKickParameters(KICK_DEFAULT_PARAMS, types);
-  assert.deepEqual(parameters.find(({ name }) => name === "kick_ready_count").value, { type: 2, integer_value: 4 });
-  assert.deepEqual(parameters.find(({ name }) => name === "kick_radius_ready_enable").value,
-    { type: 3, double_value: KICK_DEFAULT_PARAMS.kick_radius_ready_enable });
-  assert.throws(() => makeKickParameters(KICK_DEFAULT_PARAMS, { ...types, kick_distance: 2 }));
-});
 
 // WalkingParam bertipe float32. Yang dikirim 0.028 kembali sebagai
 // 0.02800000086426735, dan applyWalkingDraft() menuliskan hasil baca ulang itu

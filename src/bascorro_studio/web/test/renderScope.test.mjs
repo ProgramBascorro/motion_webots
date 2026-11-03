@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// App.jsx punya satu fungsi render per halaman (renderWalking, renderKick, ...)
+// App.jsx punya satu fungsi render per halaman (renderWalking, renderDemo, ...)
 // dan MASING-MASING mendeklarasikan const lokalnya sendiri -- termasuk beberapa
-// yang namanya mirip, seperti walkingButtonBase dan kickButtonBase.
+// yang namanya mirip, seperti walkingButtonBase dan demoButtonBase.
 //
-// 2026-09-08 sebuah tombol baru di renderKick memakai walkingButtonBase, yang
+// 2026-09-08 sebuah tombol baru di satu halaman memakai walkingButtonBase, yang
 // cuma ada di dalam renderWalking. Itu ReferenceError saat render: tab Tendangan
 // jadi LAYAR PUTIH total.
 //

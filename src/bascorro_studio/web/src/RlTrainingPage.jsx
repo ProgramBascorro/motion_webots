@@ -5,12 +5,15 @@ import {
   applyWalkingDraft, parseWalkingNumber, snapWalkingRuntime, validateWalkingParams, walkingPoseFarFromReference,
 } from "./walkingParams.js";
 import { WALKING_POSE_REFERENCE } from "./walkingPoseReference.js";
+import { recordImu, turnSummary, turnText } from "./imuRecording.js";
+import { clamp, proposeCandidate } from "./trainingLearn.js";
 
 // RL Training di robot asli dengan penilaian operator (dipasang dari CHRONUS
 // 2026-10-28).
 //
 // Tiap percobaan: ambil DATA AWAL dari Studio (bawaan: versi walking "JALAN
-// BARU" terbaru; bisa juga tabel Walking yang terbuka atau versi lain), acak
+// BARU" terbaru, target putar kiri/kanan: "Putar Kiri/Kanan New"; bisa juga
+// tabel Walking yang terbuka atau versi lain), acak
 // sebagian parameternya di dalam rentang sempit di sekitarnya, jalankan di robot, lalu operator menilai:
 // kestabilan (normal / hampir jatuh / jatuh) dan gerakan yang benar-benar
 // terjadi (jalan maju / mutar / geser ...). Skor = kestabilan + cocok-tidaknya
@@ -60,17 +63,35 @@ const RL_PARAMS = [
   { key: "dsp_ratio", label: "DSP ratio", spread: 0.03, lo: 0.05, hi: 0.60, step: 0.01 },
   { key: "z_move_amplitude", label: "Angkat kaki (m)", spread: 0.002, lo: 0.005, hi: 0.070, step: 0.001 },
   { key: "y_swap_amplitude", label: "Goyang kiri-kanan (m)", spread: 0.002, lo: 0.0, hi: 0.035, step: 0.001 },
+  // Offset pose (operator 2026-10-31). Batas = acuan page 2 +- batas menu Training
+  // (autotune_walking_core.BOUNDS: hip pitch +-0,06, pitch +-0,05 rad); semua preset
+  // yang ada (JALAN BARU 0,19) di dalamnya. Arah tanda dari training_iteration.py.
+  // Ikut stance diam sebelum start (STANCE_SETTLE_MS), tidak berubah di tengah gait.
+  { key: "hip_pitch_offset", label: "Hip pitch offset (rad, + = badan atas ke depan)", spread: 0.02,
+    lo: Number((WALKING_POSE_REFERENCE.offsets.hip_pitch_offset - 0.06).toFixed(4)),
+    hi: Number((WALKING_POSE_REFERENCE.offsets.hip_pitch_offset + 0.06).toFixed(4)), step: 0.005 },
+  { key: "init_pitch_offset", label: "Pitch offset (rad, − = seluruh badan ke depan)", spread: 0.02,
+    lo: Number((WALKING_POSE_REFERENCE.offsets.init_pitch_offset - 0.05).toFixed(4)),
+    hi: Number((WALKING_POSE_REFERENCE.offsets.init_pitch_offset + 0.05).toFixed(4)), step: 0.005 },
 ];
 // spread = setengah lebar rentang bawaan di sekitar data awal. Sengaja sempit
 // (tahap memperhalus): operator minta parameter tidak jauh dari data awal.
 // Angle +-0,01 dibawa dari CHRONUS (di sana 0,02 dan 0,05 jatuh 50%); autotune
 // jb1 di robot ini menjelajah -0,016..+0,006 rad.
 //
-// Data awal otomatis: nama pertama di daftar ini yang ada versinya (updatedAt
-// terbaru kalau namanya kembar). "JALAN BARU RL" = nama bawaan hasil
-// rl_hitung_template.py --tulis; selama belum ada, JALAN BARU (template jalan
-// maju pilihan operator 2026-10-28, juga data awal semua sesi menu Training).
-const DEFAULT_BASE_NAMES = ["jalan baru rl", "jalan baru"];
+// Data awal otomatis: nama pertama di daftar target itu yang ada versinya
+// (updatedAt terbaru kalau namanya kembar). "<nama> RL" = nama bawaan hasil
+// rl_hitung_template.py --tulis; selama belum ada, template aslinya. Bawaan
+// JALAN BARU (template jalan maju pilihan operator 2026-10-28, juga data awal
+// semua sesi menu Training). Putar kiri/kanan (2026-11-01): template koreksi
+// yaw D60 bernama sama -- tanpa itu tidak ada fallback ke JALAN BARU, jalan
+// lurus bukan titik awal untuk memutar.
+const DEFAULT_BASE_NAMES = {
+  putar_kiri: ["Putar Kiri New RL", "Putar Kiri New"],
+  putar_kanan: ["Putar Kanan New RL", "Putar Kanan New"],
+};
+const FALLBACK_BASE_NAMES = ["JALAN BARU RL", "JALAN BARU"];
+const baseNamesOf = (target) => DEFAULT_BASE_NAMES[target] || FALLBACK_BASE_NAMES;
 const DEFAULT_ON = new Set(["x_move_amplitude", "y_move_amplitude", "angle_move_amplitude", "period_time"]);
 
 const STABILITY = [
@@ -81,6 +102,8 @@ const STABILITY = [
 const MOVES = [
   { id: "maju", label: "Jalan maju" },
   { id: "mutar", label: "Mutar" },
+  { id: "putar_kiri", label: "Putar kiri" },
+  { id: "putar_kanan", label: "Putar kanan" },
   { id: "geser_kanan", label: "Geser kanan" },
   { id: "geser_kiri", label: "Geser kiri" },
   { id: "lainnya", label: "Diam / tidak jelas" },
@@ -110,15 +133,8 @@ const CARD = "bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-co
 const CARD_HEAD = "px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50";
 const CARD_TITLE = "text-sm font-bold font-display text-gray-800 uppercase tracking-wide";
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const fmt = (v, step) => (Number.isFinite(v) ? v.toFixed(step < 0.01 ? 4 : 3) : "-");
 const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-// Box-Muller: sampel normal baku.
-const randn = () => {
-  let u = 0;
-  while (u === 0) u = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
-};
 
 function defaultRanges(base) {
   const out = {};
@@ -161,20 +177,21 @@ export default function RlTrainingPage({
   const connected = rosState === "connected" && !!ros;
 
   // --- data awal ---
-  // "auto" = versi "JALAN BARU" dengan updatedAt terbaru (nama boleh kembar);
-  // "table" = tabel Walking; selain itu id versi.
+  // "auto" = versi bawaan target (baseNamesOf) dengan updatedAt terbaru (nama
+  // boleh kembar); "table" = tabel Walking; selain itu id versi.
+  const [target, setTarget] = useState("maju");
   const [baseSource, setBaseSource] = useState("auto");
   const autoBase = useMemo(() => {
-    for (const name of DEFAULT_BASE_NAMES) {
+    for (const name of baseNamesOf(target)) {
       let best = null;
       (walkingVersions || []).forEach((v) => {
-        if (String(v.name || "").trim().toLowerCase() !== name) return;
+        if (String(v.name || "").trim().toLowerCase() !== name.toLowerCase()) return;
         if (!best || (v.updatedAt || 0) > (best.updatedAt || 0)) best = v;
       });
       if (best) return best;
     }
     return null;
-  }, [walkingVersions]);
+  }, [walkingVersions, target]);
   const autoBaseId = autoBase?.id || "";
   const effectiveSource = baseSource === "auto" ? autoBaseId || "table" : baseSource;
   const baseInfo = useMemo(() => {
@@ -196,7 +213,6 @@ export default function RlTrainingPage({
   );
 
   // --- pengaturan ---
-  const [target, setTarget] = useState("maju");
   const [mode, setMode] = useState("learn");                 // "random" | "learn"
   const [durationText, setDurationText] = useState("4");
   const [session, setSession] = useState(() => `sesi ${new Date().toLocaleDateString("id-ID")}`);
@@ -372,69 +388,24 @@ export default function RlTrainingPage({
     [history]
   );
 
-  // Mode "belajar" (cross-entropy sederhana, dipandu penilaian operator):
-  //  1. elit = percobaan yang SESUAI atau MENDEKATI target dan tidak jatuh,
-  //     diambil separuh teratas menurut skor (maks 5);
-  //  2. pusat = rata-rata elit berbobot 2^(skor - skor_tertinggi): "sesuai +
-  //     normal" (5) menarik 4x lebih kuat dari "mendekati + normal" (3);
-  //  3. sebaran mulai 1/4 rentang dan MENYEMPIT tiap kali ada "sesuai + normal"
-  //     (memperhalus di sekitar yang sudah benar), tidak lebih kecil dari 1/10
-  //     rentang -- elit yang kembar membuat sebarannya nol, dan tanpa lantai ini
-  //     robot cuma mengulang angka yang sama tanpa peluang membaik;
-  //     kalau elit >= 3, ikut dicampur dengan sebaran elit itu sendiri;
-  //  4. tiga percobaan terakhir gagal semua (jatuh / tidak sesuai) -> sebaran
-  //     x1,5 supaya tidak terjebak di sekitar titik yang ternyata buruk.
-  // Belum ada satu pun yang sesuai/mendekati -> eksplorasi acak penuh dalam rentang.
-  const makeCandidate = () => {
-    const varied = {};
-    const active = RL_PARAMS.filter((p) => ranges[p.key]?.on);
-    const good = history.filter(isGood).sort((a, b) => scoreOf(b) - scoreOf(a) || (b.no || 0) - (a.no || 0));
-    const learn = mode === "learn" && good.length > 0;
-    let elite = [];
-    let weights = [];
-    let shrink = 1;
-    let widen = 1;
-    if (learn) {
-      elite = good.slice(0, Math.min(5, Math.max(1, Math.ceil(good.length / 2))));
-      const top = scoreOf(elite[0]);
-      weights = elite.map((t) => 2 ** (scoreOf(t) - top));
-      const solid = history.filter((t) => matchOf(t) === "sesuai" && t.stability === "normal").length;
-      shrink = Math.max(0.2, 1 / (1 + 0.5 * solid));
-      const last3 = history.slice(0, 3);   // history terurut terbaru dulu
-      if (last3.length === 3 && last3.every(isBad)) widen = 1.5;
-    }
-    const wSum = weights.reduce((s, x) => s + x, 0);
-    active.forEach((p) => {
+  // Mode "belajar": trainingLearn.js. Elit = SESUAI atau MENDEKATI target dan
+  // tidak jatuh; sebaran menyempit tiap ada "sesuai + normal"; "sesuai + normal"
+  // (5) menarik 4x lebih kuat dari "mendekati + normal" (3).
+  const makeCandidate = () => proposeCandidate({
+    params: RL_PARAMS.filter((p) => ranges[p.key]?.on).map((p) => {
       const r = ranges[p.key];
-      const lo = clamp(Math.min(r.min, r.max), p.lo, p.hi);
-      const hi = clamp(Math.max(r.min, r.max), p.lo, p.hi);
-      const span = hi - lo;
-      let v;
-      if (learn) {
-        const vals = elite.map((t) => Number(t.params?.[p.key] ?? base.params[p.key]));
-        const center = vals.reduce((s, x, i) => s + weights[i] * x, 0) / wSum;
-        let sigma = (span / 4) * shrink;
-        if (elite.length >= 3) {
-          const sd = Math.sqrt(vals.reduce((s, x, i) => s + weights[i] * (x - center) ** 2, 0) / wSum);
-          sigma = 0.5 * sigma + 0.5 * sd;
-        }
-        sigma = clamp(sigma * widen, span / 10, span / 2);
-        v = center + randn() * sigma;
-      } else {
-        v = lo + Math.random() * span;
-      }
-      v = clamp(v, lo, hi);
-      varied[p.key] = Number((Math.round(v / p.step) * p.step).toFixed(4));
-    });
-    let basis = "acak penuh dalam rentang";
-    if (learn) {
-      basis = `pusat dari ${elite.map((t) => `#${t.no}`).join(", ")} · sebaran ${Math.round(shrink * widen * 100)}%`
-        + (widen > 1 ? " (dilebarkan: 3 terakhir gagal)" : "");
-    } else if (mode === "learn") {
-      basis = "eksplorasi: belum ada yang sesuai/mendekati target";
-    }
-    return { varied, learn, basis };
-  };
+      return {
+        key: p.key, step: p.step,
+        lo: clamp(Math.min(r.min, r.max), p.lo, p.hi),
+        hi: clamp(Math.max(r.min, r.max), p.lo, p.hi),
+      };
+    }),
+    history,   // terurut terbaru dulu
+    mode, scoreOf, isGood, isBad,
+    isSolid: (t) => matchOf(t) === "sesuai" && t.stability === "normal",
+    valueOf: (t, key) => Number(t.params?.[key] ?? base.params[key]),
+    exploreBasis: "eksplorasi: belum ada yang sesuai/mendekati target",
+  });
 
   // --- satu percobaan ---
   const runTrial = async () => {
@@ -470,31 +441,43 @@ export default function RlTrainingPage({
     // Hanya menyalakan modul kalau kaki belum dipegang walking_module (lihat
     // initThenEnableWalking di App.jsx). Menyalakannya ulang merekam bias baru.
     let ok = (await enableWalking(still)) && !abortRef.current;
+    // IMU direkam sejak stance diam (jendela bias gyro) sampai sesudah berhenti:
+    // kecepatan putar dan goyang badan tampil di samping penilaian operator.
+    let rec = null;
+    const marks = {};
     if (ok) {
       // Stance data awal dulu, selagi diam -- walking module hanya melandaikan
       // perubahan offset saat diam.
       ok = await applyParams(still);
+      if (ok) rec = recordImu(ros);
       ok = ok && (await wait(STANCE_SETTLE_MS, setCountdown));
     }
     if (ok) ok = await applyParams(full);
     if (ok) {
       command("start");
+      marks.start = rec?.last();
       started = true;
       setPhase("jalan");
       ok = await wait(duration * 1000, setCountdown);
     }
     if (ok) {
       command("stop");
+      marks.stop = rec?.last();
       setPhase("berhenti");
       await wait((Number(full.soft_start_time) + Number(full.period_time) + 0.3) * 1000, setCountdown);
     }
     publishParams(still);
+    rec?.stop();
     if (!started && !abortRef.current) {
       // Gagal sebelum "start" (pesannya sudah tampil): robot tidak berjalan,
       // jadi tidak ada yang bisa dinilai.
       setPending(null);
       setPhase("idle");
       return;
+    }
+    if (rec && marks.start) {
+      const imu = turnSummary(rec.samples, marks.start, marks.stop ?? rec.last(), rec.last());
+      setPending((prev) => (prev ? { ...prev, imu } : prev));
     }
     setPhase("nilai");
   };
@@ -531,11 +514,13 @@ export default function RlTrainingPage({
 
   const exportCsv = () => {
     const keys = RL_PARAMS.map((p) => p.key);
-    const rows = [["no", "waktu", "target", "data_awal", "mode", "durasi", ...keys, "kestabilan", "gerakan", "kesesuaian", "skor", "catatan"]];
+    const rows = [["no", "waktu", "target", "data_awal", "mode", "durasi", ...keys, "kestabilan", "gerakan", "kesesuaian", "skor",
+      "putar_dps", "putar_total_deg", "goyang_dps", "catatan"]];
     [...sessionTrials].reverse().forEach((t) => {
       rows.push([
         t.no, new Date(t.at).toISOString(), t.target, t.base_name, t.mode, t.duration,
-        ...keys.map((k) => t.params?.[k]), t.stability, t.move, matchOf(t), scoreOf(t), t.note || "",
+        ...keys.map((k) => t.params?.[k]), t.stability, t.move, matchOf(t), scoreOf(t),
+        t.imu?.turn_dps, t.imu?.turn_deg, t.imu?.wobble_dps, t.note || "",
       ]);
     });
     const csv = rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -547,8 +532,11 @@ export default function RlTrainingPage({
     URL.revokeObjectURL(url);
   };
 
+  // Rentang yang belum ada di state (parameter baru sesudah halaman terbuka)
+  // diambil dari rentang bawaan di sekitar data awal.
+  const fallbackRanges = defaultRanges(base?.params);
   const setRange = (key, field, value) =>
-    setRanges((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+    setRanges((prev) => ({ ...prev, [key]: { ...(prev[key] ?? fallbackRanges[key]), [field]: value } }));
 
   const sessions = useMemo(() => {
     const set = new Set(trials.map((t) => t.session));
@@ -579,7 +567,9 @@ export default function RlTrainingPage({
                 disabled={busy}
               >
                 <option value="auto">
-                  {autoBase ? `Otomatis: versi "${autoBase.name}"` : "Otomatis: JALAN BARU (tidak ada → tabel Walking)"}
+                  {autoBase
+                    ? `Otomatis: versi "${autoBase.name}"`
+                    : `Otomatis: ${baseNamesOf(target).at(-1)} (tidak ada → tabel Walking)`}
                 </option>
                 <option value="table">Tabel Walking yang sedang terbuka</option>
                 {(walkingVersions || []).map((v) => (
@@ -659,7 +649,7 @@ export default function RlTrainingPage({
                 </thead>
                 <tbody>
                   {RL_PARAMS.map((p) => {
-                    const r = ranges[p.key];
+                    const r = ranges[p.key] ?? fallbackRanges[p.key];
                     return (
                       <tr key={p.key} className="border-t border-gray-100">
                         <td className="py-1.5">
@@ -685,7 +675,8 @@ export default function RlTrainingPage({
                 </tbody>
               </table>
               <p className="mt-2 text-[11px] text-gray-500">
-                Offset Init Pose, balance, dan field lain tidak diacak — dipakai apa adanya dari data awal.
+                Offset Init Pose selain hip pitch dan pitch, balance, dan field lain tidak diacak — dipakai apa
+                adanya dari data awal. Hip pitch dan pitch dipasang saat robot berdiri diam sebelum jalan.
                 Angkat kaki dibatasi 0,070 m (batas atas autotune ALPHONSE).
               </p>
             </div>
@@ -734,6 +725,17 @@ export default function RlTrainingPage({
                   ))}
                   {Object.keys(pending.varied).length === 0 && <span>(tidak ada yang diacak — data awal apa adanya)</span>}
                 </div>
+                {pending.imu !== undefined && (
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
+                    {pending.imu ? (
+                      <>
+                        <span>IMU putar <b className="text-gray-800">{turnText(pending.imu.turn_dps)}</b> (total {Math.abs(pending.imu.turn_deg).toFixed(0)}°)</span>
+                        <span>goyang {pending.imu.wobble_dps} °/s</span>
+                        {pending.imu.tilt_max_deg !== null && <span>miring maks {pending.imu.tilt_max_deg}°</span>}
+                      </>
+                    ) : <span>IMU: rekaman jalan terlalu pendek</span>}
+                  </div>
+                )}
               </div>
             )}
 
@@ -797,7 +799,8 @@ export default function RlTrainingPage({
                 </div>
                 {best.map((t) => (
                   <div key={t.id} className="flex flex-wrap items-center gap-x-3">
-                    <span>#{t.no} skor <b>{scoreOf(t)}</b> ({labelOf(STABILITY, t.stability)}, {labelOf(MATCH, matchOf(t))}, {labelOf(MOVES, t.move)})</span>
+                    <span>#{t.no} skor <b>{scoreOf(t)}</b> ({labelOf(STABILITY, t.stability)}, {labelOf(MATCH, matchOf(t))}, {labelOf(MOVES, t.move)})
+                      {t.imu && <> · putar {turnText(t.imu.turn_dps)}</>}</span>
                   </div>
                 ))}
               </div>
@@ -835,6 +838,8 @@ export default function RlTrainingPage({
                     <th className="pr-3">Gerakan</th>
                     <th className="pr-3">Kesesuaian</th>
                     <th className="pr-3 text-right">Skor</th>
+                    <th className="pr-3 text-right" title="Rata-rata kecepatan putar dari IMU selama berjalan">Putar IMU</th>
+                    <th className="pr-3 text-right" title="Goyang roll/pitch selama berjalan (RMS gyro)">Goyang °/s</th>
                     <th className="pr-3">Catatan</th>
                     <th />
                   </tr>
@@ -854,6 +859,8 @@ export default function RlTrainingPage({
                       <td className="pr-3">{labelOf(MOVES, t.move)}</td>
                       <td className="pr-3">{labelOf(MATCH, matchOf(t))}</td>
                       <td className="pr-3 text-right font-bold">{scoreOf(t)}</td>
+                      <td className="pr-3 text-right font-mono">{turnText(t.imu?.turn_dps)}</td>
+                      <td className="pr-3 text-right font-mono">{t.imu?.wobble_dps ?? "-"}</td>
                       <td className="pr-3 text-gray-500 max-w-[16rem] truncate">{t.note}</td>
                       <td className="py-1">
                         <button className="text-gray-400 hover:text-red-600" disabled={!connected}

@@ -14,17 +14,11 @@ from typing import Dict, List, Optional, Tuple
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from rcl_interfaces.srv import GetParameters
 from rclpy.node import Node
 from robotis_controller_msgs.msg import StatusMsg
 from sensor_msgs.msg import Image, Imu, JointState
 from std_msgs.msg import String, UInt8
 from std_srvs.srv import Trigger
-
-
-from bascorro_studio.kick_launch import (
-    KICK_LAUNCH_KEYS, read_kick_launch_defaults, rewrite_kick_launch_defaults,
-)
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
@@ -149,14 +143,6 @@ class StudioAgent(Node):
             ],
         )
         self.declare_parameter("bag_prefix", "op3")
-        # Kosong = cari sendiri lewat share directory op3_demo lalu diresolusi
-        # realpath. Di ruang kerja ini berkas launch di install/ cuma symlink ke
-        # sumbernya, jadi realpath mendarat tepat di berkas yang dilacak git --
-        # bukan salinan install yang akan tertimpa saat colcon build berikutnya.
-        self.declare_parameter("demo_launch_path", "")
-        self.declare_parameter(
-            "launch_backup_dir", "/tmp/bascorro_studio/launch_backups"
-        )
         self.declare_parameter("network_interface", "")
         self.declare_parameter("network_probe_host", "")
         self.declare_parameter("network_probe_port", 0)
@@ -195,24 +181,6 @@ class StudioAgent(Node):
         self._last_image: Optional[Image] = None
 
         # Node TERPISAH, sengaja tidak ikut executor utama.
-        #
-        # Menyimpan ke launch harus membaca dulu angka yang benar-benar hidup di
-        # demo_node, dan itu berarti memanggil service dari DALAM callback
-        # service. Memakai node ini sendiri untuk itu akan mengunci diri:
-        # executor-nya satu utas dan sedang sibuk menjalankan callback yang
-        # memanggil. Dengan node terpisah, spin_until_future_complete() memutar
-        # executor sementara miliknya sendiri dan tidak pernah bentrok.
-        #
-        # Nama nodenya "demo_node", BUKAN "op_demo_node" -- yang terakhir itu
-        # nama executable-nya, dan demo.launch.xml tidak menimpanya dengan
-        # atribut name. Salah nama di sini gagalnya sunyi: service-nya tidak
-        # pernah ketemu dan tombol simpan cuma melaporkan "tidak menjawab".
-        # Diverifikasi di robot dengan `ros2 service list | grep demo_node`.
-        self._param_node = rclpy.create_node("bascorro_studio_param_client")
-        self._kick_param_client = self._param_node.create_client(
-            GetParameters, "/demo_node/get_parameters"
-        )
-
         self.metrics_pub = self.create_publisher(String, "/bascorro_studio/metrics", 10)
         self.events_pub = self.create_publisher(String, "/bascorro_studio/events", 10)
 
@@ -232,16 +200,6 @@ class StudioAgent(Node):
         self.create_service(Trigger, "/bascorro_studio/snapshot", self._handle_snapshot)
         self.create_service(Trigger, "/bascorro_studio/bag_start", self._handle_bag_start)
         self.create_service(Trigger, "/bascorro_studio/bag_stop", self._handle_bag_stop)
-        self.create_service(
-            Trigger,
-            "/bascorro_studio/save_kick_to_launch",
-            self._handle_save_kick_to_launch,
-        )
-        self.create_service(
-            Trigger,
-            "/bascorro_studio/get_kick_launch",
-            self._handle_get_kick_launch,
-        )
 
         publish_rate = float(self.get_parameter("publish_rate").value)
         if publish_rate <= 0.0:
@@ -673,152 +631,6 @@ class StudioAgent(Node):
     # tidak mungkin menyimpan angka yang belum pernah dicoba, dan setelan yang
     # dipasang dari terminal dengan `ros2 param set` pun ikut tersimpan.
 
-    def _resolve_demo_launch_path(self) -> Tuple[Optional[str], str]:
-        configured = str(self.get_parameter("demo_launch_path").value or "").strip()
-        if configured:
-            if not os.path.isfile(configured):
-                return None, f"demo_launch_path menunjuk berkas yang tidak ada: {configured}"
-            return os.path.realpath(configured), ""
-
-        try:
-            share = get_package_share_directory("op3_demo")
-        except Exception as exc:  # noqa: BLE001
-            return None, f"share directory op3_demo tidak ditemukan ({exc})"
-
-        candidate = os.path.join(share, "launch", "demo.launch.xml")
-        if not os.path.isfile(candidate):
-            return None, f"demo.launch.xml tidak ada di {candidate}"
-        # realpath menembus symlink install/ ke berkas sumber yang dilacak git.
-        return os.path.realpath(candidate), ""
-
-    def _handle_get_kick_launch(self, request, response):
-        launch_path, error = self._resolve_demo_launch_path()
-        if launch_path is None:
-            response.success = False
-            response.message = error
-            return response
-        try:
-            with open(launch_path, "r", encoding="utf-8") as handle:
-                values = read_kick_launch_defaults(handle.read())
-            response.success = True
-            response.message = json.dumps({"path": launch_path, "parameters": values}, allow_nan=False)
-        except (OSError, ValueError, KeyError, ElementTree.ParseError) as error:
-            response.success = False
-            response.message = f"gagal membaca bawaan launch: {error}"
-        return response
-
-    def _read_live_kick_params(self) -> Tuple[Optional[Dict[str, float]], str]:
-        if not self._kick_param_client.wait_for_service(timeout_sec=2.0):
-            return None, "demo_node tidak menjawab; jalankan demonya dulu"
-
-        request = GetParameters.Request()
-        request.names = list(KICK_LAUNCH_KEYS)
-        future = self._kick_param_client.call_async(request)
-        rclpy.spin_until_future_complete(self._param_node, future, timeout_sec=3.0)
-
-        if not future.done():
-            future.cancel()
-            return None, "demo_node tidak membalas dalam 3 detik"
-
-        response = future.result()
-        if response is None or len(response.values) != len(KICK_LAUNCH_KEYS):
-            return None, "jawaban demo_node tidak lengkap"
-
-        values: Dict[str, float] = {}
-        missing: List[str] = []
-        for name, value in zip(KICK_LAUNCH_KEYS, response.values):
-            # 3 = PARAMETER_DOUBLE, 2 = PARAMETER_INTEGER, 0 = NOT SET.
-            # Integer muncul kalau argumen launch pernah ditulis tanpa titik
-            # desimal; tetap dibaca supaya penyimpanan sekalian membetulkannya.
-            if value.type == 3:
-                values[name] = float(value.double_value)
-            elif value.type == 2:
-                values[name] = float(value.integer_value)
-            else:
-                missing.append(name)
-
-        if missing:
-            return None, "parameter belum dikenal demo_node: " + ", ".join(missing)
-        return values, ""
-
-    def _handle_save_kick_to_launch(self, request, response):  # noqa: ARG002
-        launch_path, error = self._resolve_demo_launch_path()
-        if launch_path is None:
-            response.success = False
-            response.message = error
-            return response
-
-        values, error = self._read_live_kick_params()
-        if values is None:
-            response.success = False
-            response.message = error
-            return response
-
-        try:
-            with open(launch_path, "r", encoding="utf-8") as handle:
-                original = handle.read()
-        except OSError as exc:
-            response.success = False
-            response.message = f"gagal membaca {launch_path}: {exc}"
-            return response
-
-        updated, changed, error = rewrite_kick_launch_defaults(original, values)
-        if error:
-            response.success = False
-            response.message = error
-            return response
-
-        if not changed:
-            response.success = True
-            response.message = (
-                "Tidak ada yang berubah: demo.launch.xml sudah sama dengan "
-                "setelan yang hidup di robot."
-            )
-            return response
-
-        backup_dir = str(self.get_parameter("launch_backup_dir").value)
-        backup_path = ""
-        try:
-            os.makedirs(backup_dir, exist_ok=True)
-            backup_path = os.path.join(
-                backup_dir, "demo.launch.xml." + time.strftime("%Y%m%d-%H%M%S")
-            )
-            shutil.copyfile(launch_path, backup_path)
-        except OSError as exc:
-            response.success = False
-            response.message = f"gagal membuat cadangan di {backup_dir}: {exc}; dibatalkan"
-            return response
-
-        # Ditulis lewat berkas sementara lalu copyfile, bukan rename: copyfile
-        # menimpa ISI berkas tujuan, jadi kepemilikan dan izinnya tetap milik
-        # pengguna. Rename akan meninggalkan berkas milik root di dalam repo.
-        temp_path = launch_path + ".bascorro_tmp"
-        try:
-            with open(temp_path, "w", encoding="utf-8") as handle:
-                handle.write(updated)
-            shutil.copyfile(temp_path, launch_path)
-        except OSError as exc:
-            response.success = False
-            response.message = f"gagal menulis {launch_path}: {exc}"
-            return response
-        finally:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-        self._record_event(
-            "kick_launch_saved",
-            f"{len(changed)} setelan tendangan disimpan ke demo.launch.xml",
-        )
-        response.success = True
-        response.message = (
-            f"{len(changed)} nilai disimpan ke {launch_path} "
-            f"(cadangan: {backup_path}). " + "; ".join(changed)
-        )
-        return response
-
-
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = StudioAgent()
@@ -833,7 +645,6 @@ def main(args=None) -> None:
                 node._bag_proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 node._bag_proc.kill()
-        node._param_node.destroy_node()
         node.destroy_node()
         rclpy.shutdown()
 
