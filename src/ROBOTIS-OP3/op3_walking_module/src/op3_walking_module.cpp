@@ -75,7 +75,7 @@ WalkingModule::WalkingModule()
   z_move_ramped_ = 0.0;
   a_move_ramped_ = 0.0;
   ai_move_ramped_ = 0.0;
-  move_ramp_ = 0.0;
+  stop_ramp_active_ = false;
 
   op3_kd_ = new OP3KinematicsDynamics(WholeBody);
 
@@ -135,6 +135,12 @@ WalkingModule::WalkingModule()
 WalkingModule::~WalkingModule()
 {
   queue_thread_.join();
+}
+
+void WalkingModule::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
 }
 
 void WalkingModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
@@ -407,15 +413,32 @@ double WalkingModule::rampToward(double current, double target, double dt)
   return (current - step < target) ? target : current - step;
 }
 
-double WalkingModule::timeRampScale()
+double WalkingModule::rampDown(double current, double from, double dt)
 {
-  // ramp 0 -> mulai SOFT_START_SLOW_ kali lebih lambat; ramp 1 -> tempo penuh.
-  return 1.0 + (SOFT_START_SLOW_ - 1.0) * (1.0 - move_ramp_);
+  const double soft = walking_param_.soft_start_time;
+  if (soft <= 0.0 || from == 0.0)
+    return 0.0;
+  // Laju dipatok dari nilai saat stop diminta, jadi penurunannya selalu
+  // memakan tepat soft_start_time -- cermin soft start.
+  const double step = fabs(from) * dt / soft;
+  if (current > 0.0)
+    return (current - step < 0.0) ? 0.0 : current - step;
+  return (current + step > 0.0) ? 0.0 : current + step;
+}
+
+bool WalkingModule::stopAmplitudesZero() const
+{
+  const bool planar = (x_move_amplitude_ == 0 && y_move_amplitude_ == 0 && a_move_amplitude_ == 0 &&
+                       ai_move_amplitude_ == 0);
+  if (!stop_ramp_active_)
+    return planar;
+  return planar && z_move_amplitude_ == 0;
 }
 
 void WalkingModule::updateTimeParam(double scale)
 {
-  period_time_ = scale * timeRampScale() * walking_param_.period_time;  // * 1000;   // s -> ms
+  // Tempo TIDAK ikut soft start (19 Sep 2026): period_time dipakai apa adanya.
+  period_time_ = scale * walking_param_.period_time;  // * 1000;   // s -> ms
   dsp_ratio_ = walking_param_.dsp_ratio;
   ssp_ratio_ = 1 - dsp_ratio_;
 
@@ -524,17 +547,15 @@ void WalkingModule::startWalking()
   // take effect until the NEXT full cycle; the robot looked like it "didn't move
   // again" after pressing START a second time.
   //
-  // Soft start mulai dari nol di sini (lama: walking_param_.soft_start_time).
-  // Pelambatan tempo 1.5x yang dulu ditulis sebagai updateTimeParam(1.5) sekarang
-  // datang dari timeRampScale(): nilai awalnya sama persis, bedanya luruh mulus
-  // alih-alih balik mendadak ke tempo penuh setelah satu siklus. soft_start_time
-  // 0 membuat ramp langsung penuh, jadi perilakunya kembali seperti dulu.
+  // Soft start mulai dari nol di sini: HANYA amplitudo (x/y/z/sudut), tempo
+  // langsung penuh. Start di tengah soft stop membatalkan penurunannya dan
+  // naik lagi dari nol seperti start biasa.
   x_move_ramped_ = 0.0;
   y_move_ramped_ = 0.0;
   z_move_ramped_ = 0.0;
   a_move_ramped_ = 0.0;
   ai_move_ramped_ = 0.0;
-  move_ramp_ = (walking_param_.soft_start_time > 0.0) ? 0.0 : 1.0;
+  stop_ramp_active_ = false;
   updateTimeParam();
   time_ = control_cycle_msec_ * 0.001;
 
@@ -802,26 +823,46 @@ void WalkingModule::process(std::map<std::string, robotis_framework::Dynamixel *
     //
     // z SENGAJA tidak ikut dinolkan: tinggi angkat kaki bukan arah gerak, dan
     // versi lama pun tidak pernah menyentuhnya.
-    const double move_target_x = (ctrl_running_ == true) ? walking_param_.x_move_amplitude : 0.0;
-    const double move_target_y = (ctrl_running_ == true) ? walking_param_.y_move_amplitude : 0.0;
-    const double move_target_a = (ctrl_running_ == true) ? walking_param_.angle_move_amplitude : 0.0;
-    const double move_target_ai = (ctrl_running_ == true) ? walking_param_.angle_move_amplitude_turn_in : 0.0;
-
-    x_move_ramped_ = rampToward(x_move_ramped_, move_target_x, time_unit);
-    y_move_ramped_ = rampToward(y_move_ramped_, move_target_y, time_unit);
-    z_move_ramped_ = rampToward(z_move_ramped_, walking_param_.z_move_amplitude, time_unit);
-    a_move_ramped_ = rampToward(a_move_ramped_, move_target_a, time_unit);
-    ai_move_ramped_ = rampToward(ai_move_ramped_, move_target_ai, time_unit);
-
-    if (move_ramp_ < 1.0)
+    //
+    // SOFT STOP (19 Sep 2026): kalau soft_start_time > 0, begitu stop diterima
+    // kelima amplitudo -- termasuk z, tinggi angkat kaki -- turun LURUS ke 0
+    // dari nilai saat itu dalam soft_start_time, lalu gait berhenti di batas
+    // fase berikutnya (stopAmplitudesZero). soft_start_time 0: perilaku lama
+    // (langsung nol, z tidak disentuh).
+    if (ctrl_running_ == true)
     {
-      if (walking_param_.soft_start_time > 0.0)
-        move_ramp_ += time_unit / walking_param_.soft_start_time;
-      else
-        move_ramp_ = 1.0;   // knob dimatikan di tengah jalan
-
-      if (move_ramp_ > 1.0)
-        move_ramp_ = 1.0;
+      stop_ramp_active_ = false;
+      x_move_ramped_ = rampToward(x_move_ramped_, walking_param_.x_move_amplitude, time_unit);
+      y_move_ramped_ = rampToward(y_move_ramped_, walking_param_.y_move_amplitude, time_unit);
+      z_move_ramped_ = rampToward(z_move_ramped_, walking_param_.z_move_amplitude, time_unit);
+      a_move_ramped_ = rampToward(a_move_ramped_, walking_param_.angle_move_amplitude, time_unit);
+      ai_move_ramped_ = rampToward(ai_move_ramped_, walking_param_.angle_move_amplitude_turn_in, time_unit);
+    }
+    else if (walking_param_.soft_start_time > 0.0)
+    {
+      if (!stop_ramp_active_)
+      {
+        stop_ramp_active_ = true;
+        stop_from_x_ = x_move_ramped_;
+        stop_from_y_ = y_move_ramped_;
+        stop_from_z_ = z_move_ramped_;
+        stop_from_a_ = a_move_ramped_;
+        stop_from_ai_ = ai_move_ramped_;
+      }
+      x_move_ramped_ = rampDown(x_move_ramped_, stop_from_x_, time_unit);
+      y_move_ramped_ = rampDown(y_move_ramped_, stop_from_y_, time_unit);
+      z_move_ramped_ = rampDown(z_move_ramped_, stop_from_z_, time_unit);
+      a_move_ramped_ = rampDown(a_move_ramped_, stop_from_a_, time_unit);
+      ai_move_ramped_ = rampDown(ai_move_ramped_, stop_from_ai_, time_unit);
+    }
+    else
+    {
+      stop_ramp_active_ = false;
+      x_move_ramped_ = 0.0;
+      y_move_ramped_ = 0.0;
+      a_move_ramped_ = 0.0;
+      ai_move_ramped_ = 0.0;
+      z_move_ramped_ = rampToward(z_move_ramped_, walking_param_.z_move_amplitude, time_unit);
     }
 
     time_ += time_unit;
@@ -963,19 +1004,23 @@ void WalkingModule::processPhase(const double &time_unit)
     phase_ = PHASE0;
     if (ctrl_running_ == false)
     {
-      if (x_move_amplitude_ == 0 && y_move_amplitude_ == 0 && a_move_amplitude_ == 0 && ai_move_amplitude_ == 0)
+      if (stopAmplitudesZero())
       {
         real_running_ = false;
+        stop_ramp_active_ = false;
+        // Gait berikutnya berangkat dari diam lagi: potongan setengah langkah
+        // pertama di updateMovementParam() dipasang ulang.
+        previous_x_move_amplitude_ = 0;
       }
-      else
+      else if (!stop_ramp_active_)
       {
         // walking_param_ SENGAJA TIDAK disentuh di sini. Penghentiannya
         // dikerjakan sasaran ramp di process(); menolkan nilai tersimpan hanya
         // membuang setelan operator. Lihat catatan panjang di sana.
         //
-        // Yang tetap dinolkan cuma pembukuan langkah: gait berikutnya berangkat
-        // dari diam lagi, jadi potongan setengah langkah pertama di
-        // updateMovementParam() harus dipasang ulang.
+        // Perilaku lama (soft_start_time 0) dipertahankan. Saat SOFT STOP
+        // penghitung ini sengaja tidak dinolkan: memasang potongan setengah
+        // langkah di tengah penurunan membuat langkah maju tiba-tiba separuh.
         previous_x_move_amplitude_ = 0;
       }
     }
@@ -997,9 +1042,10 @@ void WalkingModule::processPhase(const double &time_unit)
     phase_ = PHASE2;
     if (ctrl_running_ == false)
     {
-      if (x_move_amplitude_ == 0 && y_move_amplitude_ == 0 && a_move_amplitude_ == 0 && ai_move_amplitude_ == 0)
+      if (stopAmplitudesZero())
       {
         real_running_ = false;
+        stop_ramp_active_ = false;
       }
       // Tidak ada lagi cabang "else" yang menimpa walking_param_. Versi lama
       // menulis ulang x dengan previous_x_move_amplitude_, dan karena PHASE0 di

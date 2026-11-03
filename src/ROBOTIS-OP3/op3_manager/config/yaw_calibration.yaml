@@ -1,0 +1,25 @@
+# KALIBRASI YAW 5 TITIK untuk open_cr_module (satu sumber untuk semua cara
+# menyalakan op3_manager: op3_manager.launch.py -- dipakai demo.launch.xml --,
+# op3_tmux profil real_robot, scripts/wait_u2d2_then_manager.sh).
+#
+# DIBUAT OTOMATIS oleh scripts/calib_imu_yaw.py (menu ./script.sh), 2026-09-19 00:49.
+# Robot diputar manual ke KIRI 0/90/180/270/360 deg dalam pose INIT demo,
+# heading dibaca MENTAH dari /robotis/open_cr/mag_heading saat robot diam.
+#   heading mentah 5 titik : 68.07 / 182.50 / 288.61 / 358.61 / 69.94
+#   titik 5 vs titik 1     : +1.86 deg (titik 0 tabel = rata-rata keduanya)
+#   bentang per 90 deg nyata: 113.5 / 106.1 / 70.0 / 70.4 deg
+#
+# Ulangi kalibrasi kalau OpenCR, baterai, atau kabel dipindah, atau di lapangan
+# lain. yaw_calib_enable: false = yaw firmware mentah seperti dulu.
+# Berkas sebelumnya dicadangkan di config/yaw_calibration_history/.
+#
+# Baris mag_hard_iron_* (kalau ada) DIBAWA dari berkas sebelumnya: itu kalibrasi
+# hard-iron magnetometer yang direkam terpisah dan dipakai open_cr_module untuk
+# menghitung heading di mini PC. Jangan dihapus saat mengedit tangan.
+/**:
+  ros__parameters:
+    mag_hard_iron_enable: true
+    mag_hard_iron_offset: [-106.5, 154.5, -34.5]
+    yaw_calib_enable: true
+    yaw_calib_measured_heading_deg: [69.00, 182.50, 288.61, 358.61]
+    yaw_calib_true_deg: [0.0, 90.0, 180.0, 270.0]

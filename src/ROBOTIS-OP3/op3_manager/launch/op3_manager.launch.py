@@ -1,3 +1,4 @@
+import os
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -62,6 +63,15 @@ def generate_launch_description():
                 # sendiri. Harus seiring dengan scan_period_sec di
                 # head_tracking.yaml -- alasannya ada di komentar sana.
                 'angle_unit': 35.0,
+                # Batas mendongak head_tilt, deg (negatif = MENDONGAK di robot
+                # ini). Bawaan modul -30 (servo 20 150). Diturunkan ke -45
+                # (servo 20 135) 17 Sep 2026 karena sapuan D60 tahap 3-4
+                # mendongak sampai 135; tanpa ini target dijepit diam-diam ke 150.
+                'head_tilt_min_deg': -45.0,
+                # Amplop menunduk kepala di tengah (pan 30..70 %), deg. Bawaan
+                # modul 27 (servo 20 207). Dinaikkan ke 30 (servo 20 210)
+                # 19 Sep 2026: D60 mulai sapuan dari (50 %, 180) turun ke 210.
+                'head_tilt_envelope_center_deg': 30.0,
                 'gazebo': gazebo_default,
                 'gazebo_robot_name': gazebo_robot_name_default,
                 'offset_file_path': offset_file_path_default,
@@ -75,7 +85,7 @@ def generate_launch_description():
                 # mati dengan InvalidParameterTypeException saat start.
                 'boot_init_page': ParameterValue(
                     LaunchConfiguration('boot_init_page'), value_type=int)
-            }]
+            }, os.path.join(get_package_share_directory('op3_manager'), 'config', 'yaw_calibration.yaml')]
         )
         # Node(
         #     package='op3_localization',

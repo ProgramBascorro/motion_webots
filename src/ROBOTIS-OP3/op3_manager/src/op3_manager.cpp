@@ -24,6 +24,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 /* Standard Library Header */
+#include <atomic>
 #include <chrono>
 #include <iomanip>
 #include <map>
@@ -34,6 +35,7 @@
 
 /* ROBOTIS Controller Header */
 #include "robotis_controller/robotis_controller.h"
+#include "robotis_controller_msgs/msg/sync_write_item.hpp"
 
 /* Sensor Module Header */
 #include "open_cr_module/open_cr_module.h"
@@ -85,6 +87,58 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_demo_command_pub;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_enable_ctrl_pub;
 rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr g_action_page_pub;
 std::mutex g_health_mutex;
+
+// true = loop kontrol tidak bisa (di)mulai lagi; main() keluar dengan kode 1.
+std::atomic<bool> g_controller_failed{false};
+// Thread antrean modul hanya ada sesudah addSensorModule/addMotionModule.
+bool g_modules_added = false;
+
+// Urutan berhenti yang aman untuk proses ini. Controller dan kedelapan modul
+// memutar executor di thread masing-masing selama rclcpp::ok(), dan thread
+// kontrol 125 Hz menerbitkan joint state. Kalau proses keluar (exit() atau
+// return dari main) selagi thread itu masih jalan, destruktor global ROS dan
+// Fast-DDS berebut objek dengan mereka -- heap rusak (malloc_consolidate),
+// SIGSEGV di pthread_mutex_lock, atau assertion __pthread_mutex_lock_full
+// (direproduksi dengan gdb 2026-09-15). Jadi: hentikan loop kontrol, matikan
+// konteks ROS, tunggu SEMUA thread itu selesai, baru keluar.
+void stopManagerThreads(RobotisController *controller)
+{
+  controller->stopTimer();          // no-op kalau loop kontrol belum pernah jalan
+  if (rclcpp::ok())
+    rclcpp::shutdown();             // semua executor keluar dari spin
+  controller->joinQueueThread();
+  if (g_modules_added)
+  {
+    OpenCRModule::getInstance()->joinQueueThread();
+    ActionModule::getInstance()->joinQueueThread();
+    BaseModule::getInstance()->joinQueueThread();
+    HeadControlModule::getInstance()->joinQueueThread();
+    WalkingModule::getInstance()->joinQueueThread();
+    DirectControlModule::getInstance()->joinQueueThread();
+    OnlineWalkingModule::getInstance()->joinQueueThread();
+    TuningModule::getInstance()->joinQueueThread();
+  }
+  // Publisher global ini dibuat SEBELUM pabrik Fast-DDS ada, jadi destruktor
+  // globalnya baru jalan SESUDAH pabrik itu hancur ("Failed to delete
+  // datawriter" x4 saat keluar). Dilepas di sini selagi participant masih ada.
+  g_init_pose_pub.reset();
+  g_demo_command_pub.reset();
+  g_enable_ctrl_pub.reset();
+  g_action_page_pub.reset();
+}
+
+// Loop kontrol gagal dimulai ULANG saat berjalan (inisialisasi ulang torsi, cek
+// kesehatan). Tanpa bulk read yang sah controller tidak boleh jalan, jadi
+// manager berhenti dengan pesan jelas; main() mengerjakan urutan berhentinya.
+void stopManagerAfterControllerFailure(RobotisController *controller, const char *where)
+{
+  g_controller_failed = true;
+  RCLCPP_FATAL(controller->get_logger(),
+               "op3_manager BERHENTI: loop kontrol gagal dimulai ulang (%s) karena bulk read servo gagal "
+               "(rincian port/ID di atas). Robot tidak dikendalikan; periksa bus lalu jalankan ulang manager.",
+               where);
+  rclcpp::shutdown();
+}
 
 std::string escapeJsonString(const std::string& value)
 {
@@ -200,7 +254,11 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
       }
     }
 
-    controller->startTimer();
+    if (controller->startTimer() == false)
+    {
+      stopManagerAfterControllerFailure(controller, "tombol user_long");
+      return;
+    }
 
     usleep(200 * 1000);
 
@@ -218,10 +276,43 @@ void dxlTorqueCheckCallback(const std_msgs::msg::String::SharedPtr msg)
   if (g_is_simulation == true)
     return;
 
+  RobotisController *controller = RobotisController::getInstance();
+
+  // Loop kontrol SEDANG JALAN: read1Byte() di bawah selalu mengembalikan
+  // COMM_PORT_BUSY tanpa mengisi torque_result, jadi versi lama SELALU
+  // menyimpulkan "torsi mati" lalu menghentikan loop, initializeDevice(), dan
+  // startTimer() -- bulk read pertama yang ketat itu MEMBUNUH manager begitu
+  // satu servo telat menjawab (17 Sep 2026: ID 20 diam sesaat saat tombol
+  // demo ditekan ketiga kali; log: "FIRST BULKREAD" ulang -> "first bulk read
+  // fail" -> exit 1). Padahal torsi sudah dinyalakan saat init. Yang dibutuhkan
+  // pemanggil (demo_node dxlTorqueChecker) cuma kepastian torsi hidup: itu
+  // dipenuhi lewat sync write torque_enable = 1 di dalam loop (jalur yang sama
+  // dengan Torque ON Bascorro Studio), tanpa restart loop.
+  // isTimerStopped() privat; COMM_PORT_BUSY dari read1Byte() adalah tanda yang
+  // sama (satu-satunya jalur yang mengembalikannya).
+  const auto first_dxl = controller->robot_->dxls_.begin();
+  uint8_t probe = 0;
+  const bool loop_running = first_dxl != controller->robot_->dxls_.end() &&
+                            controller->read1Byte(first_dxl->first, TORQUE_ON_CTRL_TABLE, &probe) == COMM_PORT_BUSY;
+  if (loop_running)
+  {
+    auto item = std::make_shared<robotis_controller_msgs::msg::SyncWriteItem>();
+    item->item_name = "torque_enable";
+    for (const auto &dxl : controller->robot_->dxls_)
+    {
+      item->joint_name.push_back(dxl.first);
+      item->value.push_back(1);
+    }
+    controller->syncWriteItemCallback(item);
+    RCLCPP_INFO(controller->get_logger(),
+                "dxl_torque '%s' saat loop kontrol jalan: torque_enable=1 dikirim ke %zu servo lewat sync write, "
+                "loop TIDAK dimulai ulang", msg->data.c_str(), item->joint_name.size());
+    return;
+  }
+
   // check dxl torque
   uint8_t torque_result = 0;
   bool torque_on = true;
-  RobotisController *controller = RobotisController::getInstance();
   //controller->robot_->port_default_device_
 
   for (std::map<std::string, std::string>::iterator map_it = controller->robot_->port_default_device_.begin();
@@ -241,7 +332,8 @@ void dxlTorqueCheckCallback(const std_msgs::msg::String::SharedPtr msg)
 
     controller->initializeDevice(g_init_file);
 
-    controller->startTimer();
+    if (controller->startTimer() == false)
+      stopManagerAfterControllerFailure(controller, "/robotis/dxl_torque");
   }
 }
 
@@ -405,9 +497,20 @@ int main(int argc, char **argv)
   controller->addMotionModule((MotionModule*) DirectControlModule::getInstance());
   controller->addMotionModule((MotionModule*) OnlineWalkingModule::getInstance());
   controller->addMotionModule((MotionModule*) TuningModule::getInstance());
+  g_modules_added = true;
 
   // start timer
-  controller->startTimer();
+  if (controller->startTimer() == false)
+  {
+    // Loop kontrol tidak jalan, jadi tidak ada goal yang ditulis ke servo dan
+    // init pose di bawah tidak pernah diminta.
+    RCLCPP_FATAL(node->get_logger(),
+                 "op3_manager BERHENTI: bulk read pertama gagal, loop kontrol TIDAK dimulai dan tidak ada "
+                 "perintah gerak yang dikirim (rincian port/ID di atas). Periksa kabel/konektor perangkat "
+                 "yang disebut, lalu jalankan ulang.");
+    stopManagerThreads(controller);
+    return 1;
+  }
 
   usleep(100 * 1000);
 
@@ -555,8 +658,14 @@ int main(int argc, char **argv)
           }
         }
 
-        if (was_running)
-          controller->startTimer();
+        if (was_running && controller->startTimer() == false)
+        {
+          response->success = false;
+          response->message = "loop kontrol gagal dimulai ulang sesudah health check (bulk read gagal); "
+                              "op3_manager berhenti";
+          stopManagerAfterControllerFailure(controller, "/robotis/health_check");
+          return;
+        }
 
         auto end_time = std::chrono::steady_clock::now();
         double duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
@@ -579,6 +688,7 @@ int main(int argc, char **argv)
 
   rclcpp::spin(node);
 
-  rclcpp::shutdown();
-  return 0;
+  // Ctrl-C/SIGTERM atau kegagalan controller saat berjalan: urutan yang sama.
+  stopManagerThreads(controller);
+  return g_controller_failed ? 1 : 0;
 }

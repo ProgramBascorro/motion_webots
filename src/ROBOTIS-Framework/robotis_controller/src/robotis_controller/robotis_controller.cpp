@@ -46,10 +46,10 @@ RobotisController::RobotisController()
   direct_sync_write_key_.clear();
 }
 
-void RobotisController::initializeSyncWrite()
+bool RobotisController::initializeSyncWrite()
 {
   if (gazebo_mode_ == true)
-    return;
+    return true;
 
   RCLCPP_INFO(this->get_logger(), "FIRST BULKREAD");
   for (auto& it : port_to_bulk_read_)
@@ -62,8 +62,16 @@ void RobotisController::initializeSyncWrite()
     {
       if (++error_count > 10)
       {
+        // Dulu exit(-1) di sini. exit() menjalankan destruktor global ROS dan
+        // Fast-DDS di thread ini sementara thread antrean controller dan semua
+        // modul masih di dalam rmw_wait, dan hasilnya crash acak: heap rusak
+        // (malloc_consolidate), SIGSEGV di pthread_mutex_lock, atau assertion
+        // __pthread_mutex_lock_full (dibuktikan dengan gdb 2026-09-15). Kegagalan
+        // dikembalikan ke pemanggil supaya proses bisa berhenti dengan urutan
+        // yang aman.
         RCLCPP_ERROR(this->get_logger(), "first bulk read fail!!");
-        exit(-1);
+        reportFirstBulkReadFailure(it.first, result);
+        return false;
       }
       usleep(10 * 1000);
       result = it.second->txRxPacket();
@@ -196,6 +204,61 @@ void RobotisController::initializeSyncWrite()
       }
     }
   }
+  return true;
+}
+
+void RobotisController::reportFirstBulkReadFailure(const std::string &port_name, int result)
+{
+  // GroupBulkRead::rxPacket() membaca ID satu per satu dan BERHENTI pada ID
+  // pertama yang gagal, jadi satu perangkat yang diam menggagalkan seluruh port
+  // tanpa menyebut ID-nya. Timer belum jalan, jadi port bebas untuk ping.
+  auto port_it = robot_->ports_.find(port_name);
+  if (port_it == robot_->ports_.end())
+  {
+    RCLCPP_ERROR(this->get_logger(), "first bulk read: port [%s] tidak dikenal di robot file", port_name.c_str());
+    return;
+  }
+  dynamixel::PacketHandler *result_handler = dynamixel::PacketHandler::getPacketHandler(2.0);
+  std::string silent;
+  int total = 0;
+  int answered = 0;
+  const auto check = [&](const std::string &name, const Device *device) {
+    if (device->port_name_ != port_name)
+      return;
+    ++total;
+    dynamixel::PacketHandler *handler = dynamixel::PacketHandler::getPacketHandler(device->protocol_version_);
+    uint8_t error = 0;
+    int ping_result = handler->ping(port_it->second, device->id_, &error);
+    if (ping_result != COMM_SUCCESS)
+    {
+      usleep(10 * 1000);
+      ping_result = handler->ping(port_it->second, device->id_, &error);
+    }
+    if (ping_result == COMM_SUCCESS)
+    {
+      ++answered;
+      return;
+    }
+    silent += (silent.empty() ? "" : ", ") + std::string("ID ") + std::to_string(device->id_) + " " + name + " (" +
+              handler->getTxRxResult(ping_result) + ")";
+  };
+  for (auto& it : robot_->dxls_)
+    check(it.first, it.second);
+  for (auto& it : robot_->sensors_)
+    check(it.first, it.second);
+
+  RCLCPP_ERROR(this->get_logger(),
+               "first bulk read GAGAL di port %s (baud %d) sesudah 11 percobaan, hasil SDK terakhir: %s. "
+               "Menjawab ping sekarang: %d dari %d perangkat. Tidak menjawab: %s",
+               port_name.c_str(), port_it->second->getBaudRate(), result_handler->getTxRxResult(result), answered,
+               total, silent.empty() ? "(tidak ada -- semua menjawab ping; kemungkinan balasan bulk read hilang/terlambat, "
+                                       "periksa konektor dan latency_timer)" : silent.c_str());
+}
+
+void RobotisController::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
 }
 
 bool RobotisController::initialize(const std::string robot_file_path, const std::string init_file_path)
@@ -219,8 +282,10 @@ bool RobotisController::initialize(const std::string robot_file_path, const std:
 
     if (port->setBaudRate(port->getBaudRate()) == false)
     {
+      // Belum ada thread antrean maupun modul di titik ini; kegagalan
+      // dikembalikan supaya main() yang mengakhiri proses dengan pesan jelas.
       RCLCPP_ERROR(this->get_logger(), "PORT [%s] SETUP ERROR! (baudrate: %d)", port_name.c_str(), port->getBaudRate());
-      exit(-1);
+      return false;
     }
 
     // get the default device info of the port
@@ -740,10 +805,10 @@ void *RobotisController::timerThread(void *param)
   return 0;
 }
 
-void RobotisController::startTimer()
+bool RobotisController::startTimer()
 {
   if (this->is_timer_running_ == true)
-    return;
+    return true;
 
   if (this->gazebo_mode_ == true)
   {
@@ -752,7 +817,10 @@ void RobotisController::startTimer()
   }
   else
   {
-    initializeSyncWrite();
+    // Tanpa bulk read pertama yang sah tidak ada posisi awal untuk goal, jadi
+    // loop kontrol TIDAK boleh dimulai.
+    if (initializeSyncWrite() == false)
+      return false;
 
     for (auto& it : port_to_bulk_read_)
     {
@@ -783,12 +851,13 @@ void RobotisController::startTimer()
     // create and start the thread
     if ((error = pthread_create(&this->timer_thread_, &attr, this->timerThread, this)) != 0)
     {
-      RCLCPP_ERROR(this->get_logger(), "Creating timer thread failed!!");
-      exit(-1);
+      RCLCPP_ERROR(this->get_logger(), "Creating timer thread failed!! (error %d)", error);
+      return false;
     }
   }
 
   this->is_timer_running_ = true;
+  return true;
 }
 
 void RobotisController::stopTimer()

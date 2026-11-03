@@ -72,6 +72,9 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   virtual ~WalkingModule();
 
   void initialize(const int control_cycle_msec, robotis_framework::Robot *robot);
+  // Menunggu thread antrean modul selesai. Loop-nya berputar selama rclcpp::ok(),
+  // jadi panggil SESUDAH rclcpp::shutdown(); dipakai op3_manager saat berhenti.
+  void joinQueueThread();
   void process(std::map<std::string, robotis_framework::Dynamixel *> dxls, std::map<std::string, double> sensors);
   void stop();
   bool isRunning();
@@ -128,12 +131,16 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   double wSin(double time, double period, double period_shift, double mag, double mag_shift);
   bool computeIK(double *out, double x, double y, double z, double a, double b, double c);
   void updateTimeParam(double scale = 1.0);
-  // Pengali period_time dari soft start: SOFT_START_SLOW_ saat ramp = 0, lalu
-  // turun mulus ke 1.0 saat ramp penuh.
-  double timeRampScale();
   // Menggeser satu amplitudo menuju targetnya dengan laju "0 -> target tepat
-  // dalam soft_start_time detik". Mengecil ke arah nol tidak pernah ditahan.
+  // dalam soft_start_time detik". Mengecil ke arah nol tidak ditahan (dipakai
+  // saat jalan); penurunan saat STOP diurus rampDown().
   double rampToward(double current, double target, double dt);
+  // Soft stop: turun lurus dari `from` (nilai saat stop diminta) ke 0 dalam
+  // soft_start_time detik.
+  double rampDown(double current, double from, double dt);
+  // Semua amplitudo kerja sudah 0 -> gait boleh benar-benar berhenti. z hanya
+  // ikut syarat saat soft stop aktif (soft_start_time > 0).
+  bool stopAmplitudesZero() const;
   void updateMovementParam();
   void updatePoseParam();
   void startWalking();
@@ -181,18 +188,17 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   op3_walking_module_msgs::msg::WalkingParam walking_param_;
   double previous_x_move_amplitude_;
 
-  // Soft start (walking_param_.soft_start_time detik, knob "Soft start" di grup
-  // Timing Bascorro Studio). Nilai di Studio adalah BATAS ATAS: sesudah "start"
-  // robot merangkak naik ke sana, bukan memakainya utuh di langkah pertama.
-  //
-  // Yang terpengaruh HANYA grup Movement dan Timing:
-  //   Movement -> x/y/z/angle_move_amplitude, masing-masing dibatasi lajunya.
-  //   Timing   -> period_time saja, lewat timeRampScale(). dsp_ratio dan
-  //               step_fb_ratio TIDAK ikut: keduanya rasio pembagi fase, dan
-  //               dsp_ratio yang dinaikkan dari nol berarti fase dua kaki
-  //               menapak hilang justru di langkah pertama -- kebalikan dari
-  //               yang dicari.
-  // Grup lain (Init pose, Gait shape, Balance, Gain) tidak disentuh sama sekali.
+  // Soft start + soft stop (walking_param_.soft_start_time detik, knob "Soft
+  // start" di grup Timing Bascorro Studio). SATU parameter, dua kegunaan:
+  //   start -> x/y/z/angle_move_amplitude naik lurus dari 0 ke nilai Studio;
+  //   stop  -> amplitudo yang sedang dipakai turun lurus ke 0 dalam waktu yang
+  //            sama, baru gait berhenti.
+  // Yang terpengaruh HANYA amplitudo grup Movement. period_time, dsp_ratio, dan
+  // step_fb_ratio TIDAK ikut (permintaan operator 19 Sep 2026: tempo langkah
+  // sejak langkah pertama = tempo Studio; dulu period_time dimulai 1,5x lebih
+  // lambat lalu luruh). Grup lain (Init pose, Gait shape, Balance, Gain) tidak
+  // disentuh sama sekali. soft_start_time 0 = perilaku lama: langsung penuh,
+  // berhenti tanpa penurunan, z tidak dinolkan.
   //
   // Pembatasnya PER SUMBU, bukan satu pengali bersama. Satu pengali bersama
   // terlihat lebih ringkas tapi salah perilaku: menaikkan x di tengah jalan ikut
@@ -208,14 +214,15 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   double a_move_ramped_;
   // Sumbu kelima: angle_move_amplitude_turn_in ("putar dalam").
   double ai_move_ramped_;
-  // 0 -> 1 sepanjang soft_start_time, khusus untuk tempo. Tempo tidak punya
-  // "sumbu", jadi satu kemajuan skalar sudah cukup.
-  double move_ramp_;
-  // Pengali period_time saat move_ramp_ masih 0. 1.5 diambil dari startWalking()
-  // yang sebelumnya memanggil updateTimeParam(1.5): nilai awalnya sama persis,
-  // bedanya sekarang luruh mulus alih-alih balik mendadak ke tempo penuh setelah
-  // satu siklus.
-  static constexpr double SOFT_START_SLOW_ = 1.5;
+  // Soft stop: nilai ramp saat perintah stop DITERIMA, titik awal penurunan
+  // lurus ke 0. stop_ramp_active_ = sedang turun (ctrl_running_ false tapi
+  // gait belum berhenti).
+  bool stop_ramp_active_ = false;
+  double stop_from_x_ = 0.0;
+  double stop_from_y_ = 0.0;
+  double stop_from_z_ = 0.0;
+  double stop_from_a_ = 0.0;
+  double stop_from_ai_ = 0.0;
 
   //
   int balancing_idx_;

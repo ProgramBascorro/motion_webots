@@ -49,4 +49,4 @@ dynamixel | /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3WKHM6-if00-po
 dynamixel | /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3WKHM6-if00-port0 | 18  | XM430-W350     | 2.0      | l_ank_roll     | present_position
 dynamixel | /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3WKHM6-if00-port0 | 19  | XM430-W350     | 2.0      | head_pan       | present_position
 dynamixel | /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3WKHM6-if00-port0 | 20  | XM430-W350     | 2.0      | head_tilt      | present_position
-sensor    | /dev/serial/by-id/usb-ROBOTIS_OpenCR_Virtual_ComPort_in_FS_Mode_FFFFFFFEFFFF-if00 | 200 | OPEN-CR        | 2.0      | open-cr        | button, present_voltage, gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, roll, pitch, yaw, mag_status
+sensor    | /dev/serial/by-id/usb-ROBOTIS_OpenCR_Virtual_ComPort_in_FS_Mode_FFFFFFFEFFFF-if00 | 200 | OPEN-CR        | 2.0      | open-cr        | button, present_voltage, gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, roll, pitch, yaw, mag_x, mag_y, mag_z, mag_heading, mag_status

@@ -18,7 +18,7 @@ device_type = sensor
    25  | LED                      | 1      | RW     | RAM    | 0             | 7           | N
    26  | LED_RGB                  | 2      | RW     | RAM    | 0             | 32767       | N
    28  | buzzer                   | 2      | RW     | RAM    | 0             | 65535       | N
-   30  | button                   | 1      | R      | RAM    | 0             | 15          | N
+   30  | button                   | 1      | R      | RAM    | 0             | 31          | N
    31  | present_voltage          | 1      | R      | RAM    | 50            | 250         | N
    32  | gyro_x                   | 2      | R      | RAM    | -32800        | 32800       | Y
    34  | gyro_y                   | 2      | R      | RAM    | -32800        | 32800       | Y

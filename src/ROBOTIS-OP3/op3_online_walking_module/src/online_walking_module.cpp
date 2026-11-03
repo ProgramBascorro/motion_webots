@@ -165,6 +165,12 @@ OnlineWalkingModule::~OnlineWalkingModule()
   queue_thread_.join();
 }
 
+void OnlineWalkingModule::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
+}
+
 void OnlineWalkingModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   control_cycle_sec_ = control_cycle_msec * 0.001;

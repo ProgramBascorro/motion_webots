@@ -44,6 +44,12 @@ TuningModule::~TuningModule()
     queue_thread_.join();
 }
 
+void TuningModule::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
+}
+
 void TuningModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   control_cycle_msec_ = control_cycle_msec;

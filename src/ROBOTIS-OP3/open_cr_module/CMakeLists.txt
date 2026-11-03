@@ -6,6 +6,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(dynamixel_sdk REQUIRED)
 find_package(robotis_controller_msgs REQUIRED)
 find_package(robotis_framework_common REQUIRED)
@@ -19,6 +20,7 @@ include_directories(
   ${rclcpp_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
   ${sensor_msgs_INCLUDE_DIRS}
+  ${geometry_msgs_INCLUDE_DIRS}
   ${robotis_controller_msgs_INCLUDE_DIRS}
   ${robotis_framework_common_INCLUDE_DIRS}
   ${robotis_device_INCLUDE_DIRS}
@@ -32,6 +34,7 @@ ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   std_msgs
   sensor_msgs
+  geometry_msgs
   dynamixel_sdk
   robotis_controller_msgs
   robotis_framework_common
@@ -46,6 +49,7 @@ ament_target_dependencies(open_cr_node
   rclcpp
   std_msgs
   sensor_msgs
+  geometry_msgs
   dynamixel_sdk
   robotis_controller_msgs
   robotis_framework_common
@@ -60,6 +64,7 @@ add_executable(open_cr_reader src/open_cr_reader.cpp)
 ament_target_dependencies(open_cr_reader
   rclcpp
   sensor_msgs
+  geometry_msgs
   std_msgs
 )
 

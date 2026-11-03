@@ -74,4 +74,5 @@ exec ros2 run op3_manager op3_manager --ros-args \
   -p init_file_path:="$WS/src/ROBOTIS-OP3/op3_manager/config/dxl_init_OP3.yaml" \
   -p device_name:="$DEV" \
   -p baud_rate:=2000000 \
-  -p simulation:=false
+  -p simulation:=false \
+  --params-file "$WS/src/ROBOTIS-OP3/op3_manager/config/yaw_calibration.yaml"

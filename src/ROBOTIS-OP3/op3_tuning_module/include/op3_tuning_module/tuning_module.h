@@ -82,6 +82,9 @@ class TuningModule : public robotis_framework::MotionModule, public robotis_fram
 
   /* ROS2 Framework Functions */
   void initialize(const int control_cycle_msec, robotis_framework::Robot *robot);
+  // Menunggu thread antrean modul selesai. Loop-nya berputar selama rclcpp::ok(),
+  // jadi panggil SESUDAH rclcpp::shutdown(); dipakai op3_manager saat berhenti.
+  void joinQueueThread();
   void process(std::map<std::string, robotis_framework::Dynamixel *> dxls, std::map<std::string, double> sensors);
 
   void stop();

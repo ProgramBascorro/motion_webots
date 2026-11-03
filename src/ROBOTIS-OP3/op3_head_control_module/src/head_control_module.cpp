@@ -34,6 +34,10 @@ HeadControlModule::HeadControlModule()
     scan_state_(NoScan),
     has_goal_position_(false),
     angle_unit_(35),
+    tilt_envelope_enable_(true),
+    tilt_envelope_center_rad_(27.0 * DEGREE2RADIAN),
+    tilt_envelope_edge_rad_(0.0),
+    tilt_envelope_flat_percent_(30.0),
     DEBUG(false)
 {
   enable_ = false;
@@ -73,6 +77,12 @@ HeadControlModule::~HeadControlModule()
   queue_thread_.join();
 }
 
+void HeadControlModule::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
+}
+
 void HeadControlModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   this->declare_parameter("angle_unit", 35.0);
@@ -92,6 +102,33 @@ void HeadControlModule::initialize(const int control_cycle_msec, robotis_framewo
               "Head control - angle unit : %f, head_tilt limit : %+.1f .. %+.1f deg "
               "(POSITIF = menunduk di robot ini)",
               angle_unit_, tilt_min_deg, tilt_max_deg);
+
+  // AMPLOP MENUNDUK MENGIKUTI PAN (permintaan operator 17 Sep 2026): di bagian
+  // tengah (flat_percent .. 100 - flat_percent) kepala boleh menunduk sampai
+  // center (bawaan +27 deg = servo 20 207), lalu batasnya turun linier sampai
+  // edge (bawaan 0 = servo 180) di ujung kiri/kanan (0 % / 100 % = head_pan
+  // +-85). Berlaku untuk SEMUA sumber perintah -- sapuan dan tracking dari
+  // head_tracking_node, BallTracker D56 -- jadi ketiga demo pasti sama.
+  // Catatan: zona tendang D58 hasil kalibrasi 16 Sep butuh servo 20 sampai
+  // 212,98; kalau D58 masih dipakai naikkan center_deg ke >= 33.
+  this->declare_parameter("head_tilt_envelope_enable", true);
+  this->declare_parameter("head_tilt_envelope_center_deg", 27.0);
+  this->declare_parameter("head_tilt_envelope_edge_deg", 0.0);
+  this->declare_parameter("head_tilt_envelope_flat_percent", 30.0);
+  tilt_envelope_enable_ = this->get_parameter("head_tilt_envelope_enable").as_bool();
+  tilt_envelope_center_rad_ = this->get_parameter("head_tilt_envelope_center_deg").as_double() * DEGREE2RADIAN;
+  tilt_envelope_edge_rad_ = this->get_parameter("head_tilt_envelope_edge_deg").as_double() * DEGREE2RADIAN;
+  tilt_envelope_flat_percent_ =
+      std::max(0.0, std::min(50.0, this->get_parameter("head_tilt_envelope_flat_percent").as_double()));
+  RCLCPP_WARN(this->get_logger(),
+              "Amplop menunduk mengikuti pan: %s | tengah (%.0f..%.0f %%) maks %+.1f deg (servo 20 %.1f) | "
+              "ujung 0/100 %% maks %+.1f deg (servo 20 %.1f) | 0 %% = head_pan %+.0f, 100 %% = %+.0f",
+              tilt_envelope_enable_ ? "AKTIF" : "mati", tilt_envelope_flat_percent_,
+              100.0 - tilt_envelope_flat_percent_, tilt_envelope_center_rad_ * RADIAN2DEGREE,
+              180.0 + tilt_envelope_center_rad_ * RADIAN2DEGREE, tilt_envelope_edge_rad_ * RADIAN2DEGREE,
+              180.0 + tilt_envelope_edge_rad_ * RADIAN2DEGREE,
+              max_angle_[using_joint_name_["head_pan"]] * RADIAN2DEGREE,
+              min_angle_[using_joint_name_["head_pan"]] * RADIAN2DEGREE);
 
   queue_thread_ = std::thread(&HeadControlModule::queueThread, this);
 
@@ -198,6 +235,30 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
     }
   }
 
+  // Amplop menunduk mengikuti pan: dijepit pada SASARAN, sebelum trajektori
+  // dibuat, untuk perintah absolut maupun offset. Amplopnya cekung (datar di
+  // tengah, turun linier ke ujung), jadi garis lurus goal -> sasaran yang
+  // kedua ujungnya di dalam amplop tetap di dalam sepanjang jalan.
+  if (tilt_envelope_enable_)
+  {
+    const int pan_idx = using_joint_name_["head_pan"];
+    const int tilt_idx = using_joint_name_["head_tilt"];
+    const double tilt_max = tiltEnvelopeMax(target_position_.coeff(0, pan_idx));
+    if (target_position_.coeff(0, tilt_idx) > tilt_max)
+    {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                           "head_tilt %+.1f dijepit ke %+.1f deg (servo 20 %.1f) pada pan %+.1f deg (%.0f %%)%s",
+                           target_position_.coeff(0, tilt_idx) * RADIAN2DEGREE, tilt_max * RADIAN2DEGREE,
+                           180.0 + tilt_max * RADIAN2DEGREE, target_position_.coeff(0, pan_idx) * RADIAN2DEGREE,
+                           panPercent(target_position_.coeff(0, pan_idx)), is_offset ? " [tracking]" : " [absolut]");
+      target_position_.coeffRef(0, tilt_idx) = tilt_max;
+      const double calc_moving_time =
+          fabs(goal_position_.coeff(0, tilt_idx) - tilt_max) / (angle_unit_ * M_PI / 180 * (is_offset ? 1.5 : 1.0));
+      if (calc_moving_time > moving_time_)
+        moving_time_ = calc_moving_time;
+    }
+  }
+
   // set mode
   is_direct_control_ = true;
   scan_state_ = NoScan;
@@ -232,6 +293,30 @@ void HeadControlModule::setHeadScanCallback(const std_msgs::msg::String::SharedP
   {
     scan_state_ = NoScan;
   }
+}
+
+double HeadControlModule::panPercent(double pan_rad) const
+{
+  const double left = max_angle_.at(using_joint_name_.at("head_pan"));    // +85 = 0 %
+  const double right = min_angle_.at(using_joint_name_.at("head_pan"));   // -85 = 100 %
+  const double span = left - right;
+  if (fabs(span) < 1e-9)
+    return 50.0;
+  return std::max(0.0, std::min(100.0, (left - pan_rad) / span * 100.0));
+}
+
+double HeadControlModule::tiltEnvelopeMax(double pan_rad) const
+{
+  const double p = panPercent(pan_rad);
+  const double flat = tilt_envelope_flat_percent_;
+  if (flat <= 0.0)
+    return tilt_envelope_center_rad_;
+  double t = 1.0;   // 1 = penuh (tengah), 0 = ujung
+  if (p < flat)
+    t = p / flat;
+  else if (p > 100.0 - flat)
+    t = (100.0 - p) / flat;
+  return tilt_envelope_edge_rad_ + t * (tilt_envelope_center_rad_ - tilt_envelope_edge_rad_);
 }
 
 bool HeadControlModule::checkAngleLimit(const int joint_index, double &goal_position)
@@ -353,6 +438,15 @@ void HeadControlModule::onModuleEnable()
 
 void HeadControlModule::onModuleDisable()
 {
+  // Dipanggil dari utas setCtrlModule controller, BUKAN utas process(). Tanpa
+  // lock, penulisan di bawah ini bisa masuk di antara pemeriksaan
+  // `tra_count_ < tra_size_` dan `calc_joint_tra_.block(tra_count_, ...)` di
+  // process(): matriksnya sudah jadi 1 baris, blok dibaca dari baris
+  // tra_count_ > 0 -> assertion Eigen Block.h:146 -> op3_manager mati SIGABRT.
+  // Terjadi di robot 16 Sep saat kepala menyapu dan modul lain merebut kepala
+  // (uji D60 ON/OFF berulang, siklus ke-8).
+  std::lock_guard<std::mutex> guard(tra_lock_);
+
   // init value
   calc_joint_tra_ = goal_position_;
   tra_size_ = 0;

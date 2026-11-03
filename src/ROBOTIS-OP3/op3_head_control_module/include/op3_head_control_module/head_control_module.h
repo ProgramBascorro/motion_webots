@@ -44,6 +44,9 @@ class HeadControlModule : public robotis_framework::MotionModule, public robotis
   virtual ~HeadControlModule();
 
   void initialize(const int control_cycle_msec, robotis_framework::Robot *robot);
+  // Menunggu thread antrean modul selesai. Loop-nya berputar selama rclcpp::ok(),
+  // jadi panggil SESUDAH rclcpp::shutdown(); dipakai op3_manager saat berhenti.
+  void joinQueueThread();
   void process(std::map<std::string, robotis_framework::Dynamixel *> dxls, std::map<std::string, double> sensors);
 
   void stop();
@@ -71,6 +74,10 @@ class HeadControlModule : public robotis_framework::MotionModule, public robotis
   void jointTraGeneThread();
   void setHeadJoint(const sensor_msgs::msg::JointState::SharedPtr msg, bool is_offset);
   bool checkAngleLimit(const int joint_index, double &goal_position);
+  // Batas MENUNDUK (head_tilt maksimum, rad) sebagai fungsi head_pan: mengikuti
+  // lintasan sapuan bola -- penuh di tengah, mengecil linier ke ujung kiri/kanan.
+  double tiltEnvelopeMax(double pan_rad) const;
+  double panPercent(double pan_rad) const;   // 0 = paling kiri (+85), 100 = paling kanan (-85)
   void generateScanTra(const int head_direction);
 
   void startMoving();
@@ -102,6 +109,12 @@ class HeadControlModule : public robotis_framework::MotionModule, public robotis
   int scan_state_;
   bool has_goal_position_;
   double angle_unit_;
+  // Amplop batas menunduk (lihat tiltEnvelopeMax): dipakai SEMUA perintah
+  // (absolut = sapuan, offset = tracking) sebelum trajektori dibuat.
+  bool tilt_envelope_enable_;
+  double tilt_envelope_center_rad_;   // batas menunduk di tengah (flat_percent .. 100-flat_percent)
+  double tilt_envelope_edge_rad_;     // batas menunduk di ujung 0 % / 100 %
+  double tilt_envelope_flat_percent_;
 
   Eigen::MatrixXd target_position_;
   Eigen::MatrixXd current_position_;

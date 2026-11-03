@@ -56,6 +56,12 @@ BaseModule::~BaseModule()
   delete joint_state_;
 }
 
+void BaseModule::joinQueueThread()
+{
+  if (queue_thread_ && queue_thread_->joinable())
+    queue_thread_->join();
+}
+
 void BaseModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   control_cycle_msec_ = control_cycle_msec;

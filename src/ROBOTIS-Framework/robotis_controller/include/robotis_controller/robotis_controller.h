@@ -90,7 +90,10 @@ private:
   void setJointCtrlModuleThread(robotis_controller_msgs::msg::JointCtrlModule::SharedPtr msg);
 
   bool isTimerStopped();
-  void initializeSyncWrite();
+  // false = bulk read pertama gagal; rinciannya sudah dicatat (port, hasil SDK,
+  // dan perangkat yang tidak menjawab ping). Tidak pernah memanggil exit().
+  bool initializeSyncWrite();
+  void reportFirstBulkReadFailure(const std::string &port_name, int result);
 
 public:
   const int         NONE_GAIN = 65535;
@@ -135,9 +138,15 @@ public:
   void    addSensorModule(SensorModule *module);
   void    removeSensorModule(SensorModule *module);
 
-  void    startTimer();
+  // false = loop kontrol TIDAK dimulai (bulk read pertama gagal). Pemanggil
+  // yang memutuskan: op3_manager mematikan diri dengan urutan yang aman.
+  bool    startTimer();
   void    stopTimer();
   bool    isTimerRunning();
+  // Menunggu thread antrean pesan controller selesai. Thread itu memutar
+  // executor sampai konteks ROS mati, jadi panggil SESUDAH rclcpp::shutdown();
+  // sebelum itu fungsi ini akan menunggu selamanya.
+  void    joinQueueThread();
 
   void    setCtrlModule(std::string module_name);
   void    loadOffset(const std::string path);

@@ -59,6 +59,12 @@ DirectControlModule::~DirectControlModule()
   queue_thread_.join();
 }
 
+void DirectControlModule::joinQueueThread()
+{
+  if (queue_thread_.joinable())
+    queue_thread_.join();
+}
+
 void DirectControlModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   op3_kinematics_ = new OP3KinematicsDynamics(WholeBody);
