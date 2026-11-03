@@ -433,9 +433,8 @@ per 30 detik. Lonjakan inferensi ke 63 ms sempat terjadi dan **FPS tidak turun**
 ## Kalau robot Anda berbeda
 
 - **Kamera bukan 640x360** → hitung ulang bentuk ekspor di 5a (rasio kamera,
-  kelipatan 32). Perhatikan juga `kick_image_width_px` di `demo.launch.xml`:
-  radius bola diterbitkan dalam **piksel gambar asli**
-  (`yolo_ball_detector.py::_extract_circles`), jadi angkanya harus mengikuti
+  kelipatan 32). Ingat radius bola diterbitkan dalam **piksel gambar asli**
+  (`yolo_ball_detector.py::_extract_circles`), jadi pemakainya harus mengikuti
   lebar kamera.
 - **CPU bukan 4c/8t** → peta inti di Langkah 2 berubah total. Baca
   `thread_siblings_list`, jangan menyalin `0-2` / `3,7` mentah-mentah.

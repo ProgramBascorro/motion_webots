@@ -72,6 +72,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 #   yolo_field_detector.py    : multi-class field -> vision_msgs/Detection2DArray
 #   yolo_landmark_detector.py : 5-class landmark (OpenVINO) -> Detection2DArray + FPS
 #   yolo_goalline_detector.py : goal line (garis gawang) -> PolygonStamped + FPS
+#   yolo_gawang_detector.py   : gawang (ball_gawang_v3 INT8) -> Detection2DArray + FPS
 #   goalline_fps_benchmark.py : same detection offline (video/camera) + FPS report
 #
 # The last two entries are LIBRARIES, not nodes, but they MUST land in the same
@@ -84,6 +85,7 @@ install(PROGRAMS
   scripts/yolo_field_detector.py
   scripts/yolo_landmark_detector.py
   scripts/yolo_goalline_detector.py
+  scripts/yolo_gawang_detector.py
   scripts/goalline_fps_benchmark.py
   scripts/detector_fps.py
   scripts/goalline_core.py

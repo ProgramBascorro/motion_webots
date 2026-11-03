@@ -66,7 +66,81 @@
     # Jalan kembali: model_path "model/ball_yolov8n_384x640_int8_openvino_model",
     # target_classes ["ball"], imgsz_hw [384, 640], dan kalau tulisannya ingin
     # tetap sama: display_class_names ["ball=Bola baru"].
-    model_path: "model/v8n_openvino_model"
+    # DIGANTI 2026-09-18 ke bobot hasil latihan "merged_ball_v2"
+    # (~/Downloads/train, YOLOv8n, 100 epoch diminta / berhenti di 69, terbaik
+    # epoch 44: P 0,976 R 0,971 mAP50 0,986 mAP50-95 0,729). Kelasnya "ball".
+    #
+    # Diekspor 384x640 lalu dikuantisasi INT8 mengikuti strategi yang sudah
+    # dipasang (lihat PANDUAN_OPTIMASI_FPS_DETEKSI.md):
+    #   yolo export model=model/merged_ball_v2_best.pt format=openvino imgsz=384,640
+    #   scripts/quantize_ball_int8.py --src <fp32> --dst <int8> --calib <frame>
+    # Kalibrasi dari 200 frame kamera robot yang direkam SAAT DEMO BERJALAN
+    # (model/calib_frames_demo_2026-09-18), bukan frame ruangan seperti dulu.
+    #
+    # KENAPA PINDAH DARI v8n: v8n berhalusinasi. Diukur pada 200 frame demo
+    # 18 Sep (kamera menghadap dinding, TIDAK ADA bola sama sekali):
+    #   v8n  : 197/200 frame "melihat bola", conf sampai 0,78, kotaknya
+    #          595x360 px -- hampir seluruh bingkai. Karena radius bola
+    #          diterbitkan dalam piksel, itu setara bola raksasa di depan kaki.
+    #   baru : 0/200. Bahkan pada ambang 0,05 tidak keluar satu kotak pun.
+    # Pada 200 frame kalibrasi 1 Sep keduanya 0/200 -- jadi halusinasi v8n
+    # bergantung adegan, dan adegan dinding itu memicunya.
+    #
+    # Kesetiaan INT8 terhadap FP32-nya (tes_infer.mp4, 30 frame):
+    #   FP32 30/30 conf rata2 0,865 min 0,857 | INT8 30/30 rata2 0,853 min 0,834
+    # Ulangi kapan saja: scripts/compare_ball_models.py
+    #
+    # Jalan mundur: "model/merged_ball_v2_384x640_openvino_model" (FP32, sengaja
+    # ditinggal utuh). Kembali ke v8n berarti mengembalikan JUGA imgsz_hw [0,0],
+    # target_classes ["Bola-baru"] dan display_class_names [].
+    # DIGANTI LAGI 2026-09-18 (malam) ke bobot "ball_gawang_v3"
+    # (~/Downloads/ball_gawang_v3_models, YOLOv8n, dataset ball_gawang_v3).
+    # Kelasnya DUA: {0: ball, 1: gawang}. Gawang HANYA untuk ditampilkan di
+    # gambar debug -- lihat draw_all_classes di bawah; perilaku demo tetap
+    # hanya melihat bola.
+    #
+    # Masukan dikecilkan 384x640 -> 288x480 (tetap 16:9, kelipatan 32) atas
+    # permintaan operator supaya detektor lebih ringan saat demo. Harganya
+    # bola tampak 25% lebih kecil secara linier di mata model. DIUKUR, bukan
+    # diasumsikan (tes_infer.mp4, 30 frame, kelas ball saja):
+    #
+    #   bobot / bentuk                    ms/frame  deteksi  conf avg  conf MIN  radius px
+    #   merged_ball_v2 384x640 INT8 (lama)   20,0    30/30    0,853     0,834     38,7
+    #   ball_gawang_v3 384x640 FP32          33,6    30/30    0,878     0,849     36,7
+    #   ball_gawang_v3 384x640 INT8          20,1    30/30    0,876     0,824     36,4
+    #   ball_gawang_v3 288x480 INT8 (AKTIF)  12,5    30/30    0,843     0,789     36,2
+    #
+    # Radius (piksel gambar ASLI) hanya bergeser 0,5% dari 384x640, jadi
+    # kick_image_width_px dan kalibrasi tendangan tidak perlu disentuh.
+    # Deteksi palsu: 0 dari 400 frame tanpa bola pada ambang 0,30 (bola
+    # maupun gawang); conf bola tertinggi pada adegan dinding 0,23.
+    #
+    # Kalibrasi INT8 dari 460 frame: 200 frame demo 18 Sep + 200 frame ruangan
+    # 1 Sep + 60 frame tes_infer.mp4 (satu-satunya sumber bola). TIDAK ADA
+    # frame gawang di kalibrasi -- kalau kotak gawang di lapangan tampak lemah,
+    # rekam frame berisi gawang lalu kuantisasi ulang:
+    #   scripts/capture_calib_frames.py ; scripts/quantize_ball_int8.py
+    #   --calib <folder1> --calib <folder2> ... ; scripts/compare_ball_models.py
+    #   --class ball
+    #
+    # Jalan mundur bertingkat (semua direktori ditinggal utuh):
+    #   lebih akurat, lebih berat : "model/ball_gawang_v3_384x640_int8_openvino_model" + imgsz_hw [384, 640]
+    #   bobot sebelumnya          : "model/merged_ball_v2_384x640_int8_openvino_model" + imgsz_hw [384, 640]
+    #                               + draw_all_classes false + display_class_names ["ball=Bola-baru"]
+    # DIGANTI 2026-11-03 atas permintaan operator ke bobot "robot_torso"
+    # (~/Downloads/robot_torso_training_results.zip, YOLO11n, 6 kelas: ball,
+    # goalpost, l, robot, t, x). SEMENTARA, untuk mencoba deteksi gawang dan
+    # robot. Hanya ball/goalpost/robot yang aktif (lihat active_classes).
+    # Diekspor 288x480 lalu INT8 (--ignore-head, kalibrasi 660 frame).
+    # PERINGATAN: bola LEBIH LEMAH dari ball_gawang_v3 -- angkanya di komentar
+    # active_classes di bawah.
+    #
+    # KEMBALI ke ball_gawang_v3 (direktori ditinggal utuh), ganti 4 baris:
+    #   model_path: "model/ball_gawang_v3_288x480_int8_openvino_model"
+    #   active_classes: []
+    #   display_class_names: ["gawang=Gawang"]
+    #   max_detections: 10
+    model_path: "model/robot_torso_288x480_int8_openvino_model"
 
     # OpenVINO carries no task in the way ultralytics auto-detects reliably;
     # set it explicitly. This is a detection model.
@@ -94,6 +168,12 @@
     # bobot: kalau kembali ke ball_yolov8n, kembalikan juga ke 0,5 -- di sana
     # 0,30 cuma mengundang deteksi palsu. Diukur di dalam ruangan; di lapangan
     # dengan cahaya berbeda perlu diperiksa ulang.
+    #
+    # 18 Sep, bobot merged_ball_v2: nilainya SENGAJA DIBIARKAN 0,30 dan itu
+    # terukur aman. Pada 400 frame tanpa bola (200 frame demo 18 Sep + 200
+    # frame 1 Sep) bobot baru memberi NOL deteksi bahkan di ambang 0,05, jadi
+    # 0,30 tidak mengundang deteksi palsu di sini. Bola sungguhan pada bobot
+    # ini keluar di conf 0,83-0,87, jadi jaraknya lebar.
     confidence_threshold: 0.30
     iou_threshold: 0.45
 
@@ -103,6 +183,10 @@
     # anchor sudah dibakar jadi konstanta waktu ekspor.
     #
     # imgsz di bawah dipakai hanya kalau imgsz_hw dimatikan ([0, 0]).
+    #
+    # TIDAK DIPAKAI sejak 18 Sep: imgsz_hw aktif. Angka 320 ini peninggalan
+    # bobot v8n; kalau imgsz_hw dikosongkan tanpa mengganti bobot, IR 384x640
+    # akan menolak masukan 320x320.
     imgsz: 320
 
     # --- masukan PERSEGI PANJANG [tinggi, lebar] ---------------------------
@@ -121,32 +205,66 @@
     #   384x640 ... lihat baris "Model ceiling" di log saat node start
     #
     # [0, 0] mematikannya dan kembali ke imgsz persegi di atas.
-    # [0, 0] WAJIB untuk bobot v8n: IR-nya dibakar dengan masukan statis
-    # 1x3x320x320 (persegi), jadi 384x640 akan ditolak. Dengan [0, 0], yang
-    # dipakai adalah imgsz persegi di atas.
-    imgsz_hw: [0, 0]
+    #
+    # Nilai ini WAJIB sama dengan bentuk ekspor bobot yang aktif:
+    #   ball_gawang_v3_288x480_* -> [288, 480]   (AKTIF)
+    #   *_384x640_*              -> [384, 640]
+    #   v8n_openvino_model       -> [0, 0]  (IR-nya statis 1x3x320x320)
+    # 288x480 = 138k piksel vs 246k pada 384x640 (0,56x); terukur 1,71x lebih
+    # cepat. Yang ditukar adalah jangkauan bola jauh, lihat tabel di model_path.
+    imgsz_hw: [288, 480]
 
     # OpenVINO runs on the Intel CPU; keep device "cpu" and half false. (FP16 is
     # handled inside the OpenVINO IR, not via this flag.)
     device: "cpu"
     half: false
-    max_detections: 10
+    # 10 -> 15 bersama robot_torso: bola + 2 tiang + beberapa robot tidak
+    # boleh menyingkirkan bola dari jatah. Kembali 10 untuk ball_gawang_v3.
+    max_detections: 15
 
-    # Model class names to treat as "the ball". ball_yolov8n exposes exactly one
-    # class: "ball" (class 0).
-    # If none of these match the model, every class is treated as a ball.
-    target_classes: ["Bola-baru"]
+    # Nama kelas DI DALAM MODEL yang dianggap "bola". Bobot merged_ball_v2
+    # punya tepat satu kelas: "ball" (indeks 0).
+    # Kalau tidak ada yang cocok, SEMUA kelas dianggap bola.
+    #
+    # Terikat pada bobot: nilai ini dan nama kelas di metadata.yaml model
+    # harus sama persis.
+    target_classes: ["ball"]
+
+    # Gambar SEMUA kelas model di image_out, tapi teruskan ke circle_set /
+    # ball_center HANYA kelas di target_classes. Dibuat untuk kelas "gawang"
+    # pada bobot ball_gawang_v3: operator ingin melihatnya, demo tidak boleh
+    # bereaksi padanya. Saringannya ada di _extract_circles (yolo_ball_detector
+    # .py). Bawaan false untuk profil lain.
+    draw_all_classes: true
+
+    # Kelas yang DIDETEKSI + digambar saat draw_all_classes=true. Kelas di
+    # target_classes selalu ikut. KOSONG = semua kelas model.
+    #
+    # Disiapkan 2026-11-03 untuk bobot robot_torso (YOLO11n, 6 kelas: ball,
+    # goalpost, l, robot, t, x) -- yang diinginkan hanya ball/goalpost/robot.
+    # DIAKTIFKAN 3 Nov walau gerbang bola gagal -- keputusan operator, untuk
+    # mencoba gawang + robot. Angka gerbang (288x480, conf 0,30):
+    #   tes_infer.mp4 60 frame : ball_gawang_v3 INT8 59/60 | robot_torso INT8 52/60
+    #                            (FP32 384x640: 60/60 vs 40/60)
+    #   260 frame gawang RF     : bola terdeteksi di 101 vs 20 frame -- bola
+    #                            oranye kecil di lapangan dilewatkan
+    #   INT8 setia ke FP32 (52 vs 52), jadi penurunannya dari bobotnya sendiri.
+    # Yang LEBIH BAIK: tiang gawang putih di ruangan ALPHONSE (calib_frames)
+    # terdeteksi 200/200 frame conf ~0,70; ball_gawang_v3 = 0.
+    # Kembali ke ball_gawang_v3: lihat komentar di atas model_path.
+    active_classes: ["ball", "goalpost", "robot"]
 
     # Nama yang ditulis di gambar debug (image_out), bentuknya
     # "nama_di_model=Nama Tampilan". KOSONG = pakai nama asli model.
     #
-    # Sekarang kosong karena bobot v8n memang sudah menamai kelasnya
-    # "Bola-baru". Knob ini disimpan untuk kalau bobotnya diganti lagi ke
-    # ball_yolov8n (kelas "ball") tapi tulisannya ingin tetap sama:
-    #   display_class_names: ["ball=Bola baru"]
-    # Hanya mempengaruhi gambar debug; pemilihan kelas tetap lewat
-    # target_classes dengan nama asli model.
-    display_class_names: []
+    # Dipakai sejak 18 Sep: bobot merged_ball_v2 menamai kelasnya "ball",
+    # sedangkan tulisan yang dikenal operator di lapangan adalah "Bola-baru".
+    # Ini HANYA mengganti tulisan di gambar debug; pemilihan kelas tetap lewat
+    # target_classes dengan nama ASLI model -- jadi baris ini tidak bisa dipakai
+    # untuk menyiasati ketidakcocokan label.
+    # 3 Nov: "ball=Bola-baru" dihapus atas permintaan operator -- bola kini
+    # tertulis "ball" (nama asli kelas di model).
+    display_class_names: ["goalpost=Gawang", "robot=Robot"]
 
     # Inference loop rate (Hz). Always uses the freshest camera frame.
     #

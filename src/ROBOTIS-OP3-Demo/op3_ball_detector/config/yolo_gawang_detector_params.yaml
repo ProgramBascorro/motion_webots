@@ -1,0 +1,90 @@
+# Parameter detektor GAWANG (scripts/yolo_gawang_detector.py), node mandiri.
+# Belum dipakai demo mana pun. Lihat README_GAWANG.md.
+# "/**" supaya sampai ke node apa pun namespace/namanya.
+/**:
+  ros__parameters:
+    # Bobot ball_gawang_v3 (YOLOv8n, kelas {0: ball, 1: gawang}) -- .pt-nya
+    # IDENTIK dengan yang dipakai detektor bola (sha256 d7dde576...), yang beda
+    # hanya kuantisasinya:
+    #   * kalibrasi 720 frame: 260 gambar GAWANG (train split dataset, satu
+    #     dari tiap 8 gambar rf_r0) + 200 frame demo 18 Sep + 200 frame ruangan
+    #     1 Sep + 60 frame tes_infer.mp4. INT8 milik detektor bola dikalibrasi
+    #     TANPA satu pun frame gawang.
+    #   * dekode kotak di kepala Detect dibiarkan FP32 (--ignore-head).
+    #
+    # Terukur 2026-10-30 (scripts/eval_goal_model.py, 226 gambar berlabel
+    # val+test, kelas gawang, ambang 0,40, + 400 frame robot TANPA gawang):
+    #
+    #   288x480                        AP50   AP50-95   P      R      palsu   ms*
+    #   FP32                           1,000  0,910     1,000  0,991  0/400   43,6
+    #   INT8 detektor bola (lama)      0,999  0,811     0,996  0,982  0/400    -
+    #   INT8 kalib. gawang             1,000  0,801     1,000  0,991  0/400   30,2
+    #   INT8 kalib. gawang + kepala    1,000  0,902     1,000  0,991  0/400   30,6  <- AKTIF
+    #
+    #   * ms diukur saat stack robot hidup (detektor bola memakai inti 0-2,
+    #     uji di 4-6 = sibling-nya), jadi angka mutlaknya tinggi; yang berlaku
+    #     perbandingannya: INT8 1,42x lebih cepat dari FP32. INT8 lama diukur
+    #     di run lain (26,3 vs FP32 39,8 ms di run itu), jadi tidak ditulis.
+    #
+    # AP50-95 itulah yang membedakan: kuantisasi biasa membuat tepi kotak --
+    # posisi TIANG gawang -- kurang pas. Kepala FP32 mengembalikannya.
+    #
+    # BATAS bukti: set berlabelnya SEMUA dari Roboflow, bukan dari kamera
+    # ALPHONSE, dan 400 frame negatif tidak berisi lapangan. Gawang sungguhan
+    # lewat kamera robot belum pernah diuji.
+    #
+    # Folder model/ di-.gitignore: IR ini cuma ada di mesin ini. Cara membuat
+    # ulang ada di README_GAWANG.md.
+    #
+    # Jalan mundur: "model/ball_gawang_v3_288x480_openvino_model" (FP32), atau
+    # INT8 milik detektor bola "model/ball_gawang_v3_288x480_int8_openvino_model".
+    # imgsz_hw tetap [288, 480] untuk ketiganya.
+    model_path: "model/ball_gawang_v3_288x480_int8_calgawang_openvino_model"
+    model_task: "detect"
+
+    # Kamera robot menerbitkan JPEG (image_raw/compressed); decode-nya lebih
+    # murah daripada mengangkut gambar mentah lewat DDS.
+    use_compressed: true
+
+    # Sapuan ambang pada set berlabel (model AKTIF):
+    #   ambang   0,25   0,30-0,45   0,50   0,60
+    #   recall   1,000  0,991       0,987  0,982
+    #   FP         1      0           0      0
+    # Gawang benar ber-conf TERENDAH 0,457; frame robot tanpa gawang tidak
+    # menghasilkan satu kotak pun bahkan di ambang 0,05. 0,35 = di tengah
+    # dataran 0,30-0,45, dengan sisa 0,1 ke gawang terlemah untuk menampung
+    # kamera robot yang tidak sebersih foto dataset.
+    # Bisa diubah selagi hidup:
+    #   ros2 param set /gawang_detector_node/yolo_gawang_detector confidence_threshold 0.45
+    confidence_threshold: 0.35
+    iou_threshold: 0.45
+
+    # [tinggi, lebar] WAJIB sama dengan bentuk ekspor IR (statis 1x3x288x480).
+    # 288x480 = rasio 16:9 kamera 640x360, kelipatan stride 32: tanpa bar
+    # padding yang dihitung percuma.
+    imgsz_hw: [288, 480]
+
+    device: "cpu"
+    # Dataset melabeli satu kotak per gawang utuh; lebih dari dua gawang dalam
+    # satu frame tidak mungkin di lapangan.
+    max_detections: 5
+
+    # Nama kelas DI DALAM MODEL (metadata.yaml). Tidak cocok = node menolak
+    # start, bukan diam-diam menerbitkan semua kelas.
+    gawang_class: "gawang"
+    # true = bola ikut DIGAMBAR di image_out (tidak pernah diterbitkan).
+    draw_other_classes: false
+
+    # JAUH di atas laju kamera (24 FPS) dan itu disengaja: lihat komentar
+    # detection_rate di yolo_ball_detector_openvino_params.yaml. Patokan
+    # minimal 3x laju kamera; 100 Hz = periode 10 ms.
+    detection_rate: 100.0
+
+    # image_out hanya dihitung kalau ada pelanggan (rqt_image_view).
+    publish_image: true
+    detection_frame_id: "detector"
+    enable_at_start: true
+
+    fps_log_period: 5.0
+    fps_window_sec: 2.0
+    startup_benchmark_frames: 5

@@ -53,19 +53,32 @@ def load_frames(video, frames_dir, limit):
     return imgs
 
 
-def run(path, imgs, imgsz, conf, iou):
+def run(path, imgs, imgsz, conf, iou, cls_name=None):
     import numpy as np
     from ultralytics import YOLO
     model = YOLO(path, task="detect")
     model.predict(imgs[0], imgsz=imgsz, verbose=False)      # pemanasan
+    # Dengan model multi-kelas, "deteksi" harus dihitung PER KELAS yang
+    # dinilai; kalau tidak, kotak gawang ikut dihitung sebagai bola dan
+    # gerbangnya berbohong. Kelas dicocokkan tanpa peduli kapital.
+    want_id = None
+    if cls_name:
+        names = {str(v).lower(): int(k) for k, v in dict(model.names).items()}
+        if cls_name.lower() not in names:
+            raise SystemExit("kelas '%s' tidak ada di %s (ada: %s)"
+                             % (cls_name, path, sorted(names)))
+        want_id = names[cls_name.lower()]
     hits, confs, rads = 0, [], []
     t0 = time.perf_counter()
     for img in imgs:
         r = model.predict(img, imgsz=imgsz, conf=conf, iou=iou,
                           max_det=10, verbose=False)[0]
-        if len(r.boxes):
+        idx = list(range(len(r.boxes)))
+        if want_id is not None:
+            idx = [i for i in idx if int(r.boxes.cls[i]) == want_id]
+        if idx:
             hits += 1
-            i = int(r.boxes.conf.argmax())
+            i = max(idx, key=lambda j: float(r.boxes.conf[j]))
             confs.append(float(r.boxes.conf[i]))
             x1, y1, x2, y2 = r.boxes.xyxy[i].tolist()
             rads.append(max(x2 - x1, y2 - y1) / 2)
@@ -90,14 +103,26 @@ def main():
     ap.add_argument("--frames", default="", help="pakai folder gambar, bukan video")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--imgsz", default="384,640",
-                    help="tinggi,lebar -- harus sama dengan bentuk ekspor")
+                    help="tinggi,lebar model A -- harus sama dengan bentuk ekspornya")
+    ap.add_argument("--imgsz-b", default="",
+                    help="tinggi,lebar model B kalau berbeda dari A")
     ap.add_argument("--conf", type=float, default=0.5)
     ap.add_argument("--iou", type=float, default=0.45)
     ap.add_argument("--speed-gate", type=float, default=1.3)
+    ap.add_argument("--class", dest="cls", default="",
+                    help="hanya nilai kelas ini (mis. ball); kosong = kelas apa pun")
+    ap.add_argument("--allow-slower", action="store_true",
+                    help="jangan gagalkan karena kecepatan (untuk membandingkan "
+                         "bobot, bukan format)")
     args = ap.parse_args()
 
-    imgsz = [int(x) for x in str(args.imgsz).split(",")]
-    imgsz = tuple(imgsz) if len(imgsz) == 2 else imgsz[0]
+    def parse_sz(text):
+        v = [int(x) for x in str(text).split(",")]
+        return tuple(v) if len(v) == 2 else v[0]
+    # Dua model boleh berbeda bentuk masukan (mis. 384x640 vs 288x480) --
+    # itulah gunanya membandingkan harga pengecilan.
+    imgsz_a = parse_sz(args.imgsz)
+    imgsz_b = parse_sz(args.imgsz_b) if args.imgsz_b else imgsz_a
 
     for d in (args.a, args.b):
         if not os.path.exists(d):
@@ -111,8 +136,10 @@ def main():
     h, w = imgs[0].shape[:2]
     print("Sumber uji: %d frame, %dx%d\n" % (len(imgs), w, h))
 
-    ra = run(args.a, imgs, imgsz, args.conf, args.iou)
-    rb = run(args.b, imgs, imgsz, args.conf, args.iou)
+    ra = run(args.a, imgs, imgsz_a, args.conf, args.iou, args.cls or None)
+    rb = run(args.b, imgs, imgsz_b, args.conf, args.iou, args.cls or None)
+    if args.cls:
+        print("Kelas yang dinilai: %s" % args.cls)
 
     print("%-8s %10s %10s %10s %10s %10s" %
           ("MODEL", "ms/frame", "deteksi", "conf avg", "conf MIN", "radius"))
@@ -125,7 +152,7 @@ def main():
     speedup = ra["ms"] / rb["ms"] if rb["ms"] else 0.0
     print("\n%-22s %.2fx (gerbang: >= %.2fx)" % ("Percepatan:", speedup, args.speed_gate))
 
-    ok_speed = speedup >= args.speed_gate
+    ok_speed = speedup >= args.speed_gate or args.allow_slower
     ok_hits = rb["hits"] >= ra["hits"]
     ok_conf = rb["conf_min"] >= args.conf + 0.10        # marjin di atas ambang
 

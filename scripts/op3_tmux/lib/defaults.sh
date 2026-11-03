@@ -28,7 +28,15 @@ MANAGER_CMD="${OP3_MANAGER_CMD:-ros2 launch op3_manager op3_simulation.launch.py
 TELEOP_CMD="${OP3_TELEOP_CMD:-ros2 launch op3_joy_teleop op3_joy_teleop.launch.py}"
 FOXGLOVE_CMD="${OP3_FOXGLOVE_CMD:-ros2 launch foxglove_bridge foxglove_bridge_launch.xml}"
 TOOLS_CMD="${OP3_TOOLS_CMD:-echo '[tools] /joy hz'; (ros2 topic hz /joy &) ; echo '[tools] /joint_states hz'; (ros2 topic hz /joint_states &) ; echo '[tools] /robotis/walking/command echo'; ros2 topic echo /robotis/walking/command}"
-RQT_CMD="${OP3_RQT_CMD:-ros2 run rqt_image_view rqt_image_view}"
+# rqt_image_view dipatok ke inti 3,7 (inti fisik P3), sama seperti usb_cam,
+# op_demo_node, dan head_tracking. Alasannya terukur, bukan selera: detektor
+# bola dipatok di inti 0-2, dan proses apa pun yang mendarat di sibling
+# Hyper-Threading-nya (4,5,6) berbagi unit eksekusi dengannya -- inferensi
+# 40,3 ms jadi 84,2 ms. rqt merender 640x360 @ 24 fps di Qt; tanpa patokan ia
+# bebas mendarat di sana, dan gejalanya "gambar tersendat" saat demo.
+# Ini hanya berlaku untuk rqt yang diluncurkan lewat peluncur ini; rqt yang
+# diketik manual di terminal tetap bebas (pakai `taskset -c 3,7 rqt`).
+RQT_CMD="${OP3_RQT_CMD:-taskset -c 3,7 ros2 run rqt_image_view rqt_image_view}"
 
 # Vision/localization stack
 YOLO_VISION_CMD="${OP3_YOLO_VISION_CMD:-ros2 launch op3_ball_detector yolo_ball_detector_openvino.launch.py}"

@@ -57,7 +57,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.executors import ExternalShutdownException
 
@@ -144,6 +144,39 @@ class YoloBallDetector(Node):
         # Class names (from the model) that should be treated as "the ball".
         self.target_classes = list(
             self.declare_parameter('target_classes', ['ball']).value)
+        # --- gambar semua kelas, teruskan hanya bola ------------------------
+        # Bobot ball_gawang_v3 punya kelas kedua, "gawang", yang HANYA untuk
+        # ditampilkan di gambar debug -- perilaku demo tidak boleh ikut berubah.
+        #
+        # Masalahnya, sebelumnya `classes=target_class_ids` diteruskan ke
+        # predict(), jadi kelas lain dibuang di NMS sebelum sempat digambar;
+        # mengganti bobot saja tidak akan menampilkannya. Dengan
+        # draw_all_classes=true, predict() dijalankan TANPA saringan kelas dan
+        # saringannya pindah ke _extract_circles: hanya kotak berkelas target
+        # yang jadi circle_set/ball_center. Semua yang di hilir (_select_target,
+        # BallTracker, head_tracking, D58) tetap hanya melihat bola.
+        #
+        # Bawaan false supaya profil .pt/.onnx lama berperilaku persis seperti
+        # dulu. Ongkos true: NMS memproses beberapa kotak ekstra -- terukur
+        # sub-milidetik.
+        self.draw_all_classes = bool(
+            self.declare_parameter('draw_all_classes', False).value)
+        # --- kelas AKTIF (hanya berlaku saat draw_all_classes=true) ----------
+        # Bobot robot_torso punya 6 kelas: ball, goalpost, l, robot, t, x.
+        # l/t/x (titik potong garis lapangan) tidak diinginkan di gambar debug,
+        # jadi daftar ini membatasi kelas yang dideteksi + digambar. Kelas di
+        # target_classes SELALU ikut, supaya bola tidak mungkin tersaring.
+        # Saringan dilakukan di predict(classes=...), jadi kelas lain dibuang
+        # sebelum NMS dan tidak memakan jatah max_detections.
+        #
+        # KOSONG = semua kelas (perilaku lama). Penjagaan dynamic_typing +
+        # `or []` sama alasannya dengan display_class_names di bawah.
+        self.active_classes = list(
+            self.declare_parameter(
+                'active_classes', [],
+                ParameterDescriptor(dynamic_typing=True)).value or [])
+        # Diisi sesudah model dimuat; None = semua kelas.
+        self.active_class_ids = None
         # Nama yang DITULIS di gambar debug, kalau berbeda dari nama kelas di
         # model. Bentuknya "nama_di_model=Nama Tampilan"; kosong = pakai nama
         # asli model.
@@ -158,15 +191,27 @@ class YoloBallDetector(Node):
         # asli dari model (lihat target_classes), jadi mengganti tulisan di sini
         # tidak bisa membuat deteksinya meleset.
         #
-        # `or []` BUKAN gaya penulisan, tapi wajib: kalau bawaannya daftar
-        # KOSONG, ROS tidak bisa menyimpulkan tipe elemennya, parameternya
-        # berakhir bertipe NOT_SET, dan `.value` mengembalikan None -- bukan [].
-        # Tanpa penjagaan ini node MATI saat start dengan
-        # "TypeError: 'NoneType' object is not iterable", dan gejalanya di layar
-        # cuma kamera yang tidak pernah hidup. Berlaku juga saat berkas
-        # parameter menuliskan `display_class_names: []`.
+        # DUA penjagaan di sini, dan keduanya wajib. Bawaan daftar KOSONG
+        # membuat rclpy harus menebak tipe elemennya, dan tebakannya menyakitkan
+        # di dua arah:
+        #
+        #  1. `dynamic_typing=True` -- tanpa ini rclpy Humble menyimpulkan
+        #     BYTE_ARRAY dari `[]`, lalu MENOLAK daftar string dari berkas
+        #     parameter dan node MATI saat start:
+        #       InvalidParameterTypeException: Trying to set parameter
+        #       'display_class_names' to '['ball=Bola-baru']' of type
+        #       'STRING_ARRAY', expecting type 'BYTE_ARRAY'
+        #     Terbukti 2026-09-18 saat bobot pindah ke merged_ball_v2; gejalanya
+        #     di lapangan adalah demo yang "tidak jalan" tanpa sebab jelas,
+        #     karena galatnya cuma muncul di log node detektor.
+        #
+        #  2. `or []` -- saat berkas parameter benar-benar menuliskan
+        #     `display_class_names: []`, `.value` bisa mengembalikan None, bukan
+        #     []. Tanpa ini: "TypeError: 'NoneType' object is not iterable".
         self.display_class_names = list(
-            self.declare_parameter('display_class_names', []).value or [])
+            self.declare_parameter(
+                'display_class_names', [],
+                ParameterDescriptor(dynamic_typing=True)).value or [])
         # Diisi sesudah model dimuat; None = pakai nama asli model.
         self.plot_names = None
         self.detection_rate = float(
@@ -407,10 +452,22 @@ class YoloBallDetector(Node):
         # Resolve target class names -> class indices for the model.
         self.class_names = dict(model.names)
         self.target_class_ids = self._resolve_target_class_ids()
+        self.active_class_ids = self._resolve_active_class_ids()
         self.plot_names = self._resolve_display_names()
         self.get_logger().info(
             'Model classes: %s | targeting ids: %s'
             % (self.class_names, self.target_class_ids))
+        if self.draw_all_classes:
+            # Ditulis eksplisit supaya salah konfigurasi terlihat di log,
+            # bukan baru ketahuan di lapangan saat gawang "jadi bola".
+            passed = ([self.class_names.get(i, '?') for i in self.target_class_ids]
+                      if self.target_class_ids is not None else 'SEMUA')
+            drawn = ([self.class_names.get(i, '?') for i in self.active_class_ids]
+                     if self.active_class_ids is not None else 'SEMUA')
+            self.get_logger().info(
+                'draw_all_classes: menggambar kelas %s di image_out, '
+                'meneruskan ke circle_set/ball_center HANYA: %s'
+                % (drawn, passed))
         if self.plot_names is not None:
             self.get_logger().info(
                 'Nama di gambar debug diganti jadi: %s' % self.plot_names)
@@ -482,6 +539,34 @@ class YoloBallDetector(Node):
             changed = True
 
         return plot_names if changed else None
+
+    def _resolve_active_class_ids(self):
+        """Indeks kelas yang dideteksi saat draw_all_classes=true.
+
+        None = semua kelas. Kelas target selalu disertakan.
+        """
+        if not self.active_classes:
+            return None
+        name_to_id = {str(name).lower(): idx
+                      for idx, name in self.class_names.items()}
+        ids = []
+        for wanted in self.active_classes:
+            key = str(wanted).lower()
+            if key in name_to_id:
+                ids.append(name_to_id[key])
+            else:
+                self.get_logger().warn(
+                    'active_classes: kelas "%s" tidak ada di model; '
+                    'dilewati' % wanted)
+        for idx in (self.target_class_ids or []):
+            if idx not in ids:
+                ids.append(idx)
+        if not ids:
+            self.get_logger().warn(
+                'active_classes: tidak ada yang cocok dengan model; '
+                'memakai SEMUA kelas.')
+            return None
+        return sorted(ids)
 
     def _resolve_target_class_ids(self):
         """Map configured target class names to model class indices.
@@ -679,7 +764,8 @@ class YoloBallDetector(Node):
                 imgsz=self.predict_imgsz,
                 device=self.device,
                 max_det=self.max_detections,
-                classes=self.target_class_ids,
+                classes=(self.active_class_ids if self.draw_all_classes
+                         else self.target_class_ids),
                 verbose=False,
                 **self._predict_precision)
         except Exception as exc:  # noqa: BLE001
@@ -730,7 +816,16 @@ class YoloBallDetector(Node):
 
         xyxy = boxes.xyxy.cpu().numpy()
         confs = boxes.conf.cpu().numpy() if boxes.conf is not None else None
+        # Saringan kelas di sini adalah SATU-SATUNYA yang menjaga agar kelas
+        # non-bola (mis. gawang) tidak pernah bocor ke circle_set/ball_center
+        # saat draw_all_classes=true. Jangan dihapus walau predict() sudah
+        # menyaring -- biarkan keduanya, biayanya nol.
+        cls_ids = None
+        if self.target_class_ids is not None and boxes.cls is not None:
+            cls_ids = boxes.cls.cpu().numpy().astype(int)
         for idx, (x1, y1, x2, y2) in enumerate(xyxy):
+            if cls_ids is not None and int(cls_ids[idx]) not in self.target_class_ids:
+                continue
             cx = (x1 + x2) * 0.5
             cy = (y1 + y2) * 0.5
             radius = ((x2 - x1) + (y2 - y1)) * 0.25  # mean half-side, in px
