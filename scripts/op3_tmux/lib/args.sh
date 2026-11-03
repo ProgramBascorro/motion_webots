@@ -14,7 +14,6 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --action-editor${RST} Start: webots + manager + action_editor
   ${BOLD}./$(basename "$0") --demo${RST}          Start: demo launcher only
   ${BOLD}./$(basename "$0") --offset-tuner${RST} Start: offset tuner server (no manager)
-  ${BOLD}./$(basename "$0") --demo-soccer${RST}   Start: demo launcher only (soccer)
   ${BOLD}./$(basename "$0") --demo-vision${RST}   Start: demo launcher only (vision)
   ${BOLD}./$(basename "$0") --demo-action${RST}   Start: demo launcher only (action)
   ${BOLD}./$(basename "$0") --studio${RST}        Start: webots + manager + bascorro studio
@@ -37,6 +36,8 @@ ${BOLD}Usage${RST}
   ${BOLD}./$(basename "$0") --docker-down${RST}   Stop container     (op3_docker.sh down)
   ${BOLD}./$(basename "$0") --match-mode on${RST}  Kurung desktop ke inti 3,7 (FPS deteksi naik)
   ${BOLD}./$(basename "$0") --cpu-thieves${RST}   SELAMA demo: siapa yang mencuri CPU detektor
+  ${BOLD}./$(basename "$0") --imu-calib${RST}     Kalibrasi yaw 5 titik (tersimpan permanen)
+  ${BOLD}./$(basename "$0") --training${RST}      Menu Training (preset Studio / page Action Editor)
   ${BOLD}./$(basename "$0") --exit${RST}          Stop everything (kill session)
   ${BOLD}./$(basename "$0") -x${RST}              Stop everything (alias for --exit)
 
@@ -54,7 +55,6 @@ ${BOLD}Options${RST}
   --action-editor      Enable action editor (bridge + editor)
   --demo               Enable demo launcher (op3_demo)
   --offset-tuner       Enable offset tuner server (requires manager stopped)
-  --demo-soccer        Enable demo launcher and switch to soccer mode
   --demo-vision        Enable demo launcher and switch to vision mode
   --demo-action        Enable demo launcher and switch to action mode
   --studio             Enable bascorro studio UI (bridge + apply node + Vite)
@@ -74,6 +74,14 @@ ${BOLD}Options${RST}
   --cpu-thieves         Jalankan SELAMA demo, di terminal kedua: mencuplik 30
                         detik lalu melaporkan proses mana yang duduk di inti
                         sibling milik detektor (4,5,6) dan memperlambatnya.
+  --imu-calib           Kalibrasi yaw 5 titik. Robot dinyalakan ke pose INIT lewat
+                        launch demo yang SAMA, lalu operator memutarnya manual ke
+                        KIRI 0/90/180/270/360 dan menekan SPASI di tiap titik.
+                        Hasil permanen di op3_manager/config/yaw_calibration.yaml.
+                        Reset yaw D60/D56 tidak terpengaruh.
+  --training            Menu Training: latih preset Bascorro Studio atau page
+                        Action Editor di robot, lihat hasil terbaik, ekspor.
+                        Panduan: PANDUAN_TRAINING.md.
   --match-mode on|off|status
                         Kurung sesi desktop (Firefox/VS Code/GNOME) ke inti
                         fisik 3,7 supaya inti 0-2 bersih untuk detektor bola.
@@ -153,6 +161,8 @@ op3_tmux_dispatch() {
   DO_FREE_PORT=0
   MATCH_MODE_ARG=""
   DO_CPU_THIEVES=0
+  DO_IMU_CALIB=0
+  DO_TRAINING=0
   DO_EXIT=0
   DO_STOP=0
   DO_USUAL=0
@@ -179,7 +189,6 @@ op3_tmux_dispatch() {
       --action-editor) WITH_ACTION_EDITOR=1; START_EXPLICIT=1; shift ;;
       --demo) WITH_DEMO=1; START_EXPLICIT=1; shift ;;
       --offset-tuner) WITH_OFFSET_TUNER=1; START_EXPLICIT=1; shift ;;
-      --demo-soccer) WITH_DEMO=1; DEMO_MODE="soccer"; START_EXPLICIT=1; shift ;;
       --demo-vision) WITH_DEMO=1; DEMO_MODE="vision"; START_EXPLICIT=1; shift ;;
       --demo-action) WITH_DEMO=1; DEMO_MODE="action"; START_EXPLICIT=1; shift ;;
       --studio|--action-web) WITH_ACTION_WEB=1; START_EXPLICIT=1; shift ;;
@@ -200,6 +209,8 @@ op3_tmux_dispatch() {
       --free-port) DO_FREE_PORT=1; shift ;;
       --match-mode) MATCH_MODE_ARG="${2:-status}"; shift 2 ;;
       --cpu-thieves) DO_CPU_THIEVES=1; shift ;;
+      --imu-calib) DO_IMU_CALIB=1; shift ;;
+      --training) DO_TRAINING=1; shift ;;
     --exit|-x) DO_EXIT=1; shift ;;
       --stop) DO_STOP=1; shift ;;
       --restart) RESTART_COMPONENT="$2"; shift 2 ;;
@@ -223,6 +234,8 @@ op3_tmux_dispatch() {
   if [[ "$DO_FREE_PORT" -eq 1 ]]; then action_free_port; exit $?; fi
   if [[ -n "$MATCH_MODE_ARG" ]]; then action_match_mode "$MATCH_MODE_ARG"; exit $?; fi
   if [[ "$DO_CPU_THIEVES" -eq 1 ]]; then action_cpu_thieves; exit $?; fi
+  if [[ "$DO_IMU_CALIB" -eq 1 ]]; then action_imu_calib; exit $?; fi
+  if [[ "$DO_TRAINING" -eq 1 ]]; then action_training; exit $?; fi
   if [[ "$DO_ATTACH" -eq 1 ]]; then action_attach; exit 0; fi
   if [[ "$DO_STOP" -eq 1 ]]; then action_stop; exit 0; fi
   if [[ -n "$RESTART_COMPONENT" ]]; then restart_component "$RESTART_COMPONENT"; exit 0; fi

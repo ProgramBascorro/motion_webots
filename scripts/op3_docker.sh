@@ -34,6 +34,7 @@
 #   scripts/op3_docker.sh cpu-thieves
 #                                  # SELAMA demo jalan: siapa yang duduk di inti
 #                                  # sibling milik detektor dan memperlambatnya
+#   scripts/op3_docker.sh training # menu Training (PANDUAN_TRAINING.md)
 #   scripts/op3_docker.sh down     # matikan dan hapus container
 
 set -euo pipefail
@@ -639,6 +640,23 @@ cmd_cpu_thieves() {
   python3 "$scanner" "$@"
 }
 
+# Kalibrasi yaw 5 titik. Harus DI DALAM container (ROS dan stack hidup di
+# sana) dan lewat entrypoint supaya env ROS-nya sama dengan demo; -it karena
+# alatnya menunggu tombol SPASI dari operator.
+cmd_imu_calib() {
+  container_running || { echo "Container '$NAME' tidak jalan. Jalankan: scripts/op3_docker.sh up" >&2; return 1; }
+  $DOCKER exec -it "$NAME" /docker-entrypoint.sh python3 /ros2_ws/scripts/calib_imu_yaw.py "$@"
+}
+
+# Menu Training. -it karena interaktif (gum + Enter tiap percobaan); TZ host
+# ikut supaya waktu di daftar sama dengan dropdown Studio (kontainer = UTC).
+cmd_training() {
+  container_running || { echo "Container '$NAME' tidak jalan. Jalankan: scripts/op3_docker.sh up" >&2; return 1; }
+  local tz
+  tz="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)"
+  $DOCKER exec -it ${tz:+-e TZ="$tz"} "$NAME" /docker-entrypoint.sh bash /ros2_ws/scripts/training_menu.sh
+}
+
 cmd_down() {
   container_exists || { echo "Container '$NAME' tidak ada."; return 0; }
   $DOCKER rm -f "$NAME" >/dev/null
@@ -652,9 +670,11 @@ case "${1:-up}" in
   free-port) cmd_free_port ;;
   match-mode) shift; cmd_match_mode "${1:-status}" ;;
   cpu-thieves) shift; cmd_cpu_thieves "$@" ;;
+  imu-calib) shift; cmd_imu_calib "$@" ;;
+  training)  cmd_training ;;
   down)      cmd_down ;;
   *)
-    echo "Pemakaian: $0 {up|shell|doctor|free-port|match-mode|cpu-thieves|down}" >&2
+    echo "Pemakaian: $0 {up|shell|doctor|free-port|match-mode|cpu-thieves|imu-calib|training|down}" >&2
     exit 1
     ;;
 esac

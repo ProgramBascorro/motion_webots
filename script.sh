@@ -56,6 +56,8 @@ readonly M_EXIT_TMUX="exit_tmux"
 readonly M_FREE_PORT="free_port"
 readonly M_MATCH_MODE="match_mode"
 readonly M_CPU_THIEVES="cpu_thieves"
+readonly M_IMU_CALIB="imu_calib"
+readonly M_TRAINING="training"
 readonly M_QUIT="quit"
 
 # Order matters (Launch picker first)
@@ -73,6 +75,8 @@ readonly MENU_ENUMS=(
   "$M_FREE_PORT"
   "$M_MATCH_MODE"
   "$M_CPU_THIEVES"
+  "$M_IMU_CALIB"
+  "$M_TRAINING"
   "$M_QUIT"
 )
 
@@ -92,6 +96,8 @@ menu_label() {
     "$M_FREE_PORT")     echo "Free DXL port" ;;
     "$M_MATCH_MODE")    echo "Match mode (CPU for detector)" ;;
     "$M_CPU_THIEVES")   echo "Who steals detector CPU" ;;
+    "$M_IMU_CALIB")     echo "Calibration" ;;
+    "$M_TRAINING")      echo "Training" ;;
     "$M_QUIT")          echo "Quit" ;;
     *)                  echo "Unknown" ;;
   esac
@@ -113,6 +119,8 @@ menu_emoji() {
     "$M_FREE_PORT")     echo "🔌" ;;
     "$M_MATCH_MODE")    echo "🎯" ;;
     "$M_CPU_THIEVES")   echo "🕵️" ;;
+    "$M_IMU_CALIB")     echo "🧭" ;;
+    "$M_TRAINING")      echo "🏋️" ;;
     "$M_QUIT")          echo "👋" ;;
     *)                  echo "" ;;
   esac
@@ -151,6 +159,8 @@ choice_to_enum() {
     "Free DXL port")     echo "$M_FREE_PORT" ;;
     "Match mode (CPU for detector)") echo "$M_MATCH_MODE" ;;
     "Who steals detector CPU") echo "$M_CPU_THIEVES" ;;
+    "Calibration") echo "$M_IMU_CALIB" ;;
+    "Training") echo "$M_TRAINING" ;;
     "Quit")              echo "$M_QUIT" ;;
     *)                   echo "$M_QUIT" ;;
   esac
@@ -407,6 +417,22 @@ while true; do
     # SIBLING milik detektor bola dan memperlambat inferensinya dari dalam.
     "$M_CPU_THIEVES")
       op3_tmux_main --cpu-thieves || true
+      ;;
+
+    # Kalibrasi yaw 5 titik. Robot dinyalakan ke pose INIT lewat launch demo
+    # yang SAMA (jadi init-nya ikut kalau init demo diubah), lalu operator
+    # memutar robot manual 0/90/180/270/360 ke KIRI dan menekan SPASI tiap
+    # titik. Hasilnya permanen di op3_manager/config/yaw_calibration.yaml.
+    "$M_IMU_CALIB")
+      op3_tmux_main --imu-calib || true
+      ;;
+
+    # Training parameter jalan (preset Bascorro Studio) atau page Action Editor:
+    # pilih sumber -> pilih preset/page (dibaca ulang tiap layar) -> jalankan,
+    # lihat hasil terbaik, ekspor. Navigasi di scripts/training_menu.sh,
+    # panduan di PANDUAN_TRAINING.md.
+    "$M_TRAINING")
+      op3_tmux_main --training || true
       ;;
 
     "$M_QUIT"|*)

@@ -261,6 +261,32 @@ action_cpu_thieves() {
   "$script" cpu-thieves "$@"
 }
 
+# Kalibrasi yaw 5 titik (scripts/calib_imu_yaw.py). Interaktif -- operator
+# menekan SPASI di tiap titik -- jadi butuh terminal sungguhan; dari host
+# lewat op3_docker.sh supaya masuk container via entrypoint (ROS di PATH).
+action_imu_calib() {
+  if [[ -e /.dockerenv ]]; then
+    python3 "$WS/scripts/calib_imu_yaw.py" "$@"
+    return $?
+  fi
+  local script
+  script="$(op3_docker_sh)"
+  "$script" imu-calib "$@"
+}
+
+# Menu Training (scripts/training_menu.sh). Interaktif dan butuh ROS + stack
+# yang hidup, jadi dari host masuk container lewat op3_docker.sh (sama dengan
+# imu-calib).
+action_training() {
+  if [[ -e /.dockerenv ]]; then
+    bash "$WS/scripts/training_menu.sh"
+    return $?
+  fi
+  local script
+  script="$(op3_docker_sh)"
+  "$script" training
+}
+
 restart_component() {
   local comp="$1"
 
