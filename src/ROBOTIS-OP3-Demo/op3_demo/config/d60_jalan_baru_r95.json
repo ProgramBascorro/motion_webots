@@ -1,8 +1,8 @@
 {
   "format": "bascorro-studio/walking-versions",
   "formatVersion": 1,
-  "revision": 123,
-  "savedAt": "2026-10-29T15:55:31.565Z",
+  "revision": 128,
+  "savedAt": "2026-10-29T17:18:49.028Z",
   "activeVersionId": "aa26f1e7-8bb1-4c0e-bbe1-1ce67edd6aa8",
   "ui": {},
   "versions": [
@@ -10,10 +10,10 @@
       "id": "aa26f1e7-8bb1-4c0e-bbe1-1ce67edd6aa8",
       "name": "JALAN BARU",
       "createdAt": 1789753062104,
-      "updatedAt": 1793289107068,
+      "updatedAt": 1793294319417,
       "params": {
         "init_x_offset": 0.0163,
-        "init_y_offset": 0.025,
+        "init_y_offset": 0.03,
         "init_z_offset": 0.042,
         "init_roll_offset": 0,
         "init_pitch_offset": 0.0138,

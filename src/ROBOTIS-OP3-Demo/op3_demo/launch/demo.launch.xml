@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="with_manager" default="true"/>
-  <!-- Auxiliaries below are OFF by default: the soccer demo does not need
-       face tracking, the browser tuning UI, or the on-the-fly camera tuner
-       to run — enabling any of them adds seconds of import/discovery time
-       to boot. Opt back in with e.g. with_face:=true. -->
+  <!-- Auxiliaries below are OFF by default: the demo does not need face
+       tracking, the browser tuning UI, or the on-the-fly camera tuner to run —
+       enabling any of them adds seconds of import/discovery time to boot.
+       Opt back in with e.g. with_face:=true. -->
   <arg name="with_face" default="false"/>
   <arg name="with_web_setting" default="false"/>
   <arg name="with_camera_setting" default="false"/>
@@ -42,9 +42,8 @@
     <arg name="boot_init_page" value="-1"/>
   </include>
 
-  <!-- Camera + YOLO ball detector (drop-in for the Hough-circle node:
-       publishes the same /ball_detector_node/circle_set that BallTracker
-       subscribes to). -->
+  <!-- Camera + YOLO ball detector: menerbitkan /ball_detector_node/circle_set
+       (dibaca mode D60) dan /vision/yolo/ball_center (dibaca head_tracking_node). -->
   <include file="$(find-pkg-share op3_ball_detector)/launch/yolo_ball_detector_openvino.launch.py"/>
 
   <!-- Head scan/track. Node ini diambil APA ADANYA dari cabang CHRONUS_NEW
@@ -59,10 +58,8 @@
        karena versi ALPHONSE sebelumnya hanya menerbitkan circle_set dan
        kepalanya tidak akan pernah bisa mengunci bola tanpa itu.
 
-       Demo's internal head control is disabled below (use_head_control=false),
-       so THIS node owns the head. auto_start=false: tetap diam sampai
-       SoccerDemo menerbitkan "start" di /ball_tracker/command lewat tombol
-       START. -->
+       THIS node owns the head. auto_start=false: tetap diam sampai mode D60
+       menerbitkan "start" di /ball_tracker/command. -->
   <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen"
         launch-prefix="$(var aux_launch_prefix)">
     <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
@@ -84,1212 +81,191 @@
     <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml"/>
   </group>
 
-  <!-- robotis op3 demo. use_head_control:=false hands the head off to the
-       external head_tracking_node above; SoccerDemo still owns the FSM,
-       walking module switching, ball following, and kicking. -->
-  <!-- Tinggi vertikal kamera ke LANTAI terukur 0,52 m pada 2026-09-07.
-       Koreksi pitch efektif 30,84 derajat berasal dari fitting satu titik
-       kontak kanan; bukan perintah kepala atau perubahan gait. Jika pose,
-       tinggi atau pemasangan kamera berubah, ukur ulang. Rincian dan batas
-       validasi: config/KALIBRASI_TENDANG_2026-09-07.md. -->
-  <arg name="kick_camera_height" default="0.52"/>
-  <arg name="kick_camera_pitch_offset_deg" default="30.84"/>
-
-  <!-- Ambang tendangan, meter, dalam JARAK TANAH (bukan jarak lurus ke kamera).
-       kick_distance juga jadi jarak BERHENTI robot saat mendekati bola.
-       Dibuka di sini supaya bisa ditera langsung di robot tanpa build ulang;
-       bandingkan dengan angka "jarak bola" yang dicetak BallFollower 1x/detik. -->
-  <arg name="kick_distance" default="0.15"/>
-
-  <!-- Batas mulai penyelarasan lewat jendela pan: 0,20 m pada model yang
-       sudah dikoreksi, 5 cm sebelum ambang tendang 0,15 m. Ini bukan izin
-       aksi: jarak akhir, posisi kaki, dan yaw tetap harus diperiksa ulang. -->
-  <arg name="kick_pan_max_distance" default="0.20"/>
-
-  <!-- Ambang jari-jari bola di gambar, PIKSEL. Pengukur jarak yang paling
-       sedikit asumsinya: tidak bergantung tanda head_tilt, hip_pitch, ataupun
-       apakah kepala menunjuk ke bola. Bola dekat selalu besar di gambar.
-
-       Bawaan 0 berarti DIHITUNG SENDIRI dari kick_distance + kick_camera_height.
-       Pakai itu. Ambang radius memang berbeda antara robot berdiri dan robot
-       digantung, karena besar bola ditentukan jarak LURUS kamera-ke-bola dan
-       itu ikut berubah saat kamera naik. Terukur: bola di lantai tepat di
-       posisi kaki = 64,7 px saat digantung 29,5 cm, tapi 101,3 px saat berdiri.
-       Angka tetap akan salah di salah satu keadaan.
-
-       Isi angka di sini hanya kalau mau menimpa hasil hitungan; baca
-       "radius=NN.Npx" di log detektor YOLO saat bola ada di tempat yang
-       diinginkan. Setel angka negatif untuk mematikan jalur ini. -->
-  <arg name="kick_ball_radius_px" default="0.0"/>
-
-  <!-- Boleh tidaknya jari jari bola IKUT MEMUTUSKAN. MATI atas permintaan
-       operator 2026-09-01.
-
-       Ambangnya tetap dihitung dan tetap dicetak di telemetri supaya bisa
-       ditera; yang dimatikan cuma hak suaranya. Dua tempat sekaligus:
-
-         1. pemicu TENDANG. Radius dari detektor melompat 12 sampai 87 px untuk
-            bola yang sama, dan jalur ini pernah memicu tendangan dari 1,357 m
-            padahal kick_distance 0,30 m.
-
-         2. syarat selesainya fase MENGGESER. Di sini akibatnya justru terbalik:
-            radius mentok di 78,7 px terhadap ambang 83, jadi "siap" tidak
-            pernah naik dari 0/4 dan geseran selalu habis di batas waktu 12
-            detik walaupun bolanya sudah tepat di depan kaki sejak detik
-            pertama.
-
-       DINYALAKAN LAGI 2026-09-08 atas permintaan operator, sesudah dua sebab
-       kegagalan di atas benar benar diperbaiki. Keduanya BUKAN salah detektor:
-
-         a. MODELNYA yang rusak, bukan radiusnya. Ambang 83 px pada butir 2
-            dihitung dengan setengah FOV 35,2 derajat dan jari jari bola 0,11 m
-            (diameter dikira 22 cm). Diameter sebenarnya 13,4 cm, terukur
-            operator, dan setengah FOV efektifnya 28,94 derajat. Dengan angka
-            yang benar, ambangnya jatuh ke 73,1 px sedangkan radius yang
-            terbaca di posisi tendang 81,5 px. Jadi kejadian "siap tidak pernah
-            naik dari 0/4" tidak bisa terulang: sekarang ada kelonggaran 11
-            persen, dulu kekurangan 5 persen.
-
-         b. RADIUSNYA justru sangat stabil pada bobot yang dipakai sekarang.
-            Rekaman 2026-09-07: 265 sampel berurutan, 81,27 sampai 81,70 px,
-            sebaran 0,43 px atau 0,5 persen. Angka "melompat 12 sampai 87 px"
-            pada butir 1 berasal dari bobot dan setelan ambang keyakinan yang
-            lama.
-
-       Yang perlu diingat soal wataknya: radius bola adalah pengukur jarak yang
-       BAGUS di kejauhan dan TUMPUL di dekat kaki. Pada jarak tendang 15 cm,
-       kamera hampir memandang lurus ke bawah, jadi 1 persen galat radius
-       bergeser 1,5 cm di lantai. Sudut sendi kepala justru sebaliknya: paling
-       teliti persis di jarak dekat. Karena itu keduanya dipakai bersama dan
-       bukan saling menggantikan, dan pengukur jarak berjalan tetap sudut
-       kepala (kick_distance_from_radius tetap 0). -->
-  <arg name="kick_radius_ready_enable" default="1.0"/>
-
-  <!-- ================= PENGUKUR JARAK BOLA =================================
-
-       Jarak bola diukur dari sinar gambar yang diputar memakai sudut sendi,
-       hip_pitch_offset, dan kick_camera_pitch_offset_deg:
-
-           jarak = (tinggi_kamera - radius_fisik_bola) / tan(depresi_sinar)
-
-       Radius PIKSEL detektor tidak menjadi pengukur jarak utama. Radius
-       FISIK tetap diperlukan untuk tinggi pusat bola di atas lantai.
-       Sebelumnya ia yang jadi pengukur utama karena jarak sudut kepala terbaca
-       1,3 sampai 31,4 m untuk bola yang sebenarnya 1,1 sampai 2,5 m. Sebabnya
-       ternyata bukan cara pengukurannya melainkan TANDA head_tilt yang
-       terbalik; sesudah dibetulkan galat mediannya 339 persen turun jadi 33
-       persen. Lihat catatan panjang di processFollowing().
-
-       Yang perlu diawasi sesudah pergantian ini: ambang berhenti
-       kick_distance (0,15 m pada kalibrasi 2026-09-07) dibandingkan dengan angka dari
-       pengukuran yang LAIN, jadi jarak berhenti robot bisa bergeser. Teranya
-       lewat baris telemetri yang tercetak sekali per detik; ia menyebut
-       "dari sudut kepala" dan angkanya bisa langsung diadu dengan meteran.
-
-       kick_distance_from_radius:=1.0 mengembalikan pengukur lama. -->
-  <arg name="kick_distance_from_radius" default="0.0"/>
-
-  <!-- MUTU pengukuran jarak. Tiga hal yang membuat angkanya bisa dipercaya,
-       ketiganya diukur dari 77 sampel telemetri run op_demo_node_6476.
-
-       1. TINGGI EFEKTIF. Kepala mengunci PUSAT bola, dan pusat itu ada satu
-          jari-jari bola di atas lantai. Jadi pembilang rumusnya
-          (tinggi_kamera minus jari_jari_bola) = 0,453 m untuk tinggi 0,52 m
-          dan radius 0,067 m. Ambang 0,15 m adalah acuan awal kanan yang
-          masih harus diperiksa pada pose gait yang sudah berhenti.
-
-       2. LANTAI SUDUT TUNDUK, kick_min_depression_deg. Jarak = H/tan(tunduk),
-          jadi saat kepala hampir datar angkanya meledak: pada tunduk 3 derajat
-          satu derajat galat menggeser jarak lebih dari 30 persen, sedangkan di
-          ambang berhenti 0,30 m (tunduk 62 derajat) cuma 3 persen. Di bawah
-          lantai ini bacaannya dibuang, robot dianggap masih jauh, dan pemicu
-          tendangan ditahan. Dari 77 sampel, 9 ada di bawah 5 derajat.
-
-       3. PENAPIS MEDIAN, kick_distance_filter_n. Sudut leher yang segar
-          dijumlahkan dengan posisi bola dari frame yang bisa berumur ratusan
-          milidetik, jadi tiap kali kepala bergerak ada satu dua sampel yang
-          meleset jauh. Median membuangnya tanpa keterlambatan berarti. Diuji
-          pada deret log: lompatan di atas 0,5 m antar sampel turun 27 jadi 7.
-          Isi 1 untuk mematikannya. -->
-  <arg name="kick_min_depression_deg" default="3.0"/>
-  <arg name="kick_distance_filter_n" default="5.0"/>
-
-  <!-- TANDA head_tilt. +1 = head_tilt NEGATIF berarti MENUNDUK, yaitu konvensi
-       OP3 asli dan rumus jarak dipakai apa adanya.
-
-       DIBETULKAN dari -1 pada 2026-09-03. Buktinya 77 sampel telemetri run
-       op_demo_node_6476, tanpa memakai jari-jari bola sama sekali: bola ada di
-       LANTAI, jadi arah pandang ke bola harus di bawah horizon. Dengan
-       "negatif = menunduk" 63 dari 77 sampel memenuhi itu; dengan "positif =
-       menunduk" cuma 14, dan sampel paling ekstrem menempatkan bola 50 derajat
-       di atas horizon alias di langit-langit.
-
-       Setel -1.0 kalau robot lain memakai konvensi sebaliknya. -->
-  <arg name="kick_head_tilt_sign" default="1.0"/>
-
-  <!-- Jendela sudut SERVO head_pan (0..360, tengah 180) yang dianggap "bola ada
-       di depan kaki ini". Nilai bawaan berpusat pada angka yang diukur operator
-       (157 kanan, 183 kiri), dilebarkan +-4 derajat karena kepala bergerak
-       dalam lompatan, bukan sapuan mulus.
-       Angka nominal itu ternyata meleset. Yang dipasang di bawah adalah angka
-       dari robot, bukan dari perkiraan:
-
-         KIRI  193..208, terukur 2026-08-26 dengan bola benar-benar di sisi
-               kiri; servo paling sering duduk di 200, tidak pernah 179..187.
-         KANAN 152..178, dari sebaran TERUKUR juga, bukan cerminan. 21 sampel
-               (2 run) memberi kanan 156,7..175,4 dan kiri 175,4..202,6.
-               Cerminan sebaran kanan terhadap 180 = 184,6..203,3; ujung atasnya
-               cocok dengan ujung atas kiri (202,6), jadi pusat 180 memang benar
-               dan dugaan "pusatnya bergeser" tidak terbukti. Yang meleset cuma
-               batas ATAS jendela kanan: versi 152..167 memotong 169,2 / 170,4 /
-               173,4 / 174,0 / 175,4. Batasnya 178 dan bukan pas 175,4 supaya
-               ada margin, tapi tetap berhenti sebelum 180 (lurus ke depan).
-
-       Ada zona mati 178..193 yang tidak masuk jendela mana pun. Itu disengaja:
-       di situ bola ada di depan TENGAH badan, bukan di depan salah satu kaki.
-       Fase reposisi membawa bola dari zona ini ke jendela kaki terdekat.
-
-       Jendela ini SUDUT MENDATAR, jadi tidak berubah saat robot diturunkan dari
-       gantungan: yang menentukan letak bola ke samping, bukan tinggi kamera.
-       Kalau salah satu kaki tidak pernah terpicu lewat jalur jendela pan, di
-       sinilah tempat menyetelnya: baca "servo head_pan NNN deg" di baris
-       TENDANG pada log. -->
-  <!-- type="float" pada tiap param di bawah BUKAN hiasan: tanpa itu, mengetik
-       kick_pan_left_min_deg:=193 (tanpa titik desimal) membuat ROS menyimpulkan
-       tipe integer, tidak cocok dengan deklarasi double di kode, dan
-       declare_parameter melempar exception yang mematikan op_demo_node
-       seketika (exit -6). Dengan type="float", "193" ikut dikonversi.
-       Pengenal tipenya "float", BUKAN "double": launch XML ROS 2 menolak
-       "double" dengan ValueError: Got invalid type identifier. -->
-  <arg name="kick_pan_right_min_deg" default="152.0"/>
-  <arg name="kick_pan_right_max_deg" default="178.0"/>
-  <arg name="kick_pan_left_min_deg" default="193.0"/>
-  <arg name="kick_pan_left_max_deg" default="208.0"/>
-
-  <!-- Jendela di atas dinilai dari arah BOLA, bukan dari arah leher.
-       Keduanya sama hanya selama kepala benar-benar mengunci bola di tengah
-       gambar. Justru saat bola sudah dekat kaki, kepala tidak sempat (atau
-       tidak mampu) mengunci: bola berhenti di tepi gambar sementara lehernya
-       diam, dan sudut leher menyebut bola "ada di depan" padahal sudah
-       bergeser ke samping.
-
-       Arah bola dihitung penuh 3 dimensi dari sudut leher + sudut tunduk
-       kamera + letak bola di dalam gambar. DIUKUR DI ROBOT 2026-09-04
-       (scripts/calib_pan_scale.py): dengan kepala menunduk sekitar 60 derajat,
-       satu derajat pergeseran mendatar di dalam gambar berarti DUA derajat
-       perubahan arah terhadap badan, karena perbandingannya 1/cos(tunduk).
-       Penjumlahan datar yang lama (head_pan + sudut gambar) karena itu meleset
-       dua kali lipat tepat di sudut yang menentukan kaki mana yang menendang.
-
-       0.0 mengembalikan perilaku lama (sudut leher apa adanya). -->
-  <arg name="kick_pan_window_from_bearing" default="1.0"/>
-
-  <!-- Bahan hitungan ambang radius otomatis. Rumusnya:
-         fokus  = (lebar_gambar / 2) / tan(setengah_FOV)
-         miring = akar(kick_distance^2 + (tinggi_kamera - jari_jari_bola)^2)
-         ambang = fokus * jari_jari_bola / miring
-       Radius 0,067 m mengikuti diameter terukur 13,4 cm. Ukur ulang jika
-       bola atau kamera/resolusi/lensa diganti. kick_image_width_px harus sama
-       dengan lebar gambar di camera_param.yaml, bukan lebar gambar hasil
-       resize di detektor.
-
-       kick_fov_width_deg: SETENGAH bukaan mendatar EFEKTIF, dicocokkan dari
-       pengukuran, BUKAN angka spesifikasi lensa. 2026-09-08: 35,2 menjadi
-       28,94 derajat.
-
-       Kenapa 35,2 pasti salah, dan buktinya tidak bergantung pada meteran:
-       pada rekaman 2026-09-07 (265 sampel) bola terbaca 81,48 px. Dengan
-       setengah FOV 35,2 derajat fokusnya 453,6 px, sehingga jarak MIRING
-       kamera ke pusat bola yang tersirat cuma 0,373 m. Padahal beda tinggi
-       kamera ke pusat bola saja sudah 0,453 m, dan jarak miring TIDAK MUNGKIN
-       lebih pendek daripada beda tingginya. Jadi rumusnya menghasilkan
-       segitiga yang mustahil, di posisi mana pun bolanya berada.
-
-       Batas bawah yang sahih tanpa perlu tahu letak bolanya: fokus minimal
-       550,9 px, yaitu setengah FOV maksimal 30,15 derajat (kasus bola tepat di
-       bawah kamera). Dicocokkan pada titik acuan kontak tendangan KANAN
-       (mendatar 14,56 cm, miring 0,4758 m) hasilnya fokus 578,7 px, yaitu
-       28,94 derajat.
-
-       Ini koreksi EFEKTIF satu titik, sama sifatnya dengan
-       kick_camera_pitch_offset_deg: ia ikut menyerap kotak deteksi YOLO yang
-       sedikit lebih longgar daripada siluet bola (terukur dari gambar rekaman:
-       jari jari sesungguhnya sekitar 77 px lawan 81,5 px yang dilaporkan
-       detektor). Karena dicocokkan dari titik yang sama dengan ambangnya,
-       kecocokan angka di bawah adalah KONSTRUKSI, bukan validasi bebas.
-
-       SENGAJA berbeda dengan BallTracker::FOV_WIDTH (35,2) dan fov_width_deg
-       di head_tracking.yaml. Keduanya dipakai untuk ARAH, bukan jarak, dan
-       jendela kaki kick_pan_right/left sudah ditera memakai angka itu. Jangan
-       disamakan tanpa menera ulang jendela kakinya. -->
-  <arg name="kick_ball_real_radius_m" default="0.067"/>
-  <arg name="kick_fov_width_deg" default="28.94"/>
-  <arg name="kick_image_width_px" default="640.0"/>
-
-  <!-- Potongan pada ambang radius hasil hitungan, pecahan 0..1.
-
-       Perlu karena radius TERUKUR sistematis lebih kecil daripada hitungan
-       geometri justru saat bola sudah dekat kaki: di posisi itu badan robot
-       sendiri menutupi sebagian bola, kotak deteksi YOLO ikut mengecil, dan
-       radiusnya membaca rendah.
-
-       Terukur 2026-08-28, 261 sampel, robot berdiri, operator melaporkan bola
-       berkali-kali sudah tepat di depan kaki:
-         radius >= 92,3 px (ambang ideal 0,30 m)  2 sampel   (1 %)
-         radius >= 82 px                          7 sampel   (3 %)
-         radius >= 75 px                          28 sampel  (11 %)
-       Dengan ambang ideal tanpa potongan, robot TIDAK menendang sama sekali.
-
-       PERINGATAN 2026-09-08: tabel 2026-08-28 di atas diukur dengan MODEL YANG
-       SALAH (setengah FOV 35,2 derajat, jari jari bola 0,11 m), jadi "radius
-       terukur sistematis lebih kecil daripada geometri" itu sebagian besar
-       cacat modelnya, bukan bola yang tertutup badan. Dengan model yang sudah
-       dibetulkan, radius terukur di posisi tendang 81,5 px lawan hitungan ideal
-       81,25 px, yaitu selisih 0,3 persen saja.
-
-       Angka sekarang, tinggi kamera 0,52 m dan kick_distance 0,15 m:
-         ideal   81,2 px
-         ambang  73,1 px setelah dipotong 10 persen
-         gerbang radius terbuka pada jarak lantai sekitar 27,6 cm
-
-       0,10 SENGAJA dipertahankan walaupun modelnya sudah tepat, karena kedua
-       risikonya tidak setara. Ambang yang terlalu TINGGI membekukan robot:
-       radius jadi syarat wajib untuk menendang dan untuk menyelesaikan fase
-       menggeser, dan itulah kejadian 12 detik yang tercatat di
-       kick_radius_ready_enable. Ambang yang terlalu RENDAH cuma kehilangan
-       sebagian nilai penjagaannya, karena jarak dari sudut kepala tetap harus
-       ikut setuju sebelum robot menendang.
-
-       Rapatkan ke 0.05 (77,2 px, sekitar 21,7 cm) kalau robot terasa memulai
-       urutan tendangan terlalu jauh dari bola. Longgarkan ke 0.15 (69,1 px)
-       kalau robot berhenti di depan bola tapi tidak pernah menendang. -->
-  <arg name="kick_ball_radius_margin" default="0.10"/>
-
-  <!-- Tinggi angkat kaki (z_move_amplitude) terkecil, sebagai PECAHAN dari
-       foot_height di param.yaml.
-
-       foot_height sekarang jadi BATAS ATAS, bukan nilai tetap sejak langkah
-       pertama. Tinggi angkat naik bertahap mengikuti besar gerakan, serasi
-       dengan x_move_amplitude yang memang sudah dinaikkan bertahap oleh
-       calcFootstep dalam kelipatan UNIT_FB_STEP sampai MAX_FB_STEP. Langkah
-       kecil berarti angkat kaki rendah; kaki baru terangkat penuh saat
-       langkahnya penuh.
-
-       Sudut putar ikut diperhitungkan, bukan cuma x, supaya fase memutar di
-       tempat (x = 0, hanya angle) tetap mengangkat kaki cukup tinggi.
-
-       0.5 berarti berkisar antara setengah foot_height sampai penuh. Setel
-       1.0 untuk mengembalikan perilaku lama (selalu penuh). -->
-  <!-- ================= PRESET WALKING (preset_walking.yaml) ================
-
-       Seluruh gerakan demo datang dari satu berkas, config/preset_walking.yaml,
-       yang isinya disalin operator dari Bascorro Studio. Lima bagian:
-
-           jalan        JALAN MENUJU MEKKAH   sejak tombol demo ditekan
-           putar_kiri   Putar Kiri New   mengitari bola saat yaw POSITIF
-           putar_kanan  Putar Kanan New  mengitari bola saat yaw NEGATIF
-           geser_kiri   KIRI MIN NEW     menyesuaikan kaki ke KIRI
-           geser_kanan  KANAN MIN NEW    menyesuaikan kaki ke KANAN
-
-       Mengubah angkanya TIDAK perlu compile ulang; cukup jalankan ulang demo.
-
-       Bagian jalan jadi DASAR keempat lainnya: preset putar dan geser
-       ditimpakan di atas hasilnya, jadi field yang mereka diamkan mewarisi
-       angka jalan. Field yang bagian jalan sendiri diamkan mewarisi param.yaml
-       milik walking_module.
-
-       Dua angka dari bagian jalan dipakai di luar gait itu sendiri:
-       x_move_amplitude jadi batas atas langkah maju (dulu tetap 18,1 mm) dan
-       z_move_amplitude jadi batas atas tinggi angkat kaki.
-
-       walk_preset_enable:=0.0 mengembalikan perilaku lama: robot berjalan
-       dengan isi param.yaml apa adanya. -->
-  <arg name="walk_preset_enable" default="1.0"/>
-
-  <!-- ACUAN POSE: kembalikan isi param.yaml ke walking_module tiap kali
-       modulnya dinyalakan lagi.
-
-       Kenapa perlu. walking_module merekam walking_bias_ pada tick pertama
-       sesudah diaktifkan:
-
-           walking_bias_ = pose_page2 - neutral(offset yang SEDANG hidup)
-           pose robot    = page2 + [ neutral(preset) - neutral(saat perekaman) ]
-
-       Jadi yang sampai ke robot cuma SELISIH terhadap apa pun yang kebetulan
-       hidup waktu modul dinyalakan. Pada demo pertama sesudah op3_manager
-       hidup, yang hidup adalah param.yaml dan selisihnya benar.
-
-       Sesudah robot JATUH urutannya berbeda: gerakan bangun memakai
-       action_module, lalu walking_module dinyalakan lagi SELAGI preset dari
-       siklus sebelumnya masih tertulis. Bias jadi direkam terhadap preset itu.
-       Kalau presetnya kebetulan JALAN (kasus paling sering, robot jatuh sambil
-       mengejar bola) selisihnya NOL dan robot terkunci di pose page 2: seluruh
-       init pose hasil setelan operator mati total. Kalau yang tertulis MENCARI
-       CELAH atau PUTAR, posenya bergeser sebesar selisih antar preset.
-
-       Dengan saklar ini hidup, salinan param.yaml yang dibaca SEKALI pada demo
-       pertama diterbitkan ulang tepat sebelum walking_module dinyalakan, jadi
-       posenya selalu sama dengan demo pertama. Aman dilakukan selagi
-       action_module memegang kaki: walking_module hanya menyimpan structnya
-       dan tidak menggerakkan sendi apa pun.
-
-       Menerbitkannya TIDAK sama dengan menyamakan param.yaml dengan preset
-       JALAN. Yang terakhir itu membuat selisihnya nol dan justru mengunci
-       robot di page 2; jangan dilakukan.
-
-       0.0 mengembalikan perilaku lama. -->
-  <arg name="walk_pose_reference_enable" default="1.0"/>
-
-  <!-- MENCARI CELAH: apa yang dilakukan robot saat BOLA TIDAK TERDETEKSI.
-
-       Dulu bola hilang berarti gait tetap jalan tapi amplitudonya nol, jadi
-       robot cuma melangkah di tempat sampai pelacak menemukan bola lagi.
-       Sekarang ia memakai bagian "mencari_celah" di preset_walking.yaml
-       (versi Bascorro Studio "MENCARI CELAH"), yaitu berputar di tempat,
-       sehingga arah pandang BADAN ikut berubah, bukan cuma kepalanya.
-
-       walk_search_enable:=0.0 mengembalikan perilaku lama. Perilaku lama juga
-       yang dipakai kalau bagian "mencari_celah" tidak ada di berkas preset. -->
-  <arg name="walk_search_enable" default="1.0"/>
-
-  <!-- Berapa lama bola harus HILANG sebelum robot mulai berputar, detik.
-
-       0,8 detik adalah titik yang sama persis dengan perilaku lama
-       (NOT_FOUND_THRESHOLD * 0,5 = 25 tick pada loop demo 30 Hz). Gunanya
-       menahan kedipan deteksi satu dua frame supaya tidak memutar badan.
-       Naikkan kalau detektornya sering berkedip. -->
-  <arg name="walk_search_lost_sec" default="0.8"/>
-
-  <!-- "Jeda sedikit" sesudah bola terdeteksi lagi, detik.
-
-       Begitu bola terlihat, putaran dihentikan dan robot melangkah di tempat
-       selama ini, BARU preset JALAN MENUJU MEKKAH diterbitkan ulang. Jeda ini yang
-       memberi kepala waktu mengunci bola dan badan waktu berhenti berayun;
-       tanpa itu arah bola dibaca di tengah putaran.
-
-       0,5 detik, sama dengan jeda transformasi gerakan yang lain
-       (kick_transition_delay_sec). Sebelum 2026-09-04 nilainya 1,0 s. -->
-  <arg name="walk_search_resume_delay_sec" default="0.5"/>
-
-  <!-- JEDA TRANSFORMASI GERAKAN, detik.
-
-       Jeda pendek tiap kali robot berpindah dari satu gerakan ke gerakan lain.
-       Selama jeda gait tetap HIDUP tapi amplitudonya nol, jadi robot melangkah
-       di tempat: badan sempat berhenti berayun dan kepala sempat mengunci bola
-       sebelum gerakan berikutnya mengambil alih.
-
-       Sejak kick_reposition_approach_enable dimatikan (2026-09-08) tahap MAJU
-       tidak ada lagi, jadi yang tersisa satu peralihan:
-         MEMUTAR -> MENGGESER
-       Dua peralihan lamanya (MEMUTAR ke MAJU dan MAJU ke MENGGESER) otomatis
-       hidup lagi kalau tahap MAJU dinyalakan kembali.
-
-       Peralihan lain sudah punya fase diamnya sendiri dan sengaja TIDAK
-       ditambah lagi supaya tidak menunggu dua kali:
-         MENCARI CELAH -> JALAN   walk_search_resume_delay_sec (0,5 s)
-         JALAN -> MEMUTAR         fase MENGEREM, kick_yaw_brake_sec (0,8 s).
-                                  TIDAK boleh dipendekkan ke 0,5: penapis yaw
-                                  butuh DUA blok gait penuh sebelum menjawab.
-         MENGGESER -> TENDANG     kick_yaw_settle_sec lalu kick_pre_delay_sec
-                                  (2,0 s)
-
-       DIMATIKAN 2026-09-08 atas permintaan operator ("setelah memutar masih
-       menjalankan gerakan yang tidak berguna"). Sesudah tahap MAJU dihapus,
-       satu satunya peralihan yang tersisa adalah MEMUTAR ke MENGGESER, dan itu
-       SUDAH didahului fase reda kick_yaw_settle_sec yang panjangnya dua blok
-       gait penuh. Jadi jeda ini menambah 0,5 detik melangkah di tempat tepat
-       sesudah robot baru saja berdiri diam 1,3 detik: menunggu dua kali untuk
-       hal yang sama.
-
-       Kembalikan ke 0.5 kalau tahap MAJU dinyalakan lagi; di sana jedanya
-       memang berguna, karena MAJU tidak punya fase reda sendiri. -->
-  <arg name="kick_transition_delay_sec" default="0.0"/>
-
-  <!-- MAJU dulu sebelum menggeser, sesudah selesai mengitari bola.
-
-       Mengitari bola memindahkan SELURUH badan mengelilinginya, jadi sesudah
-       yaw lurus robot sering berdiri lebih jauh dari bola daripada sebelum
-       memutar. Preset GESER hampir tidak punya langkah maju (x -2,6 dan
-       0,0 mm), jadi dari jarak segitu robot cuma menggeser menyamping sampai
-       batas waktunya habis tanpa pernah membawa bola ke depan kaki.
-
-       Dengan ini robot dapat maju lurus memakai preset JALAN sampai jaraknya
-       turun ke kick_distance. Arah bola harus masuk jendela kaki dulu; jika
-       terlalu menyamping, robot menggeser sebelum melanjutkan maju.
-
-       Jaraknya memakai posisi bola di dalam gambar dan sudut kepala terbaru,
-       bukan asumsi bola selalu di tengah. Data tidak valid menahan MAJU;
-       jika berlarut, tendangan dibatalkan, bukan diteruskan secara buta.
-
-       DIMATIKAN 2026-09-08 atas permintaan operator: sesudah memutar, robot
-       menyesuaikan posisi kaki HANYA dengan preset KIRI MIN NEW / KANAN MIN
-       NEW, tanpa maju lagi memakai preset JALAN.
-
-       Yang terjadi sekarang kalau bolanya ternyata masih jauh sesudah
-       memutar: tendangan DIBATALKAN, robot berhenti, lalu mencari dan
-       mendekati bola dari awal memakai preset JALAN. Ia TIDAK menendang dari
-       jarak jauh, dan TIDAK menghabiskan batas waktu 12 detik menggeser
-       menyamping tanpa hasil.
-
-       Yang perlu diperhatikan di lapangan: preset geser hampir tidak punya
-       langkah maju (x -2,6 mm dan 0,0 mm), jadi kalau mengitari bola sering
-       membuat robot mundur jauh, siklus dekati lalu putar lalu batal bisa
-       berulang. Kalau itu terjadi, pilihannya dua: kembalikan nilai ini ke
-       1.0, atau kecilkan amplitudo geser samping pada preset putar di
-       config/preset_walking.yaml supaya mengitari tidak melebar.
-
-       1.0 mengembalikan tahap MAJU. -->
-  <arg name="kick_reposition_approach_enable" default="0.0"/>
-
-  <!-- Bawaan -1.0 berarti DIHITUNG SENDIRI sebagai MIN_FB_STEP/max_fb_step_.
-       Pakai itu.
-
-       Angka bulat 0,5 yang dipakai sebelumnya membuat z MENDAHULUI x: pada
-       langkah pertama x baru di 27,6 % dari maksimumnya (karena langkah
-       terkecilnya MIN_FB_STEP), sementara z sudah di 50 %. Di lapangan
-       terlihat seperti kaki sudah terangkat penuh padahal robot belum
-       melangkah. Dengan pecahan yang dihitung, keduanya berangkat dari
-       persentase yang sama persis. -->
-  <arg name="walk_z_move_min_ratio" default="-1.0"/>
-
-  <!-- Besar kenaikan langkah maju tiap seperempat periode gait, milimeter.
-
-       Ini yang menentukan seberapa cepat x_move_amplitude merambat dari
-       langkah terkecil (5,0 mm) ke penuh (18,1 mm). Nilai asli ROBOTIS 0,3 mm
-       membuat perjalanan itu makan 8,7 detik: robot mengangkat kaki tapi maju
-       hanya 5 mm per langkah, dan sepanjang detik-detik awal itu terlihat
-       seperti kaki sudah terangkat sementara badan belum bergerak.
-
-       0,8 mm memangkasnya jadi sekitar 3,3 detik.
-
-       RIWAYAT: sempat 0,3 (asli ROBOTIS), 0,8, lalu 0,3 lagi sesudah rollback
-       6 September. Nilai itu sudah bolak balik enam kali; jangan menebak dari
-       kode, baca tabelnya di catatan.
-
-       DIMATIKAN 2026-09-08 (20.0 = langkah penuh pada tick ramp pertama) atas
-       permintaan operator: "ketika robot masuk gerakan jalan itu dia masih
-       terlalu lama untuk maju nya, seperti kelamaan menunggu nilai nya pas
-       dulu" dan "aku ingin dia itu memang bergerak sesuai parameter yang aku
-       berikan aja".
-
-       Angkanya memang separah itu. Dengan 0,3 mm tiap seperempat periode
-       (0,19 detik pada periode 0,77 s), perjalanan dari langkah terkecil
-       5,0 mm ke batas preset 16,0 mm makan sekitar 7 detik, DITAMBAH fase
-       "z dulu" di bawah sekitar 2 detik. Jadi hampir 9 detik sebelum robot
-       benar benar berjalan seperti preset JALAN yang disetel operator di
-       Studio, sementara Studio sendiri langsung memakai 16,0 mm begitu Start
-       ditekan.
-
-       Ramp itu juga diulang dari nol SETIAP kali robot kembali dari MENCARI
-       CELAH, jadi peralihan memutar ke jalan ikut memakan waktu yang sama.
-       Itu keluhan "perpindahan antara gerakan mencari bola dan gerakan jalan
-       terlalu lama".
-
-       Kembalikan dengan 0.3 (bersama walk_z_lead_enable:=1.0) kalau langkah
-       pertama yang langsung penuh terasa menghentak. -->
-  <arg name="walk_x_ramp_step_mm" default="20.0"/>
-
-  <!-- URUTAN RAMP: tinggi angkat kaki (z) sampai penuh DULU, langkah maju (x)
-       menyusul.
-
-       Sebelumnya z dan x dinaikkan berbarengan dengan persentase yang sama,
-       jadi langkah pertama diayun dengan kaki yang baru terangkat 10,2 mm dan
-       telapaknya menyeret lantai. Itu yang terlihat sebagai jalan yang aneh.
-
-       Dengan 1.0, robot melangkah di langkah terkecilnya (5,0 mm) sambil kaki
-       makin terangkat; baru sesudah z menyentuh batas atas foot_height, x
-       mulai merambat naik ke 18,1 mm.
-
-       DIMATIKAN 2026-09-08 bersama walk_x_ramp_step_mm, alasan yang sama:
-       fase ini sendiri memakan sekitar 2 detik sebelum langkahnya boleh mulai
-       memanjang. Dengan ramp x yang sudah langsung penuh, z ikut penuh sendiri
-       pada tick yang sama karena tinggi angkat dipetakan dari kemajuan langkah
-       maju, jadi masalah "telapak menyeret lantai" tidak kembali.
-
-       JANGAN mempercepat z lewat walk_z_move_min_ratio:=1.0. Itu mengunci
-       angkat kaki 37 mm JUGA saat amplitudo nol, sehingga robot melangkah
-       tinggi di tempat justru saat mengerem, memutar, dan menggeser, yaitu
-       persis saat magnetometer harus dibaca. Biarkan tetap -1.0.
-
-       Setel 1.0 untuk mengembalikan urutan z dulu. -->
-  <arg name="walk_z_lead_enable" default="0.0"/>
-
-  <!-- 2026-09-06: ramp DIKEMBALIKAN ke keadaan 3 September (x 0,3 mm, z_lead
-       1.0), atas permintaan operator membatalkan semua perubahan sesudah
-       tanggal itu. Sempat dimatikan 2026-09-04 (x 20,0 mm, z_lead 0.0) supaya
-       langkah demo langsung penuh seperti Studio.
-
-       walk_z_move_min_ratio tetap -1.0 (dihitung sendiri), JANGAN 1.0: dengan
-       1.0 tinggi angkat terkunci 37 mm juga saat amplitudonya nol, jadi robot
-       melangkah tinggi di tempat justru waktu mengerem, memutar, dan
-       menggeser, persis saat ia harus setenang mungkin supaya magnetometernya
-       bisa dibaca. -->
-
-  <!-- Kenaikan tinggi angkat kaki tiap seperempat periode gait, milimeter.
-
-       Rentangnya sekitar 26,8 mm (dari 10,2 mm ke 37,0 mm), dan satu tick
-       sekitar 0,2 detik, jadi 2,5 mm memberi kira-kira 2,1 detik sebelum
-       langkah maju mulai memanjang.
-
-       Angkanya dalam MILIMETER z, bukan pecahan: dengan begitu mengubah
-       foot_height di param.yaml tidak diam-diam mengubah lamanya fase ini.
-       Naikkan kalau robot terasa terlalu lama jalan di tempat, turunkan kalau
-       kakinya terangkat terlalu mendadak. -->
-  <arg name="walk_z_lead_ramp_step_mm" default="2.5"/>
-
-  <!-- Berapa TICK BERTURUT-TURUT syaratnya harus benar sebelum menendang.
-       Loop demo 30 Hz, jadi 4 tick kira-kira 0,13 detik.
-
-       Dulu 10 dan itu terlalu menuntut: deteksi bola justru paling terputus
-       tepat di saat bola dekat kaki (badan robot menutupinya), padahal di situ
-       juga syaratnya baru terpenuhi. Menuntut 10 tick tanpa putus berarti
-       menuntut sepertiga detik pelacakan mulus pada momen yang paling sulit.
-       Hitungannya juga dinolkan setiap ada satu tick yang gagal. -->
-  <arg name="kick_ready_count" default="4.0"/>
-
-  <!-- ===== Menghadap ke yaw acuan dulu, baru menendang =====================
-
-       Begitu bola masuk posisi tendang, robot TIDAK langsung menendang: ia
-       memutar badan di tempat sampai yaw-nya kembali ke kick_yaw_target_deg
-       (bawaan 0) dalam toleransi kick_yaw_tolerance_deg (bawaan +-5), baru
-       menendang.
-
-       "Yaw 0" itu ARAH YANG DIHADAPI ROBOT SAAT OPENCR MENYALA — papan itu
-       menolkan acuan headingnya sendiri waktu start, jadi nol-nya ikut ke mana
-       pun robot menghadap saat dinyalakan. Praktisnya: hadapkan robot ke gawang
-       waktu menyalakannya, lalu fitur ini berarti "hadap gawang dulu, baru
-       tendang". Angkanya bisa dibaca di kartu IMU Orientation pada Bascorro
-       Studio (badge OK di sebelah Yaw = mag_status 2/3).
-
-       Fitur ini MATI SENDIRI dan robot menendang seperti dulu kalau
-       magnetometer tidak siap: mag_status 0 (papan tanpa magnetometer) atau 1
-       (belum settle) membuat open_cr_module memaksa yaw = 0, dan angka paksaan
-       itu tidak dipercaya. Cek dengan
-         ros2 topic echo /robotis/open_cr/mag_status
-       Yang dicari 2 atau 3. -->
-  <!-- PENYELARASAN YAW, dengan pembagian tugas dua sensor.
-
-       Sempat dimatikan 2026-08-29 karena magnetometer tidak bisa dipakai saat
-       robot berjalan: terukur berayun -87, -78, -58, -43, -25, -82 derajat
-       dalam hitungan detik padahal robot cuma jalan di tempat, dan akibatnya
-       robot berputar menjauh sampai pengaman menghentikannya di 100, 158, dan
-       167 derajat.
-
-       Tapi magnetometer TENANG saat robot berhenti: pada run yang sama,
-       selama fase mengerem ia cuma bergeser 1,8 lalu 1,7 lalu 1,6 derajat.
-       Dan gyro punya sifat kebalikannya: ia mengukur laju putar, bukan arah
-       mata angin, jadi tidak terganggu medan magnet motor, tapi tidak tahu
-       di mana gawangnya.
-
-       Jadi masing-masing dipakai HANYA di tempat ia bisa dipercaya:
-
-         magnetometer, sekali, saat DIAM  -> berapa derajat harus diputar
-         gyro, terus-menerus, saat JALAN  -> sudah berputar berapa derajat
-
-       Urutan lengkapnya: bola di jangkauan, BERHENTI sampai yaw benar-benar
-       diam, baca target dari magnetometer sekali, putar sambil menghitung
-       gyro, berhenti, cek ulang dengan magnetometer saat diam lagi, ulangi
-       kalau masih meleset, lalu menendang.
-
-       Hanyutan gyro tidak sempat menumpuk karena tiap putaran cuma beberapa
-       detik dan hitungannya dinolkan tiap kali putaran baru dimulai.
-
-       Matikan lagi dengan kick_yaw_align_enable:=0.0 kalau perlu demo cepat
-       tanpa fase memutar. -->
-  <arg name="kick_yaw_align_enable" default="1.0"/>
-  <arg name="kick_yaw_target_deg" default="0.0"/>
-
-  <!-- TOLERANSI yaw, derajat. Target tetap 0 (arah saat OpenCR menyala), yang
-       berubah lebarnya: robot dianggap sudah lurus selama yaw ada di dalam
-       +-15 derajat, atas permintaan operator 2026-09-03.
-
-       Ini juga knob pemercepat yang paling besar pengaruhnya, dan bukan karena
-       robot jadi kurang teliti. Dua sebabnya:
-
-         1. ambang BERHENTI memutar ikut naik jadi setengahnya (7,5 derajat),
-            jadi putaran berhenti lebih awal;
-         2. pemeriksaan magnetometer sesudah gait reda jauh lebih jarang gagal,
-            dan tiap kegagalan berarti satu putaran ulang penuh: mengerem lagi,
-            memutar lagi, reda lagi. Dengan +-5 derajat, derau magnetometer
-            (+-1,5 derajat) plus sisa putaran yang berhenti tepat di ambang
-            membuat kegagalan itu jadi undian.
-
-       Kecilkan lagi kalau tendangannya terlalu sering melenceng. -->
-  <arg name="kick_yaw_tolerance_deg" default="15.0"/>
-
-  <!-- Besar putaran per langkah, derajat: sebanding galat (gain), lalu dijepit
-       antara min dan max. Angka bawaannya sama dengan MIN_RL_TURN/MAX_RL_TURN
-       yang sudah dipakai saat mengejar bola, jadi memutar di tempat tidak lebih
-       ganas daripada berbelok sambil berjalan.
-       Kalau robot bolak-balik melewati toleransi (oleng kiri-kanan tanpa pernah
-       berhenti), turunkan kick_yaw_min_turn_deg atau lebarkan toleransinya —
-       satu langkah gait memang tidak bisa lebih halus dari batas bawah ini. -->
-  <arg name="kick_yaw_max_turn_deg" default="8.0"/>
-  <arg name="kick_yaw_min_turn_deg" default="5.0"/>
-  <arg name="kick_yaw_turn_gain" default="0.20"/>
-
-  <!-- Batas waktu per putaran. Kalau habis, robot berhenti dan memeriksa yaw
-       lagi saat diam. Jika yaw belum sesuai, ulangi sesuai jatah recheck;
-       sesudah jatahnya habis, batalkan tendangan dan cari/dekati bola ulang.
-       kick_yaw_settle_sec = jeda sesudah putaran berhenti, supaya gait benar-
-       benar reda sebelum kaki diserahkan ke action_module.
-       kick_yaw_ready_count = berapa tick berturut-turut yaw harus di dalam
-       toleransi sebelum dianggap lurus (30 tick = 1 detik).
-
-       DINAIKKAN 12,0 menjadi 20,0. Batas ini berlaku PER PUTARAN, dan 12 detik
-       ternyata pas-pasan untuk putaran besar: terukur 2026-08-31, mengitari
-       128 derajat memakan 11,4 detik, lalu putaran keempat terpotong di 12,0
-       detik dengan sisa 19,6 derajat dan robot menendang dalam keadaan miring.
-       Lajunya sekitar 12 derajat per detik ditambah 3 detik pertama yang
-       terpakai soft start, jadi 20 detik menampung putaran sampai 200 derajat.
-       Setel 0.0 untuk mematikan batas waktu per putaran, bukan pagar yaw. -->
-  <arg name="kick_yaw_timeout_sec" default="20.0"/>
-  <arg name="kick_yaw_settle_sec" default="0.7"/>
-  <arg name="kick_yaw_ready_count" default="3.0"/>
-
-  <!-- Berapa kali putaran boleh diulang kalau cek SESUDAH gait reda ternyata
-       masih di luar toleransi.
-
-       Perlu karena yaw yang dibaca sambil berjalan tidak bisa dipercaya:
-       terukur 2026-08-28, dalam satu penyelarasan nilainya melompat -26,5 /
-       -30,3 / -31,5 / -27,5 / -33,4 / -44,3 / -28,2 / -18,1 hanya dalam selang
-       setengah detik. Badan bergoyang saat gait jalan dan magnetometer ikut
-       terbawa, jadi "tiga tick berturut di dalam jendela +-5 deg" bisa
-       terpenuhi oleh derau semata. Sesudah robot berhenti angkanya baru
-       berarti, dan di situlah pemeriksaan sungguhan dilakukan.
-
-       Setel 0 untuk kembali ke perilaku lama (percaya bacaan sambil jalan). -->
-  <arg name="kick_yaw_recheck_max" default="3.0"/>
-
-  <!-- Pengaman putaran LIAR, derajat. Kalau galat membesar lebih dari angka
-       ini dari titik acuan, putaran dihentikan paksa dan robot tetap
-       menendang.
-
-       Terpasang karena terukur 2026-08-28: robot berputar dari galat 18 deg
-       sampai 130 deg dan terus menjauh, BAIK saat tanda putaran +1 MAUPUN
-       sesudah koreksi otomatis membaliknya jadi -1. Jadi koreksi tanda saja
-       tidak cukup jadi pengaman; harus ada batas keras.
-
-       Setel 0 untuk mematikan pengaman ini (tidak disarankan). -->
-  <arg name="kick_yaw_runaway_deg" default="45.0"/>
-
-  <!-- Arah putar gyro dan jendela penilaiannya.
-
-       kick_yaw_gyro_sign menyamakan tanda gyro_z dengan tanda yaw. Kalau
-       terbalik, hasil integrasi akan berlawanan dengan target dan robot
-       mengira dirinya berputar menjauh.
-
-       kick_yaw_gyro_check_sec: sesudah selang ini arah putaran dinilai dari
-       hasil integrasi gyro, dan dibalik sekali kalau ternyata berlawanan
-       dengan yang diminta. Cukup 1,2 detik karena gyro langsung memberi tahu
-       robot sedang berputar ke mana; dengan magnetometer hal yang sama butuh
-       3 sampai 5 detik dan hasilnya tetap salah dua kali. -->
-  <arg name="kick_yaw_gyro_sign" default="1.0"/>
-
-  <!-- Pengali hasil integrasi gyro.
-
-       Terukur di robot ini gyro UNDER-BACA: satu putaran yang menurut
-       magnetometer 32,4 derajat (dua bacaan, keduanya diambil saat robot DIAM,
-       jadi sahih) hanya tercatat 18,6 derajat oleh gyro, yaitu selisih 1,74
-       kali.
-
-       Pengukuran 2026-08-31 justru BERLAWANAN: magnetometer 5,7 deg vs gyro
-       8,6 deg, yaitu gyro LEBIH baca (rasio 0,66), dan sekali lagi 5,7 vs 7,4
-       (0,77). Jadi rasionya BUKAN konstanta yang bisa dipasang sekali untuk
-       selamanya, dan bawaannya tetap 1.0. Yang menutup selisihnya bukan angka
-       ini, melainkan ambang berhenti di bawah plus cek ulang magnetometer.
-
-       Tiap tendangan tetap mencetak angka terukurnya di log ("Pengali gyro
-       terukur"). Isi di sini hanya kalau di robotmu angkanya benar-benar
-       berulang konsisten ke arah yang sama. -->
-  <arg name="kick_yaw_gyro_scale" default="1.0"/>
-
-  <!-- Pengali gyro DIUKUR SENDIRI tiap putaran, lalu dipakai untuk putaran
-       berikutnya di run yang sama.
-
-       Dua bacaan magnetometer yang sama sama diambil saat robot DIAM mengapit
-       satu putaran, jadi rasionya sahih tanpa menebak apa pun. Ini yang
-       menghapus overshoot sistematis: terukur 2026-08-31, putaran yang menurut
-       gyro 128,8 derajat ternyata 165 derajat menurut magnetometer, jadi robot
-       melewati target 37 derajat dan harus mengulang empat kali sampai batas
-       waktunya habis.
-
-       Sengaja TIDAK dipasang lewat kick_yaw_gyro_scale: angkanya berbeda antar
-       hari (1,74 pada 28 Agu, 0,66 pada 31 Agu), jadi ia memang harus diukur
-       ulang tiap run. Yang dipasang di sini cuma boleh tidaknya diukur.
-
-       Pengukuran dipakai hanya kalau putarannya di atas 10 derajat dan rasionya
-       masuk akal (0,4 sampai 2,5); selain itu cuma dicetak. Setel 0.0 untuk
-       kembali memakai kick_yaw_gyro_scale apa adanya. -->
-  <arg name="kick_yaw_gyro_autoscale" default="1.0"/>
-
-  <!-- Penapis yaw: panjang jendela dalam detik, kira kira satu periode gait.
-
-       Badan robot berputar maju mundur di dalam tiap langkah, jadi baik
-       magnetometer maupun hasil integrasi gyro berayun belasan derajat dengan
-       irama langkah. Keputusan "berhenti memutar" yang diambil dari satu sampel
-       sesaat karena itu jatuh pada fase ayunan yang acak, dan robot berhenti di
-       mana saja.
-
-       Terukur 2026-08-31, satu putaran, bacaan yaw tiap setengah detik:
-         +71 +74 +75 +77 +67 +66 +78 +73 +77 +81 +73 +60 +52 +54 +67 +86 +94
-       dan hasil integrasi gyro pada rentang yang sama ikut naik turun
-         (29) (16) +2 (1) (27) (42) (39) (38) (41) (53) (48)
-       padahal integral putaran satu arah tidak mungkin mengecil. Uji "sudah
-       berhenti" pun jadi omong kosong: ia sempat melaporkan yaw bergeser 45,3
-       derajat dalam 0,25 detik pada robot yang sedang diam.
-
-       Caranya: DUA BLOK berturut turut, masing masing sepanjang satu periode
-       gait, dirata rata sendiri sendiri lalu diekstrapolasi setengah blok ke
-       depan. Blok sepanjang tepat satu periode membuat ayunannya nol dengan
-       sendirinya, jadi kedua rata ratanya sudah bersih sebelum kemiringannya
-       dihitung, dan ekstrapolasinya menghapus keterlambatan setengah blok yang
-       selalu dibawa rata rata bergerak.
-
-       Diuji 400 putaran acak dengan goyangan +-12 derajat:
-         garis lurus, jendela = periode      0 % berhenti di dalam toleransi
-         garis lurus, jendela 0,80 s        20 %
-         dua blok,    blok = periode       100 % (sebaran 0,4 derajat)
-       Hasilnya tetap 100 % saat goyangannya dinaikkan ke +-20 derajat,
-       deraunya digandakan, dan lajunya diubah dari 5 ke 20 derajat per detik.
-
-       NEGATIF = panjang blok ikut periode gait yang sedang hidup. Itu bawaannya
-       dan itu yang benar, karena periodenya berubah mengikuti preset PUTAR
-       (0,71 detik untuk PUTAR KIRI, 0,70 untuk PUTAR KANAN). Isi angka positif
-       untuk memakunya. Setel 0.0 untuk mematikan penapis. -->
-  <arg name="kick_yaw_filter_sec" default="-1.0"/>
-
-  <!-- Ambang BERHENTI memutar, dibaca dari gyro. Bawaan 0 = setengah
-       kick_yaw_tolerance_deg.
-
-       Sengaja lebih ketat daripada toleransi yang memvonis hasilnya, karena
-       yang menghentikan putaran (gyro) dan yang memvonis (magnetometer) tidak
-       sepakat, dengan rasio yang berubah-ubah arah antar-hari. Dengan ambang
-       berhenti SAMA DENGAN toleransi, titik diam lingkarnya jatuh tepat DI
-       ambang lulus: tiap putaran ulang berhenti persis di batas dan lulusnya
-       jadi undian derau magnetometer. Terukur 2026-08-31: robot menendang
-       dengan sisa +6,7 dan +10,0 deg.
-
-       Dengan setengah toleransi, titik diamnya ikut jadi setengah toleransi,
-       aman di dalam, baik saat gyro lebih baca maupun kurang baca.
-       Disimulasikan: gagal 78% -> 11% (rasio 0,66) dan 34% -> 6% (rasio 1,74). -->
-  <arg name="kick_yaw_turn_stop_deg" default="0.0"/>
-  <arg name="kick_yaw_gyro_check_sec" default="0.8"/>
-
-  <!-- MENGITARI bola selama memutar, supaya bola tetap di tengah pandangan.
-
-       Robot yang berputar di porosnya sendiri pasti melempar bola keluar dari
-       tengah: bola diam, badan berputar, jadi arah bola relatif badan bergeser
-       sebesar sudut putarnya. Supaya tetap di tengah, robot bergeser
-       MENYAMPING sambil berputar, yaitu mengitari bola.
-
-       Umpan baliknya sudut leher: kepala terus mengunci bola, jadi head_pan
-       adalah arah bola relatif badan. Geseran menyamping sebanding simpangan
-       itu, dengan batas atas supaya tidak pernah jadi langkah samping besar.
-
-       Setel gain 0 untuk mematikan (kembali berputar di poros sendiri). -->
-  <arg name="kick_yaw_strafe_gain_mm_per_deg" default="0.30"/>
-  <arg name="kick_yaw_strafe_max_mm" default="12.0"/>
-
-  <!-- Lama MENGEREM sebelum memutar, detik.
-
-       Robot harus benar-benar berhenti di depan bola dulu. Kalau langsung
-       memutar sambil masih melangkah maju, kakinya menabrak bola yang tepat
-       ada di depannya; terlihat langsung di lapangan 2026-08-28.
-
-       Urutannya sekarang: bola masuk jangkauan, BERHENTI, memutar ke yaw
-       target, baru menendang.
-
-       Jeda ini juga yang memisahkan perintah "stop" dan "start" ke
-       walking_module. Dulu keduanya dikirim berselang 39 mikrodetik, tiba
-       dalam satu siklus kontrol 8 ms yang sama, dan siapa yang menang jadi
-       undian; itulah yang membuat gait mati diam-diam saat memutar. Jangan
-       setel 0 tanpa alasan kuat. -->
-  <arg name="kick_yaw_brake_sec" default="0.8"/>
-
-  <!-- Batas atas waktu mengerem, detik, dan ambang "yaw dianggap diam".
-
-       Lama minimum di atas belum menjamin robot benar-benar berhenti:
-       terukur 2026-08-28, selama mengerem 0,8 detik yaw masih bergeser dari
-       -20,6 ke -16,2 (4,4 derajat). Kalau putaran dimulai dari angka yang
-       masih bergerak, galat awalnya sudah salah sejak detik pertama.
-
-       Sesudah lama minimum terlewat, robot menunggu dua sampel yaw berturut
-       (jeda 0,25 detik) yang bedanya di bawah kick_yaw_brake_still_deg.
-       kick_yaw_brake_max_sec membatasi penantian itu supaya robot tidak
-       menunggu selamanya kalau lantainya bergetar. -->
-  <arg name="kick_yaw_brake_max_sec" default="2.5"/>
-  <arg name="kick_yaw_brake_still_deg" default="1.5"/>
-
-  <!-- Jeda diam sebelum halaman aksi tendangan dimainkan, detik.
-
-       Gerakan aksi itu lingkar-terbuka: ia memutar sendi menurut jadwal tetap
-       tanpa peduli keadaan badan. Kalau badan masih bergoyang sisa gait, robot
-       bisa jatuh saat mengangkat satu kaki. Karena itu ada jeda diam dulu.
-
-       2,0 detik adalah angka yang sudah lama dipakai dan terbukti tidak
-       menjatuhkan robot, jadi itu yang jadi bawaan. Ini knob untuk mempercepat
-       keputusan menendang: turunkan bertahap (1,5 lalu 1,2) sambil memperhatikan
-       apakah robot masih mantap saat kaki terangkat. Jangan langsung ke 0.
-
-       Jalur MEMUTAR sudah menjalani fase reda sendiri sesudah menghentikan
-       gait (kick_yaw_settle_sec), dan waktu itu DIKURANGKAN dari jeda ini
-       supaya tidak dihitung dua kali. Sebelum diperbaiki, jalur memutar makan
-       2,7 detik sementara jalur biasa 2,0 detik. -->
-  <arg name="kick_pre_delay_sec" default="2.0"/>
-
-  <!-- Arah putaran. +1 berarti angle_move_amplitude POSITIF memperbesar yaw.
-       Hubungan itu BELUM pernah diukur di robot ini, dan menebak tanda sudah
-       dua kali memakan waktu berjam-jam di paket ini (lihat catatan head_tilt
-       di ball_follower.cpp). Karena itu ada kick_yaw_auto_sign: kalau sesudah
-       kick_yaw_sign_check_sec galatnya justru MEMBESAR lebih dari
-       kick_yaw_sign_margin_deg, tandanya dibalik SEKALI dan dicatat dengan
-       ERROR di log. Tandanya diukur SEKALI per run: hasil koreksi itu dipakai
-       untuk semua tendangan berikutnya, jadi cuma tendangan pertama yang
-       kehilangan waktu. Pasang angka yang tercetak di kick_yaw_turn_sign supaya
-       tendangan pertama pun langsung benar, lalu boleh matikan koreksi
-       otomatisnya dengan kick_yaw_auto_sign:=0.0.
-
-       Lama putaran (hasil simulasi loop ini): galat 20 derajat selesai ~3 detik,
-       45 derajat ~5 detik, 90 derajat ~8 detik. Dua detik pertama habis untuk
-       soft_start walking_module. Kalau koreksi yang dibutuhkan besar DAN gait
-       robot kurang efektif memutar, batas waktu 12 detik bisa tercapai; robot
-       tetap menendang, dengan WARN. -->
-  <!-- ARAH PUTARAN, sudah DIUKUR di robot 2026-08-29 (run op_demo_node_2840).
-
-       +1.0 ini hasil ukur, bukan bawaan yang tidak pernah dicek. Tiga
-       penyelarasan berturut dalam satu run, semuanya dengan perintah 15
-       deg/langkah ke arah negatif (tanda 1 negatif waktu itu), dan yaw justru
-       makin menjauh dari target:
-
-         -54,6 jadi -95,4     -112,5 jadi -158,5     -138,9 jadi -150,6
-
-       Perintah negatif membuat yaw makin NEGATIF, padahal target 0 menuntut
-       yaw NAIK. Jadi tandanya harus positif. Cocok juga dengan konvensi umum:
-       angle_move_amplitude positif memutar ke kiri, dan yaw naik saat memutar
-       ke kiri.
-
-       kick_yaw_auto_sign dimatikan (0.0) karena koreksi otomatis sudah DUA
-       KALI salah menilai di robot ini: sekali membalik tanda positif yang
-       benar, sekali menyatakan tanda negatif yang salah sebagai "terbukti
-       benar". Sebabnya soft_start_time walking_module 2000 ms; selama 2 detik
-       pertama amplitudo masih merambat naik, jadi jendela penilaian 3 detik
-       cuma menyisakan 1 detik putaran sungguhan dan galatnya nyaris tidak
-       bergerak. Jendelanya kini 5 detik, tapi otomatisnya tetap mati karena
-       angkanya memang sudah terukur di sini.
-
-       ROBOT LAIN (mis. CHRONUS) harus mengukur sendiri: jalankan dengan
-       kick_yaw_auto_sign:=1.0, baca angka yang tercetak, pasang di sini, lalu
-       matikan lagi otomatisnya. -->
-  <arg name="kick_yaw_turn_sign" default="1.0"/>
-  <arg name="kick_yaw_auto_sign" default="0.0"/>
-  <arg name="kick_yaw_sign_check_sec" default="5.0"/>
-  <arg name="kick_yaw_sign_margin_deg" default="6.0"/>
-
-  <!-- Galat awal MINIMUM sebelum koreksi tanda otomatis boleh menilai, derajat.
-
-       Terukur 2026-08-28: bacaan yaw sambil gait jalan berbeda 5 sampai 10
-       derajat dari bacaan sesudah robot berhenti. Kalau galat awalnya cuma
-       5,8 derajat, derau sebesar itu sendirian sudah bisa membuatnya terlihat
-       "membesar 12,9 derajat", dan tandanya dibalik padahal arah putarannya
-       sudah benar. Itu persis yang terjadi: tanda -1 yang sudah terukur benar
-       dibalik lagi jadi +1 di tengah rangkaian cek-ulang bergalat kecil.
-
-       Di bawah ambang ini penilaian DITUNDA, bukan diputuskan, jadi
-       kesempatan menilai tetap ada pada penyelarasan berikutnya yang
-       galatnya cukup besar. -->
-  <arg name="kick_yaw_sign_min_error_deg" default="20.0"/>
-
-  <!-- Umur maksimum pesan IMU yang masih boleh dipakai, detik. Yaw yang basi
-       berarti memutar buta. -->
-  <arg name="kick_yaw_max_age_sec" default="1.0"/>
-
-  <!-- Sesudah badan berputar, kaki penendang dihitung ULANG dari sudut leher
-       yang sedang mengunci bola: keputusan lama dibuat sebelum berputar, jadi
-       bola yang tadi di depan kaki kanan bisa pindah ke depan kaki kiri.
-       Hanya berlaku kalau pelacak memang sedang melihat bola. Setel 0.0 untuk
-       memakai keputusan lama apa adanya. -->
-  <arg name="kick_refresh_foot_after_align" default="1.0"/>
-
-  <!-- Eskalasi saat putaran MACET. Terukur di robot 2026-08-28: galat 39 deg
-       memberi perintah 13,7 deg/langkah dan yaw bergerak, tapi galat 12 deg
-       memberi 5,0 deg/langkah dan yaw TIDAK bergerak sama sekali. Jadi ada
-       ambang torsi minimum, dan justru galat KECIL yang jatuh di bawahnya.
-
-       Kalau selama kick_yaw_stall_sec galat terbaiknya tidak membaik lebih
-       dari kick_yaw_stall_margin_deg, batas BAWAH putaran dinaikkan sebesar
-       kick_yaw_turn_step_deg (tidak pernah melewati kick_yaw_max_turn_deg).
-       Yang dinaikkan batas bawahnya, bukan gain: yang kurang memang cuma
-       langkah terkecil.
-
-       Catatan lapangan: kalau robot DIGANTUNG, kakinya tidak menapak dan yaw
-       memang tidak akan pernah berubah. Dalam keadaan itu eskalasi akan mentok
-       di batas atas dan mencetak peringatan; itu benar, bukan kerusakan. -->
-  <arg name="kick_yaw_stall_sec" default="4.0"/>
-  <arg name="kick_yaw_stall_margin_deg" default="3.0"/>
-  <arg name="kick_yaw_turn_step_deg" default="2.5"/>
-
-  <!-- ================= MENGITARI BOLA + MENGGESER ==========================
-
-       Sesudah berhenti di depan bola, robot TIDAK berputar di poros sendiri
-       (itu melempar bola keluar dari depan kaki). Ia memakai gerakan yang
-       sudah disetel operator di Bascorro Studio dan disimpan di
-       config/preset_walking.yaml, lalu menyesuaikan posisi kakinya sampai bola
-       tepat di depan kaki terdekat, baru menendang.
-
-       Pemilihan presetnya TETAP, tidak ditukar sendiri di tengah demo:
-
-           yaw POSITIF  = preset putar_kiri
-           yaw NEGATIF  = preset putar_kanan
-
-       Kalau di robot ternyata terbalik, ada dua cara membalikkannya:
-       kick_orbit_left_yaw_sign:=-1.0, atau menukar isi kedua bagian di
-       preset_walking.yaml. Gyro tetap mengukur arah putaran, tapi hanya untuk
-       MELAPORKAN kalau arahnya berlawanan dengan yang diminta.
-
-       kick_orbit_enable:=0.0 mengembalikan perilaku lama (memutar di poros
-       sendiri). Perilaku itu juga yang dipakai otomatis kalau berkas presetnya
-       hilang atau gagal dibaca. -->
-  <arg name="kick_orbit_enable" default="1.0"/>
-  <arg name="kick_orbit_left_yaw_sign" default="1.0"/>
-
-  <!-- Fase MENYESUAIKAN POSISI KAKI, dijalankan sesudah yaw lurus.
-
-       Mengitari bola memindahkan SELURUH badan, jadi kaki belum tentu masih di
-       sebelah bola walaupun yaw sudah benar. Di fase ini robot menyesuaikan
-       posisinya sampai bola tepat di depan kaki terdekat.
-
-       Gerakannya memakai PRESET, sama seperti fase mengitari:
-
-           bola di KIRI jendela tendang  -> preset geser_kiri  (KIRI MIN NEW)
-           bola di KANAN jendela tendang -> preset geser_kanan (KANAN MIN NEW)
-
-       Presetnya dikirim apa adanya, tidak diskalakan simpangan: operator sudah
-       menyetel gerakan itu langsung di robot, dan mengalikannya dengan
-       simpangan sama saja dengan membuang setelannya. Yang menghentikannya
-       pita mati dan jendela tendang, bukan besar amplitudonya.
-
-       kick_reposition_use_preset:=0.0 mengembalikan jalur lama: geseran
-       menyamping sebanding simpangan, sudut putar dikunci nol, dengan
-       kick_reposition_y_gain_mm_per_deg dan kick_reposition_y_max_mm sebagai
-       knobnya. Jalur itu juga yang dipakai otomatis kalau salah satu bagian
-       geser tidak ada di preset_walking.yaml.
-
-       Fase ini DILEWATI SAMA SEKALI kalau bola masih terlihat, jaraknya tidak
-       melebihi kick_distance dan sudah di depan salah satu kaki. Tanpa
-       itu ia selalu menyalakan gait, melangkah satu dua langkah kecil yang
-       tidak menghasilkan apa apa, mematikannya lagi, lalu menjalani fase reda
-       1,8 detik sekali lagi.
-
-       Syarat selesainya: arah bola masuk salah satu jendela tendang DAN jarak
-       terverifikasi tidak melebihi kick_distance. Jika menjauh selama putar,
-       geser, atau jeda, robot kembali maju memakai preset jalan.
-       Jari jari bola TIDAK lagi ikut jadi syarat (lihat
-       kick_radius_ready_enable): selama radius belum mencapai ambang, syarat
-       ini dulu tidak pernah terpenuhi dan geseran selalu habis di batas waktu
-       walaupun bolanya sudah tepat di depan kaki sejak detik pertama.
-
-       kick_reposition_timeout_sec membatasi waktu reposisi. Jika habis sebelum
-       posisi terverifikasi, robot berhenti dan membatalkan tendangan, bukan
-       menendang dengan kaki tebakan. Siklus mencari/mendekati dimulai ulang.
-
-       Dinaikkan 6,0 menjadi 8,0 sejak geserannya memakai preset. Amplitudo
-       preset itu TETAP, dan kedua sisi sangat berbeda: KIRI MIN NEW bergeser
-       25 mm per langkah (kira kira 6,5 derajat per detik pada jarak 0,4 m)
-       sedangkan KANAN MIN NEW cuma 7 mm (2,4 derajat per detik). Menutup celah
-       antar jendela yang selebar 15 derajat karena itu bisa makan 6 sampai 8
-       detik ke sisi kanan, dan dengan batas 6,0 robot akan menyerah tepat
-       sebelum sampai lalu menendang dengan kaki tebakan.
-
-       Kalau menyesuaikan ke KANAN sering kehabisan waktu, yang benar bukan
-       menaikkan angka ini lagi melainkan membesarkan y_move_amplitude di
-       bagian geser_kanan preset_walking.yaml, tanpa compile ulang.
-
-       kick_reposition_recheck_max DITURUNKAN 1 menjadi 0 atas permintaan
-       operator: penyesuaian kaki dikerjakan SEKALI saja. Yang menjaga supaya
-       sekali itu cukup adalah pita mati dan histeresis kaki di bawah, bukan
-       pengulangan. Isi 1 kalau ingin robot boleh mengitari ulang saat geseran
-       merusak yaw. -->
-  <arg name="kick_reposition_enable" default="1.0"/>
-  <arg name="kick_reposition_use_preset" default="1.0"/>
-  <arg name="kick_reposition_y_gain_mm_per_deg" default="1.50"/>
-  <arg name="kick_reposition_y_max_mm" default="25.0"/>
-  <arg name="kick_reposition_x_max_mm" default="9.0"/>
-  <arg name="kick_reposition_timeout_sec" default="8.0"/>
-  <arg name="kick_reposition_recheck_max" default="0.0"/>
-
-  <!-- Berapa kali fase MENGGESER boleh dijalankan dalam SATU percobaan
-       tendangan. Bawaan 1 atas permintaan operator: menyesuaikan posisi kaki
-       cukup SEKALI.
-
-       Ini menambal pengulangan yang tidak berbatas sama sekali. Sesudah
-       menggeser, robot memeriksa lagi apakah bola sudah tepat; kalau belum,
-       kode lama memanggil startReposition() lagi, DAN fungsi itu memasang
-       ulang tenggat waktunya sendiri. Jadi tidak ada satu pun penghitung yang
-       pernah habis: selama bola terlihat tapi belum pas, robot menggeser,
-       diam, menggeser lagi, terus menerus. Itu yang terlihat di lapangan
-       sebagai "menyesuaikan berulang ulang".
-
-       Dengan 1, kalau sekali geser belum menempatkan bola dengan tepat,
-       tendangan DIBATALKAN: robot berhenti, mendekati bola lagi dari awal,
-       lalu memutar sekali lagi dengan bacaan yang segar. Lebih cepat, dan
-       jauh lebih mudah dibaca daripada menggeser di tempat berkali kali.
-
-       Naikkan ke 2 atau 3 kalau bolanya sering hampir tepat dan cuma perlu
-       sedikit koreksi lagi. -->
-  <arg name="kick_reposition_max_passes" default="1.0"/>
-
-  <!-- HISTERESIS kaki penendang, derajat.
-
-       Kaki dikunci sekali di awal fase menggeser. nearestKickFoot() memilih
-       jendela yang pusatnya paling dekat, jadi bola yang kebetulan ada di
-       antara kedua jendela membuat pilihannya berbalik hanya karena kepala
-       bergeser sepersekian derajat, dan sasaran geseran ikut melompat puluhan
-       derajat: robot menggeser ke kiri, lalu ke kanan, lalu ke kiri lagi. Itu
-       yang terlihat sebagai "menyesuaikan kaki berkali kali".
-
-       Sasaran boleh berpindah PALING BANYAK SEKALI, dan hanya kalau jendela
-       seberang benar benar lebih dekat sejauh angka ini. Naikkan kalau masih
-       terasa berpindah pindah; turunkan kalau robot bertahan pada kaki yang
-       jelas jelas salah. -->
-  <arg name="kick_reposition_foot_hysteresis_deg" default="10.0"/>
-
-  <!-- Pita mati dan penjaga umpan balik.
-
-       kick_reposition_deadband_deg: simpangan di bawah angka ini dianggap
-       sudah tepat di depan kaki dan robot berhenti menggeser. Tanpa pita mati
-       robot menggeser bolak-balik mengejar derau beberapa derajat, dan tiap
-       geseran ikut merusak yaw yang baru diluruskan.
-
-       Fase ini menggeser berdasarkan SUDUT LEHER, dan sudut leher cuma berarti
-       "arah bola" selama pelacak kepala benar-benar mengejar bola. Dua keadaan
-       membuatnya tidak berarti: bola hilang dari pandangan, atau kepala diam
-       sama sekali sehingga angkanya beku. Keduanya membuat robot berjalan
-       berdasarkan bacaan lama, jadi robot berhenti di tempat dan, sesudah
-       kick_reposition_blind_sec, membatalkan tendangan dan mendekati ulang.
-
-       kick_reposition_stale_sec adalah berapa lama sudut leher boleh tidak
-       bergerak sedikit pun sebelum dianggap beku. Ia hanya diperiksa saat
-       simpangannya di luar pita mati: bola yang sudah tepat di depan kaki
-       memang tidak menggerakkan kepala, dan itu bukan kerusakan.
-
-       kick_reposition_blind_sec DITURUNKAN 3,0 menjadi 1,5: menunggu lebih lama
-       tidak pernah membawa umpan baliknya kembali, dan tiap detik di sini
-       langsung terasa sebagai jeda sebelum menendang. -->
-  <arg name="kick_reposition_deadband_deg" default="4.0"/>
-  <arg name="kick_reposition_blind_sec" default="1.5"/>
-  <arg name="kick_reposition_stale_sec" default="1.5"/>
-
-  <!-- Arah geser menyamping. y_move_amplitude positif SEHARUSNYA ke kiri, tapi
-       tanda itu belum pernah diukur di robot ini, jadi ia tidak ditebak:
-       sesudah kick_reposition_sign_check_sec menggeser, kalau simpangan bola
-       (sudut leher) justru MEMBESAR lebih dari kick_reposition_sign_margin_deg,
-       tandanya dibalik SEKALI dan angkanya dicetak. Pasang angka itu di
-       kick_reposition_y_sign supaya tendangan berikutnya benar sejak awal,
-       lalu matikan koreksinya dengan kick_reposition_auto_sign:=0.0.
-
-       Penilaian baru dimulai kalau simpangannya memang cukup besar
-       (kick_reposition_sign_min_error_deg), supaya derau beberapa derajat tidak
-       membalik tanda tanpa alasan. -->
-  <arg name="kick_reposition_y_sign" default="1.0"/>
-  <arg name="kick_reposition_auto_sign" default="1.0"/>
-  <arg name="kick_reposition_sign_check_sec" default="1.2"/>
-  <arg name="kick_reposition_sign_margin_deg" default="2.0"/>
-  <arg name="kick_reposition_sign_min_error_deg" default="6.0"/>
+  <!-- robotis op3 demo (mode otomatis D60, vision, action). -->
+  <!-- ================= MODE OTOMATIS TOMBOL D60 (autonomous demo) =============
+       MANDIRI: dari Ready langsung mulai; dari demo lain (vision/action) demo
+       itu dimatikan dulu, baru D60 memegang badan. mode_long saat D60 hidup =
+       D60 berhenti.
+       D60 = TOGGLE: OFF -> ON mulai dari AWAL (semua penanda direset),
+       ON -> OFF berhenti aman + kembali ke pose INIT. Bukan pause/resume.
+       Urutan: INIT "JALAN MENUJU MEKKAH" -> diam cari 3 s -> ("MENCARI CELAH")
+       -> APPROACH (servo 20) -> YAW (putar sekali) -> DISTANCE RECHECK (maju
+       sekali) -> ALIGNMENT (persen servo 19) -> geser sekali -> TENDANG
+       (104/105) -> INIT -> cari 1,5 s. Jatuh: 85/86 lalu INIT -> cari 1,5 s. -->
+  <!-- Nama tombol di /robotis/open_cr/button. open_cr_module menerbitkan "d60"
+       dari bit d60_button_bit register Button OpenCR (bawaan bit 4). Untuk uji
+       tanpa tombol: ros2 topic pub -1 /robotis/demo_command std_msgs/String
+       "{data: auto_toggle}" (dan auto_stop). -->
+  <arg name="auto_demo_button" default="d60"/>
+  <!-- Nama versi Bascorro Studio, PERSIS. Init dan approach = satu versi yang
+       sama; Init diterbitkan TANPA start (pose page 2 versi save-an itu). Tiap
+       preset diterbitkan UTUH sebelum start, jadi init pose-nya milik masing-
+       masing save-an. -->
+  <arg name="auto_demo_preset_init" default="JALAN MENUJU MEKKAH"/>
+  <arg name="auto_demo_preset_search" default="MENCARI CELAH"/>
+  <arg name="auto_demo_preset_approach" default="JALAN BARU"/>
+  <!-- Preset mendekat D60 diambil dari SALINAN JALAN BARU, bukan dari berkas Studio
+       yang hidup. Nama berkasnya masih "r95" (salinan pertama, 19 Sep 2026), isinya
+       disegarkan 29 Okt 2026 ke revisi 123 (hasil tab RL Training): x 0,013, y +0,003,
+       sudut -0,015, period 0,65, dsp 0,18, step_fb 0,25, soft start 0,65, init_y 0,025,
+       hip_pitch 0,19. Isi 21 Okt (revisi 105) dicadangkan di
+       bascorro_studio/data/backup/. Kosongkan untuk kembali memakai berkas Studio. -->
+  <arg name="auto_demo_preset_approach_file" default="$(find-pkg-share op3_demo)/config/d60_jalan_baru_r95.json"/>
+  <arg name="auto_demo_preset_turn_left" default="Putar Kiri New"/>
+  <arg name="auto_demo_preset_turn_right" default="Putar Kanan New"/>
+  <arg name="auto_demo_preset_shift_left" default="KIRI MIN NEW"/>
+  <arg name="auto_demo_preset_shift_right" default="KANAN MIN NEW"/>
+  <!-- Waktu. -->
+  <arg name="auto_demo_transition_sec" default="0.4"/>
+  <arg name="auto_demo_initial_search_sec" default="3.0"/>
+  <!-- Diam mencari KHUSUS sesi baru (tepat sesudah D60 ditekan), 19 Sep 2026: 6 s.
+       initial_search_sec 3 s tetap dipakai sesudah batas MENCARI CELAH 60 s. -->
+  <arg name="auto_demo_start_search_sec" default="7.0"/>
+  <!-- Sesi baru saja (D60 ditekan): diam pertama habis tanpa bola -> jalan preset mendekat
+       (JALAN BARU) sekian detik sambil kepala menyapu, baru MENCARI CELAH. 0 = langsung MENCARI CELAH. -->
+  <arg name="auto_demo_start_forward_sec" default="20.0"/>
+  <!-- Jeda tambahan sesudah "MENCARI CELAH" selesai (gait sudah reda + transisi)
+       sebelum jalan berikutnya dimulai. -->
+  <arg name="auto_demo_search_to_walk_delay_sec" default="0.0"/>
+  <!-- Sesudah "PUTAR KANAN NEW" lalu LANGSUNG tendang (servo 19 di zona tendang
+       dan servo 20 dekat): "KIRI MIN NEW" selama ini dulu, baru tendang kalau
+       syaratnya masih terpenuhi; kalau tidak, logika semestinya. 0 = mati. -->
+  <arg name="auto_demo_prekick_nudge_sec" default="0.3"/>
+  <arg name="auto_demo_post_action_search_sec" default="1.5"/>
+  <arg name="auto_demo_lost_search_sec" default="3.0"/>
+  <!-- Bola hilang selama ini saat badan bergerak = BALL_LOST_RECOVERY.
+       30 Okt 2026: 1,0 -> 2,0. Dengan 1,0 s mendekat terputus 4 dari 6 kali
+       (sesi 29 Okt), robot berhenti + INIT sebelum sempat berbelok. -->
+  <arg name="auto_demo_ball_lost_sec" default="2.0"/>
+  <!-- SERVO 20 = JARAK. servo20 <= batas: masih jauh; > batas: sudah dekat. -->
+  <arg name="auto_demo_tilt_limit_deg" default="200.0"/>
+  <!-- SERVO 19 = HORIZONTAL, persen (0 kiri, 100 kanan). < kiri: tendang kiri;
+       kiri..tengah: KIRI MIN NEW; tengah..kanan: KANAN MIN NEW; > kanan:
+       tendang kanan. -->
+  <arg name="auto_demo_pan_kick_left" default="48.0"/>
+  <arg name="auto_demo_pan_center" default="50.0"/>
+  <arg name="auto_demo_pan_kick_right" default="52.0"/>
+  <!-- Zona LUAR (geser tarik, sekali per percobaan; koreksi operator 17 Sep):
+       < outer_left jalankan KIRI MIN NEW sampai >= outer_left_stop;
+       > outer_right jalankan KANAN MIN NEW sampai <= outer_right_stop;
+       sesudah itu tabel di atas dipakai lagi. Zona tengah: kiri..tengah =
+       KANAN MIN NEW, tengah..kanan = KIRI MIN NEW. -->
+  <arg name="auto_demo_pan_outer_left" default="45.0"/>
+  <arg name="auto_demo_pan_outer_left_stop" default="46.0"/>
+  <arg name="auto_demo_pan_outer_right" default="55.0"/>
+  <arg name="auto_demo_pan_outer_right_stop" default="54.0"/>
+  <!-- SETIR saat mendekat: badan mengikuti arah kepala (servo 19) selama
+       preset mendekat (JALAN BARU) berjalan, rumus pengikut bola klasik tapi lebih agresif:
+       angle_move_amplitude = angle preset + sign x clamp(|pan| x gain, min..max),
+       naik ramp deg/tick, di bawah deadband jalan lurus. gain 0 = mati (lurus saja).
+       Kalau robot berbelok ke arah yang SALAH, balik steer_sign ke -1.
+       30 Okt 2026: gain 0,2 -> 0,5 dan ramp 0,5 -> 1,5. Dengan 0,2 setiap bola di
+       bawah 25 deg cuma dapat 5 deg, dan JALAN BARU sendiri sudah -0,86 deg (ke kanan),
+       jadi belok kiri ~4 deg: bola lepas dari kamera di kiri sebelum robot berbelok. -->
+  <arg name="auto_demo_steer_gain" default="0.5"/>
+  <arg name="auto_demo_steer_min_deg" default="5.0"/>
+  <arg name="auto_demo_steer_max_deg" default="15.0"/>
+  <arg name="auto_demo_steer_ramp_deg" default="1.5"/>
+  <arg name="auto_demo_steer_deadband_deg" default="5.0"/>
+  <arg name="auto_demo_steer_sign" default="1.0"/>
+  <arg name="auto_demo_steer_publish_period_sec" default="0.1"/>
+  <!-- YAW IMU: > +toleransi PUTAR KIRI NEW, < -toleransi PUTAR KANAN NEW,
+       putaran dihentikan saat |galat| <= stop. Sekali per percobaan. -->
+  <arg name="auto_demo_yaw_target_deg" default="0.0"/>
+  <arg name="auto_demo_yaw_tolerance_deg" default="6.0"/>
+  <arg name="auto_demo_yaw_stop_deg" default="4.0"/>
+  <!-- Sisi negatif yaw D60 (19 Sep 2026): putar KANAN mulai di galat < -0,5, berhenti di galat >= 0.
+       Sisi positif tetap: putar KIRI mulai > +6, berhenti <= +4. -->
+  <arg name="auto_demo_yaw_tolerance_neg_deg" default="0.5"/>
+  <arg name="auto_demo_yaw_stop_neg_deg" default="0.0"/>
+  <arg name="auto_demo_yaw_timeout_sec" default="20.0"/>
+  <arg name="auto_demo_approach_timeout_sec" default="30.0"/>
+  <arg name="auto_demo_shift_timeout_sec" default="8.0"/>
+  <arg name="auto_demo_search_timeout_sec" default="60.0"/>
+  <!-- SEARCH ALIGN: bola pertama terlihat saat mencari dengan servo 19 di
+       <= left_max (0-30 %) -> "MENCARI CELAH" dengan angle_move_amplitude
+       dibalik (runtime) sampai > stop_left (40 %); >= right_min (70-100 %) ->
+       "MENCARI CELAH" asli sampai < stop_right (60 %). Di antaranya = logika
+       D60 lama. Kepala tetap search/track selama correction. -->
+  <arg name="auto_demo_search_align_left_max" default="30.0"/>
+  <arg name="auto_demo_search_align_right_min" default="70.0"/>
+  <arg name="auto_demo_search_align_stop_left" default="40.0"/>
+  <arg name="auto_demo_search_align_stop_right" default="60.0"/>
+  <!-- INIT KEPALA sebelum halaman action (tendang/bangun): pelacak di-"stop"
+       -> head_tracking_node memarkir kepala (park_pan_deg / park_tilt_servo_deg
+       di head_tracking.yaml), lalu ditunggu sampai posisi nyata dekat pose itu
+       (toleransi) atau batas waktu, baru sendi ke action_module. -->
+  <arg name="auto_demo_head_park_wait_sec" default="1.5"/>
+  <arg name="auto_demo_head_park_tol_deg" default="3.0"/>
+  <arg name="auto_demo_head_park_pan_deg" default="0.0"/>
+  <arg name="auto_demo_head_park_tilt_servo_deg" default="200.0"/>
+  <!-- Servo 20 saat D60 DIMATIKAN (kepala mendongak). -->
+  <arg name="auto_demo_stop_head_tilt_servo_deg" default="135.0"/>
+  <!-- Halaman action editor, timing apa adanya dari ALPHONSE.bin. -->
+  <arg name="auto_demo_page_kick_left" default="104.0"/>
+  <arg name="auto_demo_page_kick_right" default="105.0"/>
+  <arg name="auto_demo_page_getup_front" default="85.0"/>
+  <arg name="auto_demo_page_getup_back" default="86.0"/>
+  <!-- Umur maksimum pembacaan yaw IMU yang masih dipakai tahap putar, detik. -->
+  <arg name="auto_demo_yaw_max_age_sec" default="1.0"/>
 
   <node pkg="op3_demo" exec="op_demo_node" output="screen"
         launch-prefix="$(var aux_launch_prefix)">
-    <param name="kick_camera_height" value="$(var kick_camera_height)" type="float"/>
-    <param name="kick_camera_pitch_offset_deg" value="$(var kick_camera_pitch_offset_deg)" type="float"/>
-    <param name="kick_distance" value="$(var kick_distance)" type="float"/>
-    <param name="kick_pan_max_distance" value="$(var kick_pan_max_distance)" type="float"/>
-    <param name="kick_ball_radius_px" value="$(var kick_ball_radius_px)" type="float"/>
-    <param name="kick_pan_right_min_deg" value="$(var kick_pan_right_min_deg)" type="float"/>
-    <param name="kick_pan_right_max_deg" value="$(var kick_pan_right_max_deg)" type="float"/>
-    <param name="kick_pan_left_min_deg" value="$(var kick_pan_left_min_deg)" type="float"/>
-    <param name="kick_pan_left_max_deg" value="$(var kick_pan_left_max_deg)" type="float"/>
-    <param name="kick_ball_real_radius_m" value="$(var kick_ball_real_radius_m)" type="float"/>
-    <param name="kick_fov_width_deg" value="$(var kick_fov_width_deg)" type="float"/>
-    <param name="kick_image_width_px" value="$(var kick_image_width_px)" type="float"/>
-    <param name="kick_ball_radius_margin" value="$(var kick_ball_radius_margin)" type="float"/>
-    <param name="kick_radius_ready_enable" value="$(var kick_radius_ready_enable)" type="float"/>
-    <param name="kick_distance_from_radius" value="$(var kick_distance_from_radius)" type="float"/>
-    <param name="kick_min_depression_deg" value="$(var kick_min_depression_deg)" type="float"/>
-    <param name="kick_distance_filter_n" value="$(var kick_distance_filter_n)" type="float"/>
-    <param name="kick_head_tilt_sign" value="$(var kick_head_tilt_sign)" type="float"/>
-    <param name="kick_pan_window_from_bearing" value="$(var kick_pan_window_from_bearing)" type="float"/>
-    <param name="walk_z_move_min_ratio" value="$(var walk_z_move_min_ratio)" type="float"/>
-    <param name="walk_x_ramp_step_mm" value="$(var walk_x_ramp_step_mm)" type="float"/>
-    <param name="walk_preset_enable" value="$(var walk_preset_enable)" type="float"/>
-    <param name="walk_pose_reference_enable"
-           value="$(var walk_pose_reference_enable)" type="float"/>
-    <param name="walk_search_enable" value="$(var walk_search_enable)" type="float"/>
-    <param name="walk_search_lost_sec" value="$(var walk_search_lost_sec)" type="float"/>
-    <param name="walk_search_resume_delay_sec"
-           value="$(var walk_search_resume_delay_sec)" type="float"/>
-    <param name="kick_transition_delay_sec"
-           value="$(var kick_transition_delay_sec)" type="float"/>
-    <param name="kick_reposition_approach_enable"
-           value="$(var kick_reposition_approach_enable)" type="float"/>
-    <param name="walk_z_lead_enable" value="$(var walk_z_lead_enable)" type="float"/>
-    <param name="walk_z_lead_ramp_step_mm" value="$(var walk_z_lead_ramp_step_mm)" type="float"/>
-    <param name="kick_ready_count" value="$(var kick_ready_count)" type="float"/>
-    <param name="kick_yaw_align_enable" value="$(var kick_yaw_align_enable)" type="float"/>
-    <param name="kick_yaw_target_deg" value="$(var kick_yaw_target_deg)" type="float"/>
-    <param name="kick_yaw_tolerance_deg" value="$(var kick_yaw_tolerance_deg)" type="float"/>
-    <param name="kick_yaw_max_turn_deg" value="$(var kick_yaw_max_turn_deg)" type="float"/>
-    <param name="kick_yaw_min_turn_deg" value="$(var kick_yaw_min_turn_deg)" type="float"/>
-    <param name="kick_yaw_turn_gain" value="$(var kick_yaw_turn_gain)" type="float"/>
-    <param name="kick_yaw_timeout_sec" value="$(var kick_yaw_timeout_sec)" type="float"/>
-    <param name="kick_yaw_settle_sec" value="$(var kick_yaw_settle_sec)" type="float"/>
-    <param name="kick_yaw_ready_count" value="$(var kick_yaw_ready_count)" type="float"/>
-    <param name="kick_yaw_recheck_max" value="$(var kick_yaw_recheck_max)" type="float"/>
-    <param name="kick_yaw_runaway_deg" value="$(var kick_yaw_runaway_deg)" type="float"/>
-    <param name="kick_yaw_gyro_sign" value="$(var kick_yaw_gyro_sign)" type="float"/>
-    <param name="kick_yaw_gyro_scale" value="$(var kick_yaw_gyro_scale)" type="float"/>
-    <param name="kick_yaw_gyro_autoscale" value="$(var kick_yaw_gyro_autoscale)" type="float"/>
-    <param name="kick_yaw_filter_sec" value="$(var kick_yaw_filter_sec)" type="float"/>
-    <param name="kick_yaw_turn_stop_deg" value="$(var kick_yaw_turn_stop_deg)" type="float"/>
-    <param name="kick_yaw_gyro_check_sec" value="$(var kick_yaw_gyro_check_sec)" type="float"/>
-    <param name="kick_yaw_strafe_gain_mm_per_deg" value="$(var kick_yaw_strafe_gain_mm_per_deg)" type="float"/>
-    <param name="kick_yaw_strafe_max_mm" value="$(var kick_yaw_strafe_max_mm)" type="float"/>
-    <param name="kick_yaw_brake_sec" value="$(var kick_yaw_brake_sec)" type="float"/>
-    <param name="kick_yaw_brake_max_sec" value="$(var kick_yaw_brake_max_sec)" type="float"/>
-    <param name="kick_yaw_brake_still_deg" value="$(var kick_yaw_brake_still_deg)" type="float"/>
-    <param name="kick_pre_delay_sec" value="$(var kick_pre_delay_sec)" type="float"/>
-    <param name="kick_yaw_turn_sign" value="$(var kick_yaw_turn_sign)" type="float"/>
-    <param name="kick_yaw_auto_sign" value="$(var kick_yaw_auto_sign)" type="float"/>
-    <param name="kick_yaw_sign_check_sec" value="$(var kick_yaw_sign_check_sec)" type="float"/>
-    <param name="kick_yaw_sign_margin_deg" value="$(var kick_yaw_sign_margin_deg)" type="float"/>
-    <param name="kick_yaw_sign_min_error_deg" value="$(var kick_yaw_sign_min_error_deg)" type="float"/>
-    <param name="kick_yaw_max_age_sec" value="$(var kick_yaw_max_age_sec)" type="float"/>
-    <param name="kick_refresh_foot_after_align" value="$(var kick_refresh_foot_after_align)" type="float"/>
-    <param name="kick_yaw_stall_sec" value="$(var kick_yaw_stall_sec)" type="float"/>
-    <param name="kick_yaw_stall_margin_deg" value="$(var kick_yaw_stall_margin_deg)" type="float"/>
-    <param name="kick_yaw_turn_step_deg" value="$(var kick_yaw_turn_step_deg)" type="float"/>
-    <param name="kick_orbit_enable" value="$(var kick_orbit_enable)" type="float"/>
-    <param name="kick_orbit_left_yaw_sign" value="$(var kick_orbit_left_yaw_sign)" type="float"/>
-    <param name="kick_reposition_enable" value="$(var kick_reposition_enable)" type="float"/>
-    <param name="kick_reposition_use_preset" value="$(var kick_reposition_use_preset)" type="float"/>
-    <param name="kick_reposition_y_gain_mm_per_deg" value="$(var kick_reposition_y_gain_mm_per_deg)" type="float"/>
-    <param name="kick_reposition_y_max_mm" value="$(var kick_reposition_y_max_mm)" type="float"/>
-    <param name="kick_reposition_x_max_mm" value="$(var kick_reposition_x_max_mm)" type="float"/>
-    <param name="kick_reposition_timeout_sec" value="$(var kick_reposition_timeout_sec)" type="float"/>
-    <param name="kick_reposition_max_passes"
-           value="$(var kick_reposition_max_passes)" type="float"/>
-    <param name="kick_reposition_recheck_max" value="$(var kick_reposition_recheck_max)" type="float"/>
-    <param name="kick_reposition_foot_hysteresis_deg" value="$(var kick_reposition_foot_hysteresis_deg)" type="float"/>
-    <param name="kick_reposition_y_sign" value="$(var kick_reposition_y_sign)" type="float"/>
-    <param name="kick_reposition_auto_sign" value="$(var kick_reposition_auto_sign)" type="float"/>
-    <param name="kick_reposition_sign_check_sec" value="$(var kick_reposition_sign_check_sec)" type="float"/>
-    <param name="kick_reposition_sign_margin_deg" value="$(var kick_reposition_sign_margin_deg)" type="float"/>
-    <param name="kick_reposition_sign_min_error_deg" value="$(var kick_reposition_sign_min_error_deg)" type="float"/>
-    <param name="kick_reposition_deadband_deg" value="$(var kick_reposition_deadband_deg)" type="float"/>
-    <param name="kick_reposition_blind_sec" value="$(var kick_reposition_blind_sec)" type="float"/>
-    <param name="kick_reposition_stale_sec" value="$(var kick_reposition_stale_sec)" type="float"/>
-    <param name="grass_demo" value="False"/>
-    <param name="p_gain" value="0.45"/>
-    <param name="d_gain" value="0.045"/>
-    <param name="use_head_control" value="false"/>
+    <param name="auto_demo_button" value="$(var auto_demo_button)" type="str"/>
+    <param name="auto_demo_preset_init" value="$(var auto_demo_preset_init)" type="str"/>
+    <param name="auto_demo_preset_search" value="$(var auto_demo_preset_search)" type="str"/>
+    <param name="auto_demo_preset_approach" value="$(var auto_demo_preset_approach)" type="str"/>
+    <param name="auto_demo_preset_approach_file" value="$(var auto_demo_preset_approach_file)"/>
+    <param name="auto_demo_preset_turn_left" value="$(var auto_demo_preset_turn_left)" type="str"/>
+    <param name="auto_demo_preset_turn_right" value="$(var auto_demo_preset_turn_right)" type="str"/>
+    <param name="auto_demo_preset_shift_left" value="$(var auto_demo_preset_shift_left)" type="str"/>
+    <param name="auto_demo_preset_shift_right" value="$(var auto_demo_preset_shift_right)" type="str"/>
+    <param name="auto_demo_transition_sec" value="$(var auto_demo_transition_sec)" type="float"/>
+    <param name="auto_demo_initial_search_sec" value="$(var auto_demo_initial_search_sec)" type="float"/>
+    <param name="auto_demo_start_search_sec" value="$(var auto_demo_start_search_sec)" type="float"/>
+    <param name="auto_demo_start_forward_sec" value="$(var auto_demo_start_forward_sec)" type="float"/>
+    <param name="auto_demo_search_to_walk_delay_sec" value="$(var auto_demo_search_to_walk_delay_sec)" type="float"/>
+    <param name="auto_demo_prekick_nudge_sec" value="$(var auto_demo_prekick_nudge_sec)" type="float"/>
+    <param name="auto_demo_post_action_search_sec" value="$(var auto_demo_post_action_search_sec)" type="float"/>
+    <param name="auto_demo_lost_search_sec" value="$(var auto_demo_lost_search_sec)" type="float"/>
+    <param name="auto_demo_ball_lost_sec" value="$(var auto_demo_ball_lost_sec)" type="float"/>
+    <param name="auto_demo_tilt_limit_deg" value="$(var auto_demo_tilt_limit_deg)" type="float"/>
+    <param name="auto_demo_pan_kick_left" value="$(var auto_demo_pan_kick_left)" type="float"/>
+    <param name="auto_demo_pan_center" value="$(var auto_demo_pan_center)" type="float"/>
+    <param name="auto_demo_pan_kick_right" value="$(var auto_demo_pan_kick_right)" type="float"/>
+    <param name="auto_demo_pan_outer_left" value="$(var auto_demo_pan_outer_left)" type="float"/>
+    <param name="auto_demo_pan_outer_left_stop" value="$(var auto_demo_pan_outer_left_stop)" type="float"/>
+    <param name="auto_demo_pan_outer_right" value="$(var auto_demo_pan_outer_right)" type="float"/>
+    <param name="auto_demo_pan_outer_right_stop" value="$(var auto_demo_pan_outer_right_stop)" type="float"/>
+    <param name="auto_demo_steer_gain" value="$(var auto_demo_steer_gain)" type="float"/>
+    <param name="auto_demo_steer_min_deg" value="$(var auto_demo_steer_min_deg)" type="float"/>
+    <param name="auto_demo_steer_max_deg" value="$(var auto_demo_steer_max_deg)" type="float"/>
+    <param name="auto_demo_steer_ramp_deg" value="$(var auto_demo_steer_ramp_deg)" type="float"/>
+    <param name="auto_demo_steer_deadband_deg" value="$(var auto_demo_steer_deadband_deg)" type="float"/>
+    <param name="auto_demo_steer_sign" value="$(var auto_demo_steer_sign)" type="float"/>
+    <param name="auto_demo_steer_publish_period_sec" value="$(var auto_demo_steer_publish_period_sec)" type="float"/>
+    <param name="auto_demo_yaw_target_deg" value="$(var auto_demo_yaw_target_deg)" type="float"/>
+    <param name="auto_demo_yaw_tolerance_deg" value="$(var auto_demo_yaw_tolerance_deg)" type="float"/>
+    <param name="auto_demo_yaw_stop_deg" value="$(var auto_demo_yaw_stop_deg)" type="float"/>
+    <param name="auto_demo_yaw_tolerance_neg_deg" value="$(var auto_demo_yaw_tolerance_neg_deg)" type="float"/>
+    <param name="auto_demo_yaw_stop_neg_deg" value="$(var auto_demo_yaw_stop_neg_deg)" type="float"/>
+    <param name="auto_demo_yaw_timeout_sec" value="$(var auto_demo_yaw_timeout_sec)" type="float"/>
+    <param name="auto_demo_approach_timeout_sec" value="$(var auto_demo_approach_timeout_sec)" type="float"/>
+    <param name="auto_demo_shift_timeout_sec" value="$(var auto_demo_shift_timeout_sec)" type="float"/>
+    <param name="auto_demo_search_timeout_sec" value="$(var auto_demo_search_timeout_sec)" type="float"/>
+    <param name="auto_demo_search_align_left_max" value="$(var auto_demo_search_align_left_max)" type="float"/>
+    <param name="auto_demo_search_align_right_min" value="$(var auto_demo_search_align_right_min)" type="float"/>
+    <param name="auto_demo_search_align_stop_left" value="$(var auto_demo_search_align_stop_left)" type="float"/>
+    <param name="auto_demo_search_align_stop_right" value="$(var auto_demo_search_align_stop_right)" type="float"/>
+    <param name="auto_demo_head_park_wait_sec" value="$(var auto_demo_head_park_wait_sec)" type="float"/>
+    <param name="auto_demo_head_park_tol_deg" value="$(var auto_demo_head_park_tol_deg)" type="float"/>
+    <param name="auto_demo_head_park_pan_deg" value="$(var auto_demo_head_park_pan_deg)" type="float"/>
+    <param name="auto_demo_head_park_tilt_servo_deg" value="$(var auto_demo_head_park_tilt_servo_deg)" type="float"/>
+    <param name="auto_demo_stop_head_tilt_servo_deg" value="$(var auto_demo_stop_head_tilt_servo_deg)" type="float"/>
+    <param name="auto_demo_page_kick_left" value="$(var auto_demo_page_kick_left)" type="float"/>
+    <param name="auto_demo_page_kick_right" value="$(var auto_demo_page_kick_right)" type="float"/>
+    <param name="auto_demo_page_getup_front" value="$(var auto_demo_page_getup_front)" type="float"/>
+    <param name="auto_demo_page_getup_back" value="$(var auto_demo_page_getup_back)" type="float"/>
+    <param name="auto_demo_yaw_max_age_sec" value="$(var auto_demo_yaw_max_age_sec)" type="float"/>
   </node>
 </launch>

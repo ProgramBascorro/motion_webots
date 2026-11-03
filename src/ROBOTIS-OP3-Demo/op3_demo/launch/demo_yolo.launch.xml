@@ -13,10 +13,10 @@
   <!-- YOLO detector -->
   <include file="$(find-pkg-share op3_yolo_vision)/launch/yolo.launch.py"/>
 
-  <!-- YOLO -> CircleSet bridge so soccer_demo's BallTracker still gets ball positions -->
+  <!-- YOLO -> CircleSet bridge: /ball_detector_node/circle_set untuk mode D60 -->
   <node pkg="op3_ball_localization" exec="yolo_to_demo_bridge" output="screen"/>
 
-  <!-- Head tracking: start paused, activated by SoccerDemo via /ball_tracker/command -->
+  <!-- Head tracking: start paused, activated by mode D60 via /ball_tracker/command -->
   <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen">
     <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
     <param name="auto_start" value="false"/>
@@ -25,11 +25,6 @@
   <!-- camera setting tool (logs to file, not terminal — boots faster) -->
   <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml"/>
 
-  <!-- robotis op3 demo: keep FSM + walking + kicking, disable internal head control -->
-  <node pkg="op3_demo" exec="op_demo_node" output="screen">
-    <param name="grass_demo" value="False"/>
-    <param name="p_gain" value="0.45"/>
-    <param name="d_gain" value="0.045"/>
-    <param name="use_head_control" value="false"/>
-  </node>
+  <!-- robotis op3 demo (mode otomatis D60, vision, action) -->
+  <node pkg="op3_demo" exec="op_demo_node" output="screen"/>
 </launch>

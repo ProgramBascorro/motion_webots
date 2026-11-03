@@ -11,7 +11,6 @@ find_package(robotis_controller_msgs REQUIRED)
 find_package(op3_walking_module_msgs REQUIRED)
 find_package(op3_action_module_msgs REQUIRED)
 find_package(robotis_math REQUIRED)
-find_package(op3_ball_detector REQUIRED)
 find_package(op3_ball_detector_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 find_package(Eigen3 REQUIRED)
@@ -32,7 +31,6 @@ include_directories(
   ${op3_walking_module_msgs_INCLUDE_DIRS}
   ${op3_action_module_msgs_INCLUDE_DIRS}
   ${robotis_math_INCLUDE_DIRS}
-  ${op3_ball_detector_INCLUDE_DIRS}
   ${op3_ball_detector_msgs_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
@@ -41,12 +39,11 @@ include_directories(
 
 add_executable(op_demo_node 
   src/demo_node.cpp
-  src/soccer/soccer_demo.cpp
-  src/soccer/ball_tracker.cpp
-  src/soccer/ball_follower.cpp
   src/action/action_demo.cpp
   src/vision/vision_demo.cpp
   src/vision/face_tracker.cpp
+  src/auto_demo/auto_demo.cpp
+  src/auto_demo/studio_walking_versions.cpp
 )
 
 ament_target_dependencies(op_demo_node
@@ -59,7 +56,6 @@ ament_target_dependencies(op_demo_node
   op3_walking_module_msgs
   op3_action_module_msgs
   robotis_math
-  op3_ball_detector
   op3_ball_detector_msgs
   Boost
   Eigen3
@@ -68,9 +64,6 @@ ament_target_dependencies(op_demo_node
 
 add_executable(self_test_node 
   src/test_node.cpp
-  src/soccer/soccer_demo.cpp
-  src/soccer/ball_tracker.cpp
-  src/soccer/ball_follower.cpp
   src/action/action_demo.cpp
   src/vision/vision_demo.cpp
   src/vision/face_tracker.cpp
@@ -88,7 +81,6 @@ ament_target_dependencies(self_test_node
   op3_walking_module_msgs
   op3_action_module_msgs
   robotis_math
-  op3_ball_detector
   op3_ball_detector_msgs
   Boost
   Eigen3
@@ -109,20 +101,28 @@ install(DIRECTORY config data launch list
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(kick_alignment_test
-    test/kick_alignment_test.cpp
-    src/soccer/ball_follower.cpp
+  # Tepi tekanan + debounce tombol di sumbernya (open_cr_module asli, bit palsu).
+  find_package(open_cr_module REQUIRED)
+  find_package(robotis_device REQUIRED)
+  ament_add_gtest(opencr_button_edge_test
+    test/opencr_button_edge_test.cpp
+    TIMEOUT 60
   )
-  ament_target_dependencies(kick_alignment_test
-    rclcpp ament_index_cpp std_msgs sensor_msgs geometry_msgs
-    robotis_controller_msgs op3_walking_module_msgs
-    op3_ball_detector_msgs YAML_CPP
+  ament_target_dependencies(opencr_button_edge_test
+    rclcpp std_msgs open_cr_module robotis_device
   )
-  target_compile_definitions(kick_alignment_test PRIVATE
-    OP3_DEMO_PRESET_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/preset_walking.yaml"
+  set_tests_properties(opencr_button_edge_test PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=80;ROS_LOCALHOST_ONLY=1"
   )
-  set_tests_properties(kick_alignment_test PROPERTIES
-    ENVIRONMENT "ROS_DOMAIN_ID=77;ROS_LOCALHOST_ONLY=1"
+  # Acuan page 2 demo D60 (walking_ready_reference.json) + tanda acuan berkas versi.
+  ament_add_gtest(walking_ready_reference_test
+    test/walking_ready_reference_test.cpp
+    src/auto_demo/studio_walking_versions.cpp
+    TIMEOUT 60
+  )
+  ament_target_dependencies(walking_ready_reference_test YAML_CPP)
+  target_compile_definitions(walking_ready_reference_test PRIVATE
+    OP3_DEMO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
   )
 endif()
 

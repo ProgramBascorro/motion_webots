@@ -20,7 +20,6 @@
 #include <std_msgs/msg/string.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
-#include "op3_demo/soccer_demo.h"
 #include "op3_demo/action_demo.h"
 #include "op3_demo/vision_demo.h"
 #include "op3_demo/button_test.h"
@@ -33,10 +32,9 @@ enum Demo_Status
   Ready = 0,
   ButtonTest = 1,
   MicTest = 2,
-  SoccerDemo = 3,
-  VisionDemo = 4,
-  ActionDemo = 5,
-  DemoCount = 6,
+  VisionDemo = 3,
+  ActionDemo = 4,
+  DemoCount = 5,
 };
 
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -69,7 +67,6 @@ int main(int argc, char **argv)
 
   //create ros wrapper object
   robotis_op::OPDemo *current_demo = NULL;
-  robotis_op::SoccerDemo *soccer_demo = new robotis_op::SoccerDemo();
   robotis_op::ActionDemo *action_demo = new robotis_op::ActionDemo();
   robotis_op::VisionDemo *vision_demo = new robotis_op::VisionDemo();
   robotis_op::ButtonTest *button_test = new robotis_op::ButtonTest();
@@ -127,19 +124,6 @@ int main(int argc, char **argv)
 
           if (DEBUG_PRINT)
             RCLCPP_INFO(node->get_logger(), "[Go to Demo READY!]");
-          break;
-        }
-
-        case SoccerDemo:
-        {
-          if (current_demo != NULL)
-            current_demo->setDemoDisable();
-
-          current_demo = soccer_demo;
-          current_demo->setDemoEnable();
-
-          if (DEBUG_PRINT)
-            RCLCPP_INFO(node->get_logger(), "[Start] Soccer Demo");
           break;
         }
 
@@ -250,11 +234,6 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
       // sound out desired status
       switch (desired_status)
       {
-        case SoccerDemo:
-          dxlTorqueChecker();
-          playSound(default_mp3_path + "Start soccer demonstration.mp3");
-          break;
-
         case VisionDemo:
           dxlTorqueChecker();
           playSound(default_mp3_path + "Start vision processing demonstration.mp3");
@@ -290,11 +269,6 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
       // sound out desired status and changign LED
       switch (desired_status)
       {
-        case SoccerDemo:
-          playSound(default_mp3_path + "Autonomous soccer mode.mp3");
-          setLED(0x01);
-          break;
-
         case VisionDemo:
           playSound(default_mp3_path + "Vision processing mode.mp3");
           setLED(0x02);
@@ -393,18 +367,7 @@ void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg)
   // In ready mode
   else
   {
-    if(msg->data == "soccer")
-    {
-      desired_status = SoccerDemo;
-      apply_desired = true;
-
-      // play sound
-      dxlTorqueChecker();
-      playSound(default_mp3_path + "Start soccer demonstration.mp3");
-      if (DEBUG_PRINT)
-        RCLCPP_INFO(node->get_logger(), "= Start Demo Mode : %d", desired_status);
-    }
-    else if(msg->data == "vision")
+    if(msg->data == "vision")
     {
       desired_status = VisionDemo;
       apply_desired = true;

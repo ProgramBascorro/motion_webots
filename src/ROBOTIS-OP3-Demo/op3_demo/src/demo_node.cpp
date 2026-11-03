@@ -22,13 +22,14 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
-#include "op3_demo/soccer_demo.h"
 #include "op3_demo/action_demo.h"
 #include "op3_demo/vision_demo.h"
+#include "op3_demo/auto_demo.h"
 #include "robotis_math/robotis_linear_algebra.h"
 #include "robotis_controller_msgs/msg/sync_write_item.hpp"
 
 #include <execinfo.h>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <fcntl.h>
@@ -38,10 +39,14 @@
 enum Demo_Status
 {
   Ready = 0,
-  SoccerDemo = 1,
-  VisionDemo = 2,
-  ActionDemo = 3,
-  DemoCount = 4,
+  VisionDemo = 1,
+  ActionDemo = 2,
+  DemoCount = 3,
+  // Mode otomatis tombol D60 (autonomous demo), MANDIRI: bisa ditekan dari
+  // Ready maupun dari demo lain (demo itu dihentikan dulu). Sengaja sesudah
+  // DemoCount, karena tombol "mode" memutar pilihan dengan % DemoCount, jadi
+  // mode ini hanya bisa dimasuki lewat D60.
+  AutoDemoMode = 4,
 };
 
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -57,11 +62,11 @@ void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg);
 // Jejak tumpukan saat node ini mati mendadak.
 //
 // op_demo_node beberapa kali mati dengan exit code -11 (SIGSEGV) beberapa ratus
-// milidetik sesudah demo soccer mulai. Dari luar gejalanya menyesatkan: tombol
-// START "berhasil" (robot memang mulai jalan), lalu tombol berikutnya tidak
-// berpengaruh apa-apa dan robot tidak pernah menendang -- padahal sebenarnya
-// node-nya sudah TIDAK ADA sejak detik pertama. launch.log cuma menulis
-// "process has died", tanpa satu baris pun tentang di mana.
+// milidetik sesudah demo mulai. Dari luar gejalanya menyesatkan: demo
+// "berhasil" mulai (robot memang bergerak), lalu perintah berikutnya tidak
+// berpengaruh apa-apa -- padahal sebenarnya node-nya sudah TIDAK ADA sejak
+// detik pertama. launch.log cuma menulis "process has died", tanpa satu baris
+// pun tentang di mana.
 //
 // Handler ini mencetak jejak tumpukan ke stderr, jadi crash berikutnya langsung
 // menunjuk barisnya. Sengaja hanya memakai fungsi yang aman dipanggil dari
@@ -108,8 +113,8 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr dxl_torque_pub;
 // WALKING_READY = action page 2. goInitPose() switches the controller to
 // action_module and triggers this page. The walking_module's IK ready
 // pose is FK-tuned (param.yaml init_x/y/z_offset) to match the geometry
-// of this page, so when soccer_demo later swaps the body to walking_module
-// the transition is smooth.
+// of this page, so when a demo later swaps the body to walking_module the
+// transition is smooth.
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr enable_ctrl_module_pub;
 rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_page_pub;
 
@@ -124,10 +129,20 @@ Demo_Status desired_status = Ready;
 bool apply_desired = false;
 
 rclcpp::Node::SharedPtr node;
-std::shared_ptr<robotis_op::SoccerDemo> soccer_demo;
 std::shared_ptr<robotis_op::ActionDemo> action_demo;
 std::shared_ptr<robotis_op::VisionDemo> vision_demo;
+// Mode otomatis tombol D60 (autonomous demo), status AutoDemoMode. Mandiri:
+// D60 dari Ready langsung mulai; dari demo lain, demo itu dimatikan dulu
+// (setDemoDisable di loop utama) lalu D60 mulai. mode_long saat D60 hidup =
+// D60 berhenti aman.
+std::shared_ptr<robotis_op::AutoDemo> auto_demo;
+// Nama pesan tombol di /robotis/open_cr/button yang memicu D60 (parameter
+// auto_demo_button, bawaan "d60" = bit d60_button_bit di open_cr_module).
+std::string auto_demo_button = "d60";
 std::shared_ptr<robotis_op::OPDemo> current_demo;
+
+// D60 ON/OFF dari satu tempat: dipakai tombol fisik dan /robotis/demo_command.
+void toggleAutoDemo(const std::string &source);
 
 //node main
 int main(int argc, char **argv)
@@ -158,23 +173,17 @@ int main(int argc, char **argv)
   default_mp3_path = ament_index_cpp::get_package_share_directory("op3_demo") + "/data/mp3/";
 
   //create demo instance
-  soccer_demo = std::make_shared<robotis_op::SoccerDemo>();
   action_demo = std::make_shared<robotis_op::ActionDemo>();
   vision_demo = std::make_shared<robotis_op::VisionDemo>();
+  auto_demo = std::make_shared<robotis_op::AutoDemo>();
 
   // set node
-  soccer_demo->setNode(node);
   action_demo->setNode(node);
   vision_demo->setNode(node);
-
-  bool use_head_control = node->declare_parameter<bool>("use_head_control", true);
-  soccer_demo->setUsingHeadControl(use_head_control);
-  RCLCPP_INFO(node->get_logger(), "use_head_control = %s",
-              use_head_control ? "true" : "false");
-
-  // connect imu callback
-  // auto imu_data_sub = node->create_subscription<sensor_msgs::msg::Imu>("/robotis/open_cr/imu", 10,
-  //                                                                     std::bind(&robotis_op::SoccerDemo::imuDataCallback, soccer_demo.get(), std::placeholders::_1));
+  auto_demo->setNode(node);
+  auto_demo_button = node->declare_parameter<std::string>("auto_demo_button", "d60");
+  RCLCPP_WARN(node->get_logger(), "mode otomatis D60 dipicu tombol '%s' (mandiri: tekan = mulai dari awal, "
+                                  "tekan lagi = berhenti)", auto_demo_button.c_str());
 
   // wait for manager
   std::string manager_name = "/op3_manager";
@@ -197,9 +206,8 @@ int main(int argc, char **argv)
 
   // Boot-time INIT pose. Per user spec: robot lands at WALKING_READY (action
   // page 2 — calibrated standing pose) when demo launches. Walking-ready
-  // is a separate transition that happens on START button press (handled
-  // by soccer_demo's startSoccerMode, which switches the body to
-  // walking_module). The init_x/y/z_offset in param.yaml are FK-tuned to
+  // is a separate transition done by the demo that takes the body to
+  // walking_module. The init_x/y/z_offset in param.yaml are FK-tuned to
   // match this WALKING_READY geometry, so the boot→walking handoff is smooth
   // (no jerky pose snap when walking_module takes over).
   //
@@ -207,37 +215,54 @@ int main(int argc, char **argv)
   //  (a) ActionModule's page_num subscriber up — modules constructed
   //  (b) /robotis/present_joint_states publishing — controller running
   // Both needed before page 2 publish, otherwise the command is dropped.
+  //
+  // Batas tunggunya PANJANG dan berisik, bukan 25 s lalu menyerah diam-diam.
+  // 18 Sep 2026: launch pertama sesudah boot, op3_manager butuh 42 s sampai
+  // FIRST BULKREAD (biasanya < 1 s: cache disk dingin + OpenVINO memuat model
+  // bersamaan). Versi lama menyerah di detik ke-25 -> page 2 tidak pernah
+  // dikirim -> "robot tidak bergerak saat ros2 launch", padahal semua node
+  // hidup. Tanpa page 2 demo ini tidak ada gunanya, jadi ditunggu.
   {
+    const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + std::chrono::seconds(180);
+    auto next_report = started + std::chrono::seconds(5);
     bool modules_constructed = false;
-    for (int i = 0; i < 150; ++i) {
-      if (action_page_pub->get_subscription_count() > 0) {
-        modules_constructed = true;
-        break;
-      }
-      rclcpp::sleep_for(std::chrono::milliseconds(100));
-    }
-
     bool controller_running = false;
     auto js_sub = node->create_subscription<sensor_msgs::msg::JointState>(
         "/robotis/present_joint_states", 1,
         [&controller_running](const sensor_msgs::msg::JointState::SharedPtr) {
           controller_running = true;
         });
-    for (int i = 0; i < 100 && !controller_running; ++i) {
+    while (rclcpp::ok() && !(modules_constructed && controller_running) &&
+           std::chrono::steady_clock::now() < deadline) {
       rclcpp::spin_some(node);
+      if (!modules_constructed && action_page_pub->get_subscription_count() > 0)
+        modules_constructed = true;
+      if (std::chrono::steady_clock::now() >= next_report) {
+        next_report += std::chrono::seconds(5);
+        const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        RCLCPP_WARN(node->get_logger(),
+                    "menunggu op3_manager siap %.0f s: action_module %s, present_joint_states %s "
+                    "(manager lambat sesudah boot itu normal; page 2 dikirim begitu keduanya ada)",
+                    waited, modules_constructed ? "sudah hidup" : "BELUM hidup",
+                    controller_running ? "sudah terbit" : "BELUM terbit");
+      }
       rclcpp::sleep_for(std::chrono::milliseconds(100));
     }
     js_sub.reset();
 
     if (modules_constructed && controller_running) {
       RCLCPP_WARN(node->get_logger(),
-                  "controller running — playing WALKING_READY (action page 2)");
+                  "controller running — playing WALKING_READY (action page 2) sesudah %.1f s",
+                  std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
       goInitPose();
     } else {
-      RCLCPP_WARN(node->get_logger(),
-                  "boot-init skipped: modules_constructed=%d controller_running=%d. "
-                  "Press USER button or publish to /robotis/action/page_num manually.",
-                  modules_constructed, controller_running);
+      RCLCPP_ERROR(node->get_logger(),
+                   "boot-init DILEWATI sesudah 180 s: action_module %s, present_joint_states %s. "
+                   "op3_manager tidak pernah siap -- periksa terminal launch (bus servo / OpenCR). "
+                   "Kalau manager akhirnya hidup, kirim page 2 sendiri: "
+                   "ros2 topic pub --once /robotis/action/page_num std_msgs/msg/Int32 \"{data: 2}\"",
+                   modules_constructed ? "hidup" : "TIDAK hidup", controller_running ? "terbit" : "TIDAK terbit");
     }
   }
 
@@ -250,6 +275,10 @@ int main(int argc, char **argv)
     // process
     if (apply_desired == true)
     {
+      // Berpindah demo / Ready saat D60 hidup: D60 berhenti aman dan direset.
+      if (desired_status != AutoDemoMode && (auto_demo->isBusy() || auto_demo->hasQueuedStart()))
+        auto_demo->requestStop("demo berpindah / Ready");
+
       if (current_demo)
         current_demo->setDemoDisable();
 
@@ -271,12 +300,6 @@ int main(int argc, char **argv)
             RCLCPP_INFO(node->get_logger(), "[Go to Demo READY!]");
           break;
 
-        case SoccerDemo:
-          current_demo = soccer_demo;
-          if(DEBUG_PRINT)
-            RCLCPP_INFO(node->get_logger(), "[Start] Soccer Demo");
-          break;
-
         case VisionDemo:
           current_demo = vision_demo;
           if(DEBUG_PRINT)
@@ -288,25 +311,41 @@ int main(int argc, char **argv)
           if(DEBUG_PRINT)
             RCLCPP_INFO(node->get_logger(), "[Start] Action Demo");
           break;
+
+        case AutoDemoMode:
+          // Bukan OPDemo: dimulai langsung di sini, mulai dari AWAL.
+          current_demo.reset();
+          RCLCPP_WARN(node->get_logger(), "[Start] mode otomatis D60");
+          auto_demo->toggle("tombol D60");
+          break;
+
+        default:
+          break;
       }
 
       if (current_demo)
         current_demo->setDemoEnable();
       apply_desired = false;
       current_status = desired_status;
-
-      // Tombol START diproses ketika status masih Ready, sehingga pada
-      // tekanan pertama ia hanya sempat memilih SoccerDemo. Mulai soccer
-      // setelah objek demo benar-benar aktif agar robot tidak tertahan di
-      // WALKING_READY (action page 2) dan tidak memerlukan tekanan kedua.
-      if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
-        soccer_demo->startSoccerMode();
     }
 
-    if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
+    // Mode D60 diproses tiap loop selama masih sibuk (termasuk STOPPING, yang
+    // harus bisa selesai), apa pun demo yang aktif.
+    if (auto_demo->isBusy() || auto_demo->hasQueuedStart())
+      auto_demo->process();
+
+    // D60 sudah STOPPED tanpa mulai-ulang: status demo kembali ke Ready TANPA
+    // page 2 (robot sudah diparkir di pose INIT oleh D60 sendiri).
+    if (apply_desired == false && current_status == AutoDemoMode && auto_demo->isBusy() == false &&
+        auto_demo->hasQueuedStart() == false)
     {
-      soccer_demo->process();
-    } else if (current_status == VisionDemo && vision_demo->isDemoEnabled() == true)
+      current_demo.reset();
+      current_status = Ready;
+      desired_status = Ready;
+      RCLCPP_WARN(node->get_logger(), "mode D60 STOPPED; status demo Ready (D60 = mulai lagi dari awal)");
+    }
+
+    if (current_status == VisionDemo && vision_demo->isDemoEnabled() == true)
     {
       vision_demo->process();
     } else if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
@@ -328,6 +367,11 @@ int main(int argc, char **argv)
 
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 {
+  // Tombol yang dipakai node ini: "d60" (mode otomatis), "mode"/"mode_long".
+  // "start" dan "user" tidak dipakai; "user_long" milik op3_manager.
+  if (msg->data == "start" || msg->data == "user")
+    return;
+
   if(apply_desired == true)
   {
     // Tekanan tombol DIBUANG di sini selama perpindahan mode masih diproses
@@ -339,9 +383,14 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
     return;
   }
 
-  if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
-    soccer_demo->buttonHandlerCallback(msg);
-  else if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
+  // ---- D60 (mode otomatis) -----------------------------------------------
+  if (msg->data == auto_demo_button)
+  {
+    toggleAutoDemo("tombol D60");
+    return;
+  }
+
+  if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
     action_demo->buttonHandlerCallback(msg);
 
   // in the middle of playing demo
@@ -365,38 +414,7 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
   // ready to start demo
   else
   {
-    if (msg->data == "start")
-    {
-      // select current demo
-      desired_status = (desired_status == Ready) ? static_cast<Demo_Status>(desired_status + 1) : desired_status;
-      apply_desired = true;
-
-      // sound out desired status
-      switch (desired_status)
-      {
-        case SoccerDemo:
-          dxlTorqueChecker();
-          playSound(default_mp3_path + "Start soccer demonstration.mp3");
-          break;
-
-        case VisionDemo:
-          dxlTorqueChecker();
-          playSound(default_mp3_path + "Start vision processing demonstration.mp3");
-          break;
-
-        case ActionDemo:
-          dxlTorqueChecker();
-          playSound(default_mp3_path + "Start motion demonstration.mp3");
-          break;
-
-        default:
-          break;
-      }
-
-      if(DEBUG_PRINT)
-        RCLCPP_INFO(node->get_logger(), "= Start Demo Mode : %d", desired_status);
-    }
-    else if (msg->data == "mode")
+    if (msg->data == "mode")
     {
       // change to next demo
       desired_status = static_cast<Demo_Status>((desired_status + 1) % DemoCount);
@@ -405,11 +423,6 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
       // sound out desired status and changing LED
       switch (desired_status)
       {
-        case SoccerDemo:
-          playSound(default_mp3_path + "Autonomous soccer mode.mp3");
-          setLED(0x01);
-          break;
-
         case VisionDemo:
           playSound(default_mp3_path + "Vision processing mode.mp3");
           setLED(0x02);
@@ -430,14 +443,37 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
   }
 }
 
+// D60 = TOGGLE MANDIRI: OFF -> ON mulai dari AWAL (reset), ON -> OFF berhenti
+// aman. Dari Ready langsung mulai; dari demo lain (vision/action)
+// demo itu dimatikan dulu lewat setDemoDisable() di loop utama, baru D60 mulai,
+// supaya tidak pernah ada dua pengendali badan.
+void toggleAutoDemo(const std::string &source)
+{
+  if (current_status == AutoDemoMode || auto_demo->isBusy() || auto_demo->hasQueuedStart())
+  {
+    // Masih STOPPING sesudah status sempat kembali Ready: tekanan ini mengantre
+    // mulai-ulang, dan statusnya ditandai D60 lagi supaya tombol lain tetap
+    // memperlakukannya sebagai mode yang hidup.
+    if (current_status == Ready && !apply_desired)
+      current_status = desired_status = AutoDemoMode;
+    auto_demo->toggle(source);
+    return;
+  }
+  desired_status = AutoDemoMode;
+  apply_desired = true;
+  dxlTorqueChecker();
+  RCLCPP_WARN(node->get_logger(), "%s: pindah ke mode otomatis D60 (demo sebelumnya: %d)", source.c_str(),
+              current_status);
+}
+
 void goInitPose()
 {
   // Switch to action_module and play page 2 (WALKING_READY — the user's
   // calibrated standing pose, recorded in the action editor and stored
   // in ALPHONSE.bin). This is the boot pose AND the return pose for
   // mode_long → Ready transitions. Walking-ready is a separate
-  // transition done by soccer_demo on START — its module switch to
-  // walking_module engages an IK whose neutral pose matches this
+  // transition done by the demo that takes the body to walking_module —
+  // that module switch engages an IK whose neutral pose matches this
   // WALKING_READY geometry (param.yaml init_x/y/z_offset are FK-tuned).
   std_msgs::msg::String enable_msg;
   enable_msg.data = "action_module";
@@ -558,18 +594,7 @@ void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg)
   // In ready mode
   else
   {
-    if(msg->data == "soccer")
-    {
-      desired_status = SoccerDemo;
-      apply_desired = true;
-
-      // play sound
-      dxlTorqueChecker();
-      playSound(default_mp3_path + "Start soccer demonstration.mp3");
-      if (DEBUG_PRINT)
-        RCLCPP_INFO(node->get_logger(), "= Start Demo Mode : %d", desired_status);
-    }
-    else if(msg->data == "vision")
+    if(msg->data == "vision")
     {
       desired_status = VisionDemo;
       apply_desired = true;
@@ -596,8 +621,28 @@ void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg)
 
 void demoCommandCallback(const std_msgs::msg::String::SharedPtr msg)
 {
-  if (current_status == SoccerDemo && soccer_demo->isDemoEnabled() == true)
-    soccer_demo->demoCommandCallback(msg);
-  else if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
+  // Mode D60 lewat perintah (uji tanpa tombol / Bascorro Studio):
+  //   auto_toggle = persis tombol D60, auto_stop = D60 OFF.
+  if (msg->data == "auto_toggle")
+  {
+    toggleAutoDemo("/robotis/demo_command auto_toggle");
+    return;
+  }
+  if (msg->data == "auto_stop")
+  {
+    auto_demo->requestStop("/robotis/demo_command auto_stop");
+    return;
+  }
+  if (auto_demo->isBusy() || auto_demo->hasQueuedStart())
+  {
+    if (msg->data == "stop")
+      auto_demo->requestStop("/robotis/demo_command stop");
+    else
+      RCLCPP_WARN(node->get_logger(), "demo_command '%s' diabaikan selama mode D60; pakai 'stop'/'auto_stop'",
+                  msg->data.c_str());
+    return;
+  }
+
+  if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
     action_demo->demoCommandCallback(msg);
 }

@@ -20,9 +20,5 @@
   <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml" />
     
   <!-- robotis op3 self test demo -->
-  <node pkg="op3_demo" exec="self_test_node" name="op3_self_test" output="screen">
-    <param name="grass_demo" value="False" />
-    <param name="p_gain" value="0.45" />
-    <param name="d_gain" value="0.045" />
-  </node>
+  <node pkg="op3_demo" exec="self_test_node" name="op3_self_test" output="screen"/>
 </launch>
