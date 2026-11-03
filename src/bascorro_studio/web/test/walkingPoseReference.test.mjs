@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import yaml from "js-yaml";
 import {
   WALKING_POSE_REFERENCE, walkingReferenceOffset,
-  walkingOffsetToDisplay, walkingOffsetFromDisplay,
+  walkingOffsetToDisplay, walkingOffsetFromDisplay, walkingPoseFromReference,
 } from "../src/walkingPoseReference.js";
 import {
-  WALKING_KEYS, WALKING_BOOL_FIELDS, validateWalkingParams,
+  WALKING_KEYS, WALKING_BOOL_FIELDS, WALKING_BIAS_FIELDS, validateWalkingParams,
   applyWalkingDraft, checkLegReach,
 } from "../src/walkingParams.js";
+
+const REFERENCE_FILE = JSON.parse(readFileSync(new URL("../../data/walking_ready_reference.json", import.meta.url), "utf8"));
+const REF = WALKING_POSE_REFERENCE.offsets;
+// Nilai asli ROS = acuan + selisih, dibulatkan seperti kotak isian Studio.
+const nativeFrom = (key, relative) => walkingOffsetFromDisplay(String(relative), REF[key]);
 
 function nativeParams(overrides = {}) {
   return {
@@ -21,12 +25,45 @@ function nativeParams(overrides = {}) {
   };
 }
 
-test("the fixed page-2 display reference does not zero timing or extra foot separation", () => {
+test("the page-2 reference is the one generated from ALPHONSE.bin, not a copy", () => {
+  // Satu sumber: yang dipakai Studio = isi berkas yang juga dibaca demo D60.
+  assert.equal(REFERENCE_FILE.format, "bascorro-studio/walking-ready-reference");
+  assert.equal(WALKING_POSE_REFERENCE.id, REFERENCE_FILE.id);
+  for (const key of WALKING_BIAS_FIELDS) {
+    assert.equal(walkingReferenceOffset(key), REFERENCE_FILE.offsets[key], key);
+    assert.ok(Number.isFinite(REF[key]), key);
+  }
+  // Keenam field bias dicocokkan atau dipegang -- tidak ada yang tertinggal.
+  assert.deepEqual([...REFERENCE_FILE.fitted, ...REFERENCE_FILE.held].sort(), [...WALKING_BIAS_FIELDS].sort());
+  assert.equal(REFERENCE_FILE.source.page, 2);
+  assert.equal(Object.keys(REFERENCE_FILE.source.legRaw).length, 12);
+  assert.match(WALKING_POSE_REFERENCE.source, /ALPHONSE\.bin page 2/);
+});
+
+test("code-embedded presets are written relative to page 2", () => {
+  assert.deepEqual(walkingPoseFromReference(), Object.fromEntries(WALKING_BIAS_FIELDS.map((key) => [key, REF[key]])));
+  const moved = walkingPoseFromReference({ init_x_offset: -0.01, init_pitch_offset: -0.05 });
+  assert.equal(walkingOffsetToDisplay(moved.init_x_offset, REF.init_x_offset), -0.01);
+  assert.equal(walkingOffsetToDisplay(moved.init_pitch_offset, REF.init_pitch_offset), -0.05);
+  assert.equal(moved.init_z_offset, REF.init_z_offset);
+  assert.equal(moved.hip_pitch_offset, REF.hip_pitch_offset);
+  assert.equal(Object.hasOwn(moved, "init_y_offset"), false);
+});
+
+test("every saved version file is shifted to the current reference", () => {
+  // walking_ready_fk.py --write menandai tiap berkas versi yang digesernya.
+  // Tanda yang beda = angka init pose-nya berarti acuan lain (16 deg pada
+  // pergantian 23 Okt 2026), jadi demo D60 menolaknya.
+  const files = [new URL("../../data/walking_versions.json", import.meta.url),
+    new URL("../../../ROBOTIS-OP3-Demo/op3_demo/config/d60_jalan_baru_r95.json", import.meta.url)];
+  for (const file of files) {
+    const document = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(document.poseReferenceId, WALKING_POSE_REFERENCE.id, file.pathname);
+  }
+});
+
+test("the page-2 display reference does not zero timing or extra foot separation", () => {
   assert.ok(Object.isFrozen(WALKING_POSE_REFERENCE.offsets));
-  assert.equal(walkingReferenceOffset("init_x_offset"), -0.02);
-  assert.equal(walkingReferenceOffset("init_z_offset"), 0.0408);
-  assert.equal(walkingReferenceOffset("init_pitch_offset"), -0.07);
-  assert.equal(walkingReferenceOffset("hip_pitch_offset"), 0.1396);
   assert.equal(walkingReferenceOffset("init_y_offset"), 0);
   assert.equal(walkingOffsetToDisplay(0.028, walkingReferenceOffset("init_y_offset")), 0.028);
   for (const key of ["period_time", "pelvis_offset", "x_move_amplitude", "p_gain", "balance_enable"]) {
@@ -48,7 +85,11 @@ test("zero means the page-2 reference value, not a zero-valued ROS pose", () => 
 });
 
 test("native presets display as deltas without mutating their numbers", () => {
-  const native = Object.freeze(nativeParams({ init_x_offset: -0.03, init_pitch_offset: -0.12, hip_pitch_offset: 0.14 }));
+  const native = Object.freeze(nativeParams({
+    init_x_offset: nativeFrom("init_x_offset", -0.01),
+    init_pitch_offset: nativeFrom("init_pitch_offset", -0.05),
+    hip_pitch_offset: nativeFrom("hip_pitch_offset", 0.0004),
+  }));
   const before = JSON.stringify(native);
   const displayed = Object.fromEntries(Object.entries(native)
     .map(([key, value]) => [key, walkingOffsetToDisplay(value, walkingReferenceOffset(key))]));
@@ -63,12 +104,14 @@ test("native presets display as deltas without mutating their numbers", () => {
   assert.deepEqual(validateWalkingParams(native), native);
 });
 
-test("all six demo presets round-trip in ROS float32 without a storage migration", () => {
-  const document = yaml.load(readFileSync(new URL("../../../ROBOTIS-OP3-Demo/op3_demo/config/preset_walking.yaml", import.meta.url), "utf8"));
+test("every saved Studio version round-trips through the delta display in ROS float32", () => {
+  // Dulu berkas ini membaca op3_demo/config/preset_walking.yaml, yang dihapus
+  // 19 Sep 2026 bersama demo soccer; versi tersimpan Studio-lah yang kini dipakai demo.
+  const document = JSON.parse(readFileSync(new URL("../../data/walking_versions.json", import.meta.url), "utf8"));
   const snapshot = JSON.stringify(document);
-  assert.equal(Object.keys(document).length, 6);
-  for (const [name, preset] of Object.entries(document)) {
-    for (const [key, value] of Object.entries(preset)) {
+  assert.ok(document.versions.length > 0);
+  for (const { name, params } of document.versions) {
+    for (const [key, value] of Object.entries(params)) {
       const offset = walkingReferenceOffset(key);
       const display = walkingOffsetToDisplay(value, offset);
       const restored = walkingOffsetFromDisplay(display, offset);
@@ -122,16 +165,16 @@ test("changing display mode leaves all native values and non-pose inputs intact"
 
 test("Apply sends native values, not page-2 deltas, and retains untouched fields", async () => {
   const baseline = nativeParams();
-  const draft = { ...baseline, init_x_offset: walkingOffsetFromDisplay("-0.01", -0.02) };
+  const draft = { ...baseline, init_x_offset: walkingOffsetFromDisplay("-0.01", REF.init_x_offset) };
   const reads = [baseline, draft];
   const published = [];
   const result = await applyWalkingDraft({
     draft, baseline, read: async () => reads.shift(), publish: (payload) => published.push(payload),
     check: () => {}, onRead: () => {}, wait: async () => {},
   });
-  assert.deepEqual(published, [{ ...baseline, init_x_offset: -0.03 }]);
-  assert.equal(result.init_z_offset, 0.0408);
-  assert.equal(result.init_pitch_offset, -0.07);
+  assert.deepEqual(published, [{ ...baseline, init_x_offset: nativeFrom("init_x_offset", -0.01) }]);
+  assert.equal(result.init_z_offset, REF.init_z_offset);
+  assert.equal(result.init_pitch_offset, REF.init_pitch_offset);
   assert.equal(result.period_time, 0.8);
 });
 

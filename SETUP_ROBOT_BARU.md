@@ -48,7 +48,7 @@ perintah perbaikannya.
 | **Alamat serial** (U2D2 + OpenCR) | Setiap adaptor punya serial sendiri | `op3_serial_setup.py --apply` |
 | **OpenCR di port USB terpisah** | Transceiver bus TTL board ALPHONSE **mati** | Lihat bagian 3 — kemungkinan besar CHRONUS tidak butuh ini |
 | **Model servo di `OP3.robot`** | Tertulis `XM430-W350` untuk semua, padahal aslinya beda | Lihat bagian 6 |
-| `op3_walking_module/config/param.yaml` | `x/y/z_offset` diturunkan lewat FK dari page 2 milik ALPHONSE | Turunkan ulang: `scripts/walking_ready_fk.py --yaml <export>` |
+| `op3_walking_module/config/param.yaml` + `bascorro_studio/data/walking_ready_reference.json` | Acuan init pose = FK page 2 milik ALPHONSE (dibaca Studio + D60) | Turunkan ulang sesudah page 2 sendiri direkam: `python3 scripts/walking_ready_fk.py --write` (Studio ditutup dulu) |
 | `op3_action_module/data/ALPHONSE.bin` | Gerakan hasil kalibrasi ALPHONSE | Rekam sendiri jadi `CHRONUS.bin` — lihat bawah |
 | `offset.yaml` | Offset mekanis per robot | Tuning ulang dengan offset tuner |
 

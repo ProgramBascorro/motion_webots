@@ -328,6 +328,11 @@ d_gain: 0
 
 ### KENAPA NILAI INI:
 - `init_x/y/z_offset` = FK-derived dari WALKING_READY page 2 Robot 0. Diturunkan via `scripts/walking_ready_fk.py` (lihat section 2).
+  > **23 Okt 2026:** `scripts/walking_ready_fk.py` sudah ditulis ulang. Ia kini membaca
+  > page 2 langsung dari `.bin`, memakai IK walking_module yang di-port 1:1 (bukan panjang
+  > link spesifikasi 0,093 m), ikut mencocokkan `pitch_offset`, dan menulis
+  > `src/bascorro_studio/data/walking_ready_reference.json` (acuan Studio + D60) + `param.yaml`.
+  > Dict `PAGE2` dan `--yaml` yang disebut di bawah sudah tidak ada; lihat docstring skripnya.
 - `pitch_offset = 4°` — proven value, body lean forward kompensasi berat kepala+kamera.
 - `hip_pitch_offset = 8°` — juga dipake `ball_follower` untuk kalkulasi jarak bola.
 - `period_time = 750` (ms) — comfortable cadence.

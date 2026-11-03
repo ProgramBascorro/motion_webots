@@ -318,7 +318,7 @@ test("offset yang jauh dari page 2 dilaporkan, yang dekat tidak", () => {
   assert.deepEqual(walkingPoseFarFromReference({ ...REF }, REF), []);
   const jauh = walkingPoseFarFromReference({ ...REF, init_pitch_offset: -0.5, hip_pitch_offset: 0 }, REF);
   assert.deepEqual(jauh.map((x) => x.key).sort(), ["hip_pitch_offset", "init_pitch_offset"]);
-  assert.ok(Math.abs(jauh.find((x) => x.key === "init_pitch_offset").selisih + 0.43) < 1e-9);
+  assert.ok(Math.abs(jauh.find((x) => x.key === "init_pitch_offset").selisih - (-0.5 - REF.init_pitch_offset)) < 1e-9);
   // Perubahan kecil tidak mengganggu operator dengan dialog.
   assert.deepEqual(walkingPoseFarFromReference({ ...REF, init_pitch_offset: REF.init_pitch_offset - 0.05 }, REF), []);
 });
@@ -332,6 +332,19 @@ test("acuan pose diterbitkan SEBELUM walking_module dinyalakan", () => {
   assert.ok(acuan !== -1, "acuan pose harus diterbitkan di sini");
   assert.ok(nyala !== -1, "modul harus dinyalakan di sini");
   assert.ok(acuan < nyala, "acuan WAJIB mendarat sebelum modul menyala");
+});
+
+test("page 2 diputar sebelum acuan dipatok dan walking_module dinyalakan", () => {
+  // walking_bias_ merekam goal yang SEDANG dipegang. Tanpa page 2 dulu, sesudah
+  // Torque ON yang terekam adalah pose lemas robot, bukan page 2.
+  const badan = badanFungsi(readFileSync(SUMBER, "utf8"), "initThenEnableWalking");
+  const page2 = badan.indexOf("playWalkingReadyPage(");
+  const acuan = badan.indexOf("publishWalkingPoseReference(");
+  assert.ok(page2 !== -1, "page 2 harus diputar di sini");
+  assert.ok(page2 < acuan, "page 2 WAJIB selesai sebelum acuan dan modul walking");
+  const putar = badanFungsi(readFileSync(SUMBER, "utf8"), "playWalkingReadyPage");
+  assert.ok(putar.indexOf('data: "action_module"') < putar.indexOf("WALKING_READY_PAGE_NUM }"));
+  assert.match(putar, /actionIsRunningRef\.current/, "ditunggu sampai action_module selesai, bukan cuma jeda");
 });
 
 test("Apply & Start menyalakan modul dulu, baru mengirim nilai operator", () => {

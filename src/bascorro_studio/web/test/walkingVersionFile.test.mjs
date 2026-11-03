@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   createWalkingVersionFile, applyStoreOperation, emptyStoreState, StoreError, STORE_FILE_NAME,
+  REFERENCE_FILE_NAME,
 } from "../server/walkingVersionFile.js";
 import { WALKING_KEYS } from "../src/walkingParams.js";
 
@@ -245,4 +246,31 @@ test("-0 kembali sebagai 0: JSON memang tidak bisa menulis nol bertanda, nilainy
   const { versions } = await createWalkingVersionFile({ dataDir: dir }).load();
   assert.ok(versions[0].params.init_roll_offset === -0);
   assert.equal(Math.fround(versions[0].params.init_roll_offset), 0);
+});
+
+test("tanda acuan page 2: berkas baru dari Save ditandai, impor tidak, tanda lama terbawa", async () => {
+  const dir = await tempDir();
+  await fs.writeFile(path.join(dir, REFERENCE_FILE_NAME), JSON.stringify({ id: "page2-uji" }));
+  const store = createWalkingVersionFile({ dataDir: dir });
+  const lahir = await store.mutate({ op: "upsert", version: version("a", "A") });
+  assert.equal(lahir.poseReferenceId, "page2-uji", "angkanya diketik terhadap acuan yang berlaku");
+
+  // Acuan diturunkan ulang: hanya walking_ready_fk.py yang boleh menandai ulang
+  // (sambil menggeser angkanya). Save berikutnya membawa tanda LAMA apa adanya.
+  await fs.writeFile(path.join(dir, REFERENCE_FILE_NAME), JSON.stringify({ id: "page2-baru" }));
+  const sesudah = await store.mutate({ op: "upsert", version: version("b", "B") });
+  assert.equal(sesudah.poseReferenceId, "page2-uji");
+  assert.equal(JSON.parse(await fs.readFile(path.join(dir, STORE_FILE_NAME), "utf8")).poseReferenceId, "page2-uji");
+
+  const lain = await tempDir();
+  await fs.writeFile(path.join(lain, REFERENCE_FILE_NAME), JSON.stringify({ id: "page2-uji" }));
+  const impor = await createWalkingVersionFile({ dataDir: lain }).mutate({ op: "import", versions: [version("c", "C")] });
+  assert.equal(impor.poseReferenceId, null, "versi dari browser bisa dari acuan mana pun");
+});
+
+test("tanpa berkas acuan (server uji), tidak ada tanda dan Save tetap jalan", async () => {
+  const dir = await tempDir();
+  const state = await createWalkingVersionFile({ dataDir: dir }).mutate({ op: "upsert", version: version("a", "A") });
+  assert.equal(state.poseReferenceId, null);
+  assert.equal(state.versions.length, 1);
 });

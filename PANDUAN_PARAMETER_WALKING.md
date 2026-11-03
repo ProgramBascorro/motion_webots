@@ -451,11 +451,14 @@ Salin apa adanya:
 
 Turunkan ulang per robot — **jangan disalin**:
 
-- [ ] `param.yaml` `x/y/z_offset`, `pitch_offset`, `hip_pitch_offset`
-      → `scripts/walking_ready_fk.py --yaml <export page 2>`
-      (`scripts/init_baru_fk.py` di `CHRONUS_NEW`)
+- [ ] `param.yaml` `x/z_offset`, `pitch_offset`, `hip_pitch_offset`
+      → `scripts/walking_ready_fk.py --write` (sejak 23 Okt 2026 di `ALPHONSE_NEW_V2`
+      membaca `.bin` langsung, menulis `data/walking_ready_reference.json` untuk
+      Studio + D60, dan menggeser versi tersimpan; `init_baru_fk.py` di `CHRONUS_NEW`
+      masih versi lama dengan `--yaml <export page 2>`)
 - [ ] Fallback di `initialize()` disamakan dengan `param.yaml` hasil di atas
-- [ ] `WALKING_DEFAULT_PARAMS` di `App.jsx` disamakan juga (ingat konversi satuan)
+- [ ] `WALKING_DEFAULT_PARAMS` di `App.jsx` disamakan juga (ingat konversi satuan) —
+      tidak perlu lagi kalau `App.jsx` sudah membaca `walking_ready_reference.json`
 
 Build:
 

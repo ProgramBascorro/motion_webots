@@ -1,3 +1,14 @@
+# 23 OKT 2026: x/z/roll/pitch/yaw/hip_pitch offset di bawah = ACUAN PAGE 2, hasil
+# FK page 2 WALKING_READY di ALPHONSE.bin (satu sumber:
+# src/bascorro_studio/data/walking_ready_reference.json, dibaca juga oleh Bascorro
+# Studio dan demo D60). Jangan disunting tangan -- sesudah page 2 di-teach ulang,
+# scripts/walking_ready_fk.py --write menulis keenamnya bersama acuan itu dan
+# menggeser semua versi tersimpan. Angka lama (-0.02 / 0.0408 / -4.0107 deg) yang
+# disebut di bawah adalah acuan sebelum tanggal itu.
+#
+# y_offset juga 0 sejak 23 Okt 2026 (dulu 0.028): lebar kaki = page 2 persis,
+# sama dengan semua versi Studio. Bukan bagian acuan -- skrip tidak menyentuhnya.
+#
 # DIKEMBALIKAN 2026-09-06 ke isi 3 September 2026 (akhir hari, WIB), atas
 # permintaan operator: "batalkan semua perubahan yang telah terjadi setelah
 # tanggal 3 September".
@@ -55,11 +66,11 @@
 # dengan berkas ini -- itu yang dilihat operator sebelum menekan Load.
 #
 # NOTE: sending "save" on /robotis/walking/command rewrites this file and drops comments.
-x_offset: -0.02
-y_offset: 0.028
-z_offset: 0.0408
+x_offset: 0.0163
+y_offset: 0
+z_offset: 0.042
 roll_offset: 0
-pitch_offset: -4.010704565915763
+pitch_offset: 0.790681757280536
 yaw_offset: 0
 hip_pitch_offset: 7.9984904662224929
 period_time: 800

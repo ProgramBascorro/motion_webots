@@ -36,6 +36,10 @@ export const STORE_FORMAT = "bascorro-studio/walking-versions";
 export const STORE_FORMAT_VERSION = 1;
 export const STORE_FILE_NAME = "walking_versions.json";
 export const STORE_BACKUP_DIR = "backup";
+// Acuan page 2 (scripts/walking_ready_fk.py). Angka init pose tiap versi adalah
+// nilai asli ROS TERHADAP acuan itu; berkas versi membawa id-nya di
+// `poseReferenceId`, dan skrip itulah satu-satunya yang menggesernya.
+export const REFERENCE_FILE_NAME = "walking_ready_reference.json";
 
 export class StoreError extends Error {
   constructor(status, message) {
@@ -223,6 +227,16 @@ export function createWalkingVersionFile({ dataDir, keepBackups = 200, now = () 
     return { exists: true, state: parsed };
   }
 
+  // null kalau acuan belum dibuat (atau server uji dengan data sementara).
+  async function readReferenceId() {
+    try {
+      const reference = JSON.parse(await fs.readFile(path.join(dataDir, REFERENCE_FILE_NAME), "utf8"));
+      return typeof reference?.id === "string" ? reference.id : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function backupCurrentFile(revision) {
     try {
       await fs.access(file);
@@ -269,6 +283,7 @@ export function createWalkingVersionFile({ dataDir, keepBackups = 200, now = () 
 
   const view = (exists, state) => ({
     exists,
+    poseReferenceId: state.poseReferenceId ?? null,
     revision: state.revision ?? 0,
     savedAt: state.savedAt ?? null,
     activeVersionId: state.activeVersionId ?? null,
@@ -284,7 +299,7 @@ export function createWalkingVersionFile({ dataDir, keepBackups = 200, now = () 
       return view(exists, state);
     }),
     mutate: (operation) => exclusive(async () => {
-      const { state } = await readStateFile();
+      const { exists, state } = await readStateFile();
       const { state: changed, result } = applyStoreOperation(state, operation);
       const revision = (state.revision ?? 0) + 1;
       const next = {
@@ -294,6 +309,15 @@ export function createWalkingVersionFile({ dataDir, keepBackups = 200, now = () 
         revision,
         savedAt: new Date(now()).toISOString(),
       };
+      // Berkas yang LAHIR dari Save di Studio ini memakai acuan yang sedang
+      // berlaku, jadi langsung ditandai. Impor dari browser sengaja tidak:
+      // isinya bisa dari acuan mana pun, dan walking_ready_fk.py yang memutuskan.
+      // Berkas yang sudah ada tidak pernah ditandai ulang di sini -- tandanya
+      // ikut terbawa lewat ...changed.
+      if (!exists && operation?.op === "upsert") {
+        const referenceId = await readReferenceId();
+        if (referenceId) next.poseReferenceId = referenceId;
+      }
       const written = await writeStateFile(next, state.revision ?? 0);
       // BUKTI, bukan asumsi: yang ada di disk harus sama persis dengan yang
       // dimaksud sebelum operator diberi tahu "tersimpan".
