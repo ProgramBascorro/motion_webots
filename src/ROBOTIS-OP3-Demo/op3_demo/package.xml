@@ -24,6 +24,8 @@
   <depend>ament_index_cpp</depend>
   <depend>robotis_math</depend>
   <depend>op3_ball_detector_msgs</depend>
+  <!-- demo_striker: deteksi kiper/gawang (yolo_gawang_detector.py). -->
+  <depend>vision_msgs</depend>
   <depend>boost</depend>
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>

@@ -1,0 +1,324 @@
+<?xml version="1.0"?>
+<!-- =====================================================================
+     demo_striker (KSTI 2026) - program TERPISAH dari demo.launch.xml.
+
+     Salinan demo.launch.xml: manager, kamera + detektor bola, dan
+     head_tracking_node di-include / dijalankan PERSIS sama. Bedanya:
+       * op_striker_node menggantikan op_demo_node. Isinya StrikerDemo =
+         mesin keadaan D60 + penyesuaian panduan ksti2026_STRIKER_adaptasi_
+         minimal-v2 (pengarah search B->A->C->D, target orbit celah kiper,
+         yaw gyro tanpa magnetometer). Lihat config/striker_params.yaml.
+       * TIDAK dipasang ke tombol. Mulai / berhenti lewat program:
+           ros2 topic pub -1 /robotis/demo_command std_msgs/String "{data: striker_start}"
+           ros2 topic pub -1 /robotis/demo_command std_msgs/String "{data: striker_stop}"
+       * dua yolo_gawang_detector.py apa adanya (kelas "robot" = kiper,
+         "goalpost" = tiang), mati sejak start, dinyalakan striker hanya
+         ~0,6 s saat melirik sebelum orbit (AIM_LOOK).
+
+     JANGAN dijalankan bersama demo.launch.xml (dua pengendali badan).
+     ===================================================================== -->
+<launch>
+  <arg name="with_manager" default="true"/>
+  <!-- Auxiliaries below are OFF by default: the demo does not need face
+       tracking, the browser tuning UI, or the on-the-fly camera tuner to run —
+       enabling any of them adds seconds of import/discovery time to boot.
+       Opt back in with e.g. with_face:=true. -->
+  <arg name="with_face" default="false"/>
+  <arg name="with_web_setting" default="false"/>
+  <arg name="with_camera_setting" default="false"/>
+
+  <!-- Inti CPU untuk node PENDAMPING (bukan YOLO).
+       i5-10210U: 4 inti fisik / 8 utas, pasangan HT 0<->4 1<->5 2<->6 3<->7.
+       Dua utas satu pasangan berbagi unit eksekusi, jadi proses yang mendarat
+       di 4/5/6 mencuri tenaga dari detektor bola yang dipatok di 0-2.
+       Terukur: inferensi 40,3 ms (sibling sepi) vs 84,2 ms (sibling sibuk).
+
+       "3,7" = kedua utas inti fisik P3 saja, sehingga P0/P1/P2 utuh untuk YOLO.
+       Hasil ukur dengan pesaing terkurung: 15,8 -> 20,9 FPS median,
+       p95 8,7 -> 16,9 FPS.
+
+       op3_manager SENGAJA TIDAK ikut dipatok: loop bus servo 125 Hz-nya terlalu
+       berharga untuk dieksperimeni, dan ongkos CPU-nya kecil (didominasi tunggu
+       I/O serial). Kalau `ps -eo pid,psr,comm` menunjukkan ia sering duduk di
+       inti 4/5/6, barulah pertimbangkan mematoknya juga.
+
+       Kosongkan ("") untuk mematikan pematokan sama sekali. Afinitas YOLO
+       sendiri diatur terpisah lewat cpu_affinity di
+       yolo_ball_detector_openvino.launch.py. -->
+  <arg name="aux_launch_prefix" default="taskset -c 3,7"/>
+
+  <!-- robotis op3 manager.
+       boot_init_page:=-1 mematikan init pose bawaan manager. Bukan karena tidak
+       perlu, tapi karena di sini SUDAH ada yang mengurusnya: demo_node memainkan
+       page 2 (WALKING_READY) sendiri setelah menunggu module + controller siap
+       (demo_node.cpp:175). Kalau keduanya jalan, tiap boot mereka balapan dan
+       yang kalah mencetak "Can not play page 2.(Now playing)" + "Failed to start
+       page 2". Penolakan itu tidak berbahaya (ActionModule::start() keluar
+       sebelum menyentuh state), tapi ERROR palsu yang muncul tiap kali membuat
+       ERROR sungguhan ikut terabaikan. -->
+  <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py">
+    <arg name="boot_init_page" value="-1"/>
+  </include>
+
+  <!-- Camera + YOLO ball detector: menerbitkan /ball_detector_node/circle_set
+       (dibaca mode D60) dan /vision/yolo/ball_center (dibaca head_tracking_node). -->
+  <include file="$(find-pkg-share op3_ball_detector)/launch/yolo_ball_detector_openvino.launch.py"/>
+
+  <!-- Head scan/track. Node ini diambil APA ADANYA dari cabang CHRONUS_NEW
+       (head_tracking_node.py + head_tracking.yaml, tanpa modifikasi), atas
+       permintaan: pola sapuannya persis sama dengan robot itu — empat titik
+       ABSOLUT (kiri, kanan, kanan-bawah, kiri-bawah) pada periode TETAP
+       scan_period_sec, dan PID-melacak bola begitu terlihat.
+
+       Konsekuensinya node membaca /vision/yolo/ball_center (geometry_msgs/
+       PointStamped, [0,1]) — BUKAN /ball_detector_node/circle_set. Publisher
+       topik itu ikut diambil dari CHRONUS ke scripts/yolo_ball_detector.py,
+       karena versi ALPHONSE sebelumnya hanya menerbitkan circle_set dan
+       kepalanya tidak akan pernah bisa mengunci bola tanpa itu.
+
+       THIS node owns the head. auto_start=false: tetap diam sampai mode D60
+       menerbitkan "start" di /ball_tracker/command. -->
+  <node pkg="op3_ball_localization" exec="head_tracking_node" output="screen"
+        launch-prefix="$(var aux_launch_prefix)">
+    <param from="$(find-pkg-share op3_ball_localization)/config/head_tracking.yaml"/>
+    <param name="auto_start" value="false"/>
+  </node>
+
+  <!-- STRIKER: detektor kiper & tiang gawang = yolo_gawang_detector.py APA ADANYA
+       (node mandiri yang sudah ada; satu kelas per instans lewat gawang_class),
+       bobot robot_torso yang sama dengan detektor bola (kelas ball/goalpost/robot).
+       enable_at_start false: tidak ada inferensi tambahan selama bola dikejar;
+       op_striker_node menyalakannya lewat <namespace>/enable hanya saat AIM_LOOK.
+       Inti CPU dan batas utas sama dengan detektor YOLO (0-2, OMP 2). -->
+  <arg name="striker_detector_model" default="model/robot_torso_288x480_int8_openvino_model"/>
+  <arg name="striker_image_topic" default="/usb_cam_node/image_raw/compressed"/>
+  <node pkg="op3_ball_detector" exec="yolo_gawang_detector.py" namespace="kiper_detector_node"
+        name="yolo_kiper_detector" output="screen" launch-prefix="taskset -c 0-2">
+    <env name="OMP_NUM_THREADS" value="2"/>
+    <env name="OPENBLAS_NUM_THREADS" value="2"/>
+    <param from="$(find-pkg-share op3_ball_detector)/config/yolo_gawang_detector_params.yaml"/>
+    <param name="model_path" value="$(var striker_detector_model)"/>
+    <param name="gawang_class" value="robot"/>
+    <param name="enable_at_start" value="false"/>
+    <param name="publish_image" value="false"/>
+    <param name="startup_benchmark_frames" value="0"/>
+    <remap from="image_in" to="$(var striker_image_topic)"/>
+  </node>
+  <node pkg="op3_ball_detector" exec="yolo_gawang_detector.py" namespace="gawang_detector_node"
+        name="yolo_gawang_detector" output="screen" launch-prefix="taskset -c 0-2">
+    <env name="OMP_NUM_THREADS" value="2"/>
+    <env name="OPENBLAS_NUM_THREADS" value="2"/>
+    <param from="$(find-pkg-share op3_ball_detector)/config/yolo_gawang_detector_params.yaml"/>
+    <param name="model_path" value="$(var striker_detector_model)"/>
+    <param name="gawang_class" value="goalpost"/>
+    <param name="enable_at_start" value="false"/>
+    <param name="publish_image" value="false"/>
+    <param name="startup_benchmark_frames" value="0"/>
+    <remap from="image_in" to="$(var striker_image_topic)"/>
+  </node>
+
+  <!-- face tracking — opt-in with with_face:=true -->
+  <group if="$(var with_face)">
+    <include file="$(find-pkg-share op3_demo)/launch/face_detection_op3.launch.xml"/>
+  </group>
+
+  <!-- camera tuning tool — opt-in with with_camera_setting:=true -->
+  <group if="$(var with_camera_setting)">
+    <include file="$(find-pkg-share op3_camera_setting_tool)/launch/op3_camera_setting_tool.launch.xml"/>
+  </group>
+
+  <!-- web setting UI — opt-in with with_web_setting:=true -->
+  <group if="$(var with_web_setting)">
+    <include file="$(find-pkg-share op3_web_setting_tool)/launch/web_setting_server.launch.xml"/>
+  </group>
+
+  <!-- STRIKER: op_striker_node (StrikerDemo). Argumen auto_demo_* di bawah =
+       nilai yang SAMA dengan demo.launch.xml (preset, page, ambang servo 19/20,
+       toleransi yaw orbit). Catatan D60 di bawah berlaku apa adanya, kecuali
+       soal tombol: striker tidak memakai tombol. -->
+  <!-- ================= MODE OTOMATIS TOMBOL D60 (autonomous demo) =============
+       MANDIRI: dari Ready langsung mulai; dari demo lain (vision/action) demo
+       itu dimatikan dulu, baru D60 memegang badan. mode_long saat D60 hidup =
+       D60 berhenti.
+       D60 = TOGGLE: OFF -> ON mulai dari AWAL (semua penanda direset),
+       ON -> OFF berhenti aman + kembali ke pose INIT. Bukan pause/resume.
+       Urutan: INIT "JALAN MENUJU MEKKAH" -> diam cari 3 s -> ("MENCARI CELAH")
+       -> APPROACH (servo 20) -> YAW (putar sekali) -> DISTANCE RECHECK (maju
+       sekali) -> ALIGNMENT (persen servo 19) -> geser sekali -> TENDANG
+       (104/105) -> INIT -> cari 1,5 s. Jatuh: 85/86 lalu INIT -> cari 1,5 s. -->
+  <!-- Nama tombol di /robotis/open_cr/button. open_cr_module menerbitkan "d60"
+       dari bit d60_button_bit register Button OpenCR (bawaan bit 4). Untuk uji
+       tanpa tombol: ros2 topic pub -1 /robotis/demo_command std_msgs/String
+       "{data: auto_toggle}" (dan auto_stop). -->
+  <!-- Nama versi Bascorro Studio, PERSIS. Init dan approach = satu versi yang
+       sama; Init diterbitkan TANPA start (pose page 2 versi save-an itu). Tiap
+       preset diterbitkan UTUH sebelum start, jadi init pose-nya milik masing-
+       masing save-an. -->
+  <arg name="auto_demo_preset_init" default="JALAN MENUJU MEKKAH"/>
+  <arg name="auto_demo_preset_search" default="MENCARI CELAH"/>
+  <arg name="auto_demo_preset_approach" default="JALAN BARU"/>
+  <!-- Preset mendekat D60 diambil dari SALINAN JALAN BARU, bukan dari berkas Studio
+       yang hidup. Nama berkasnya masih "r95" (salinan pertama, 19 Sep 2026), isinya
+       disegarkan 29 Okt 2026 ke revisi 123 (hasil tab RL Training): x 0,013, y +0,003,
+       sudut -0,015, period 0,65, dsp 0,18, step_fb 0,25, soft start 0,65, init_y 0,025,
+       hip_pitch 0,19. Isi 21 Okt (revisi 105) dicadangkan di
+       bascorro_studio/data/backup/. Kosongkan untuk kembali memakai berkas Studio. -->
+  <arg name="auto_demo_preset_approach_file" default="$(find-pkg-share op3_demo)/config/d60_jalan_baru_r95.json"/>
+  <arg name="auto_demo_preset_turn_left" default="Putar Kiri New"/>
+  <arg name="auto_demo_preset_turn_right" default="Putar Kanan New"/>
+  <arg name="auto_demo_preset_shift_left" default="KIRI MIN NEW"/>
+  <arg name="auto_demo_preset_shift_right" default="KANAN MIN NEW"/>
+  <!-- Waktu. -->
+  <arg name="auto_demo_transition_sec" default="0.4"/>
+  <arg name="auto_demo_initial_search_sec" default="3.0"/>
+  <!-- Diam mencari KHUSUS sesi baru (tepat sesudah D60 ditekan), 19 Sep 2026: 6 s.
+       initial_search_sec 3 s tetap dipakai sesudah batas MENCARI CELAH 60 s. -->
+  <arg name="auto_demo_start_search_sec" default="7.0"/>
+  <!-- Sesi baru saja (D60 ditekan): diam pertama habis tanpa bola -> jalan preset mendekat
+       (JALAN BARU) sekian detik sambil kepala menyapu, baru MENCARI CELAH. 0 = langsung MENCARI CELAH. -->
+  <arg name="auto_demo_start_forward_sec" default="20.0"/>
+  <!-- Jeda tambahan sesudah "MENCARI CELAH" selesai (gait sudah reda + transisi)
+       sebelum jalan berikutnya dimulai. -->
+  <arg name="auto_demo_search_to_walk_delay_sec" default="0.0"/>
+  <!-- Sesudah "PUTAR KANAN NEW" lalu LANGSUNG tendang (servo 19 di zona tendang
+       dan servo 20 dekat): "KIRI MIN NEW" selama ini dulu, baru tendang kalau
+       syaratnya masih terpenuhi; kalau tidak, logika semestinya. 0 = mati. -->
+  <arg name="auto_demo_prekick_nudge_sec" default="0.3"/>
+  <arg name="auto_demo_post_action_search_sec" default="1.5"/>
+  <arg name="auto_demo_lost_search_sec" default="3.0"/>
+  <!-- Bola hilang selama ini saat badan bergerak = BALL_LOST_RECOVERY.
+       30 Okt 2026: 1,0 -> 2,0. Dengan 1,0 s mendekat terputus 4 dari 6 kali
+       (sesi 29 Okt), robot berhenti + INIT sebelum sempat berbelok. -->
+  <arg name="auto_demo_ball_lost_sec" default="2.0"/>
+  <!-- SERVO 20 = JARAK. servo20 <= batas: masih jauh; > batas: sudah dekat. -->
+  <arg name="auto_demo_tilt_limit_deg" default="200.0"/>
+  <!-- SERVO 19 = HORIZONTAL, persen (0 kiri, 100 kanan). < kiri: tendang kiri;
+       kiri..tengah: KIRI MIN NEW; tengah..kanan: KANAN MIN NEW; > kanan:
+       tendang kanan. -->
+  <arg name="auto_demo_pan_kick_left" default="48.0"/>
+  <arg name="auto_demo_pan_center" default="50.0"/>
+  <arg name="auto_demo_pan_kick_right" default="52.0"/>
+  <!-- Zona LUAR (geser tarik, sekali per percobaan; koreksi operator 17 Sep):
+       < outer_left jalankan KIRI MIN NEW sampai >= outer_left_stop;
+       > outer_right jalankan KANAN MIN NEW sampai <= outer_right_stop;
+       sesudah itu tabel di atas dipakai lagi. Zona tengah: kiri..tengah =
+       KANAN MIN NEW, tengah..kanan = KIRI MIN NEW. -->
+  <arg name="auto_demo_pan_outer_left" default="45.0"/>
+  <arg name="auto_demo_pan_outer_left_stop" default="46.0"/>
+  <arg name="auto_demo_pan_outer_right" default="55.0"/>
+  <arg name="auto_demo_pan_outer_right_stop" default="54.0"/>
+  <!-- SETIR saat mendekat: badan mengikuti arah kepala (servo 19) selama
+       preset mendekat (JALAN BARU) berjalan, rumus pengikut bola klasik tapi lebih agresif:
+       angle_move_amplitude = angle preset + sign x clamp(|pan| x gain, min..max),
+       naik ramp deg/tick, di bawah deadband jalan lurus. gain 0 = mati (lurus saja).
+       Kalau robot berbelok ke arah yang SALAH, balik steer_sign ke -1.
+       30 Okt 2026: gain 0,2 -> 0,5 dan ramp 0,5 -> 1,5. Dengan 0,2 setiap bola di
+       bawah 25 deg cuma dapat 5 deg, dan JALAN BARU sendiri sudah -0,86 deg (ke kanan),
+       jadi belok kiri ~4 deg: bola lepas dari kamera di kiri sebelum robot berbelok. -->
+  <arg name="auto_demo_steer_gain" default="0.5"/>
+  <arg name="auto_demo_steer_min_deg" default="5.0"/>
+  <arg name="auto_demo_steer_max_deg" default="15.0"/>
+  <arg name="auto_demo_steer_ramp_deg" default="1.5"/>
+  <arg name="auto_demo_steer_deadband_deg" default="5.0"/>
+  <arg name="auto_demo_steer_sign" default="1.0"/>
+  <arg name="auto_demo_steer_publish_period_sec" default="0.1"/>
+  <!-- YAW IMU: > +toleransi PUTAR KIRI NEW, < -toleransi PUTAR KANAN NEW,
+       putaran dihentikan saat |galat| <= stop. Sekali per percobaan. -->
+  <arg name="auto_demo_yaw_target_deg" default="0.0"/>
+  <arg name="auto_demo_yaw_tolerance_deg" default="6.0"/>
+  <arg name="auto_demo_yaw_stop_deg" default="4.0"/>
+  <!-- Sisi negatif yaw D60 (19 Sep 2026): putar KANAN mulai di galat < -0,5, berhenti di galat >= 0.
+       Sisi positif tetap: putar KIRI mulai > +6, berhenti <= +4. -->
+  <arg name="auto_demo_yaw_tolerance_neg_deg" default="0.5"/>
+  <arg name="auto_demo_yaw_stop_neg_deg" default="0.0"/>
+  <arg name="auto_demo_yaw_timeout_sec" default="20.0"/>
+  <arg name="auto_demo_approach_timeout_sec" default="30.0"/>
+  <arg name="auto_demo_shift_timeout_sec" default="8.0"/>
+  <arg name="auto_demo_search_timeout_sec" default="60.0"/>
+  <!-- SEARCH ALIGN: bola pertama terlihat saat mencari dengan servo 19 di
+       <= left_max (0-30 %) -> "MENCARI CELAH" dengan angle_move_amplitude
+       dibalik (runtime) sampai > stop_left (40 %); >= right_min (70-100 %) ->
+       "MENCARI CELAH" asli sampai < stop_right (60 %). Di antaranya = logika
+       D60 lama. Kepala tetap search/track selama correction. -->
+  <arg name="auto_demo_search_align_left_max" default="30.0"/>
+  <arg name="auto_demo_search_align_right_min" default="70.0"/>
+  <arg name="auto_demo_search_align_stop_left" default="40.0"/>
+  <arg name="auto_demo_search_align_stop_right" default="60.0"/>
+  <!-- INIT KEPALA sebelum halaman action (tendang/bangun): pelacak di-"stop"
+       -> head_tracking_node memarkir kepala (park_pan_deg / park_tilt_servo_deg
+       di head_tracking.yaml), lalu ditunggu sampai posisi nyata dekat pose itu
+       (toleransi) atau batas waktu, baru sendi ke action_module. -->
+  <arg name="auto_demo_head_park_wait_sec" default="1.5"/>
+  <arg name="auto_demo_head_park_tol_deg" default="3.0"/>
+  <arg name="auto_demo_head_park_pan_deg" default="0.0"/>
+  <arg name="auto_demo_head_park_tilt_servo_deg" default="200.0"/>
+  <!-- Servo 20 saat D60 DIMATIKAN (kepala mendongak). -->
+  <arg name="auto_demo_stop_head_tilt_servo_deg" default="135.0"/>
+  <!-- Halaman action editor, timing apa adanya dari ALPHONSE.bin. -->
+  <arg name="auto_demo_page_kick_left" default="104.0"/>
+  <arg name="auto_demo_page_kick_right" default="105.0"/>
+  <arg name="auto_demo_page_getup_front" default="85.0"/>
+  <arg name="auto_demo_page_getup_back" default="86.0"/>
+  <!-- Umur maksimum pembacaan yaw IMU yang masih dipakai tahap putar, detik. -->
+  <arg name="auto_demo_yaw_max_age_sec" default="1.0"/>
+
+  <node pkg="op3_demo" exec="op_striker_node" output="screen"
+        launch-prefix="$(var aux_launch_prefix)">
+    <param from="$(find-pkg-share op3_demo)/config/striker_params.yaml"/>
+    <param name="auto_demo_preset_init" value="$(var auto_demo_preset_init)" type="str"/>
+    <param name="auto_demo_preset_search" value="$(var auto_demo_preset_search)" type="str"/>
+    <param name="auto_demo_preset_approach" value="$(var auto_demo_preset_approach)" type="str"/>
+    <param name="auto_demo_preset_approach_file" value="$(var auto_demo_preset_approach_file)"/>
+    <param name="auto_demo_preset_turn_left" value="$(var auto_demo_preset_turn_left)" type="str"/>
+    <param name="auto_demo_preset_turn_right" value="$(var auto_demo_preset_turn_right)" type="str"/>
+    <param name="auto_demo_preset_shift_left" value="$(var auto_demo_preset_shift_left)" type="str"/>
+    <param name="auto_demo_preset_shift_right" value="$(var auto_demo_preset_shift_right)" type="str"/>
+    <param name="auto_demo_transition_sec" value="$(var auto_demo_transition_sec)" type="float"/>
+    <param name="auto_demo_initial_search_sec" value="$(var auto_demo_initial_search_sec)" type="float"/>
+    <param name="auto_demo_start_search_sec" value="$(var auto_demo_start_search_sec)" type="float"/>
+    <param name="auto_demo_start_forward_sec" value="$(var auto_demo_start_forward_sec)" type="float"/>
+    <param name="auto_demo_search_to_walk_delay_sec" value="$(var auto_demo_search_to_walk_delay_sec)" type="float"/>
+    <param name="auto_demo_prekick_nudge_sec" value="$(var auto_demo_prekick_nudge_sec)" type="float"/>
+    <param name="auto_demo_post_action_search_sec" value="$(var auto_demo_post_action_search_sec)" type="float"/>
+    <param name="auto_demo_lost_search_sec" value="$(var auto_demo_lost_search_sec)" type="float"/>
+    <param name="auto_demo_ball_lost_sec" value="$(var auto_demo_ball_lost_sec)" type="float"/>
+    <param name="auto_demo_tilt_limit_deg" value="$(var auto_demo_tilt_limit_deg)" type="float"/>
+    <param name="auto_demo_pan_kick_left" value="$(var auto_demo_pan_kick_left)" type="float"/>
+    <param name="auto_demo_pan_center" value="$(var auto_demo_pan_center)" type="float"/>
+    <param name="auto_demo_pan_kick_right" value="$(var auto_demo_pan_kick_right)" type="float"/>
+    <param name="auto_demo_pan_outer_left" value="$(var auto_demo_pan_outer_left)" type="float"/>
+    <param name="auto_demo_pan_outer_left_stop" value="$(var auto_demo_pan_outer_left_stop)" type="float"/>
+    <param name="auto_demo_pan_outer_right" value="$(var auto_demo_pan_outer_right)" type="float"/>
+    <param name="auto_demo_pan_outer_right_stop" value="$(var auto_demo_pan_outer_right_stop)" type="float"/>
+    <param name="auto_demo_steer_gain" value="$(var auto_demo_steer_gain)" type="float"/>
+    <param name="auto_demo_steer_min_deg" value="$(var auto_demo_steer_min_deg)" type="float"/>
+    <param name="auto_demo_steer_max_deg" value="$(var auto_demo_steer_max_deg)" type="float"/>
+    <param name="auto_demo_steer_ramp_deg" value="$(var auto_demo_steer_ramp_deg)" type="float"/>
+    <param name="auto_demo_steer_deadband_deg" value="$(var auto_demo_steer_deadband_deg)" type="float"/>
+    <param name="auto_demo_steer_sign" value="$(var auto_demo_steer_sign)" type="float"/>
+    <param name="auto_demo_steer_publish_period_sec" value="$(var auto_demo_steer_publish_period_sec)" type="float"/>
+    <param name="auto_demo_yaw_target_deg" value="$(var auto_demo_yaw_target_deg)" type="float"/>
+    <param name="auto_demo_yaw_tolerance_deg" value="$(var auto_demo_yaw_tolerance_deg)" type="float"/>
+    <param name="auto_demo_yaw_stop_deg" value="$(var auto_demo_yaw_stop_deg)" type="float"/>
+    <param name="auto_demo_yaw_tolerance_neg_deg" value="$(var auto_demo_yaw_tolerance_neg_deg)" type="float"/>
+    <param name="auto_demo_yaw_stop_neg_deg" value="$(var auto_demo_yaw_stop_neg_deg)" type="float"/>
+    <param name="auto_demo_yaw_timeout_sec" value="$(var auto_demo_yaw_timeout_sec)" type="float"/>
+    <param name="auto_demo_approach_timeout_sec" value="$(var auto_demo_approach_timeout_sec)" type="float"/>
+    <param name="auto_demo_shift_timeout_sec" value="$(var auto_demo_shift_timeout_sec)" type="float"/>
+    <param name="auto_demo_search_timeout_sec" value="$(var auto_demo_search_timeout_sec)" type="float"/>
+    <param name="auto_demo_search_align_left_max" value="$(var auto_demo_search_align_left_max)" type="float"/>
+    <param name="auto_demo_search_align_right_min" value="$(var auto_demo_search_align_right_min)" type="float"/>
+    <param name="auto_demo_search_align_stop_left" value="$(var auto_demo_search_align_stop_left)" type="float"/>
+    <param name="auto_demo_search_align_stop_right" value="$(var auto_demo_search_align_stop_right)" type="float"/>
+    <param name="auto_demo_head_park_wait_sec" value="$(var auto_demo_head_park_wait_sec)" type="float"/>
+    <param name="auto_demo_head_park_tol_deg" value="$(var auto_demo_head_park_tol_deg)" type="float"/>
+    <param name="auto_demo_head_park_pan_deg" value="$(var auto_demo_head_park_pan_deg)" type="float"/>
+    <param name="auto_demo_head_park_tilt_servo_deg" value="$(var auto_demo_head_park_tilt_servo_deg)" type="float"/>
+    <param name="auto_demo_stop_head_tilt_servo_deg" value="$(var auto_demo_stop_head_tilt_servo_deg)" type="float"/>
+    <param name="auto_demo_page_kick_left" value="$(var auto_demo_page_kick_left)" type="float"/>
+    <param name="auto_demo_page_kick_right" value="$(var auto_demo_page_kick_right)" type="float"/>
+    <param name="auto_demo_page_getup_front" value="$(var auto_demo_page_getup_front)" type="float"/>
+    <param name="auto_demo_page_getup_back" value="$(var auto_demo_page_getup_back)" type="float"/>
+    <param name="auto_demo_yaw_max_age_sec" value="$(var auto_demo_yaw_max_age_sec)" type="float"/>
+  </node>
+</launch>

@@ -1,0 +1,73 @@
+# =============================================================================
+#  demo_striker (KSTI 2026) -- parameter striker_* untuk op_striker_node
+# =============================================================================
+# Terjemahan ksti2026_STRIKER_adaptasi_minimal-v2/config/striker_adaptation_params.yaml
+# ke KONVENSI ROBOT (panduan yang menyesuaikan robot):
+#   * posisi bola = servo 19 persen (0 kiri .. 100 kanan) dan servo 20 (> 200 dekat),
+#     bukan piksel 640x480;
+#   * kelas = NAMA di bobot aktif robot_torso (ball / goalpost / robot), bukan id;
+#   * error orbit = galat YAW derajat (orbit D60), bukan piksel;
+#   * yaw = integrasi gyro z; magnetometer TIDAK dipakai (enable_magnetometer: false).
+# Parameter auto_demo_* (preset, page, ambang servo 19/20, toleransi yaw) tetap
+# milik D60 dan diatur di demo_striker.launch.xml.
+/**:
+  ros__parameters:
+    # ---- urutan bola -------------------------------------------------------
+    # 0 = B (tengah, 200 cm) -> 1 = A (kanan, 170 cm) -> 2 = C (kiri, 250 cm) -> 3 = D.
+    # Ganti untuk mulai dari bola lain (mis. sesudah reset di tengah pertandingan).
+    striker_start_index: 0
+
+    # ---- Titik 1: pengarah search ----------------------------------------------
+    # Arah putar MENCARI CELAH per bola: -1 kanan, +1 kiri, 0 = ikut tanda yaw
+    # (aturan bola B di panduan 01: yaw > 0 -> kanan, selain itu kiri).
+    # Panduan yaml menulis [-1, -1, 1, 1]; kode panduan 01 memakai yaw untuk B.
+    striker_search_turn_direction_per_step: [0.0, -1.0, 1.0, 1.0]
+    # MENCARI CELAH asli = angle_move_amplitude -0,2 = putar KANAN (arah SearchAlign
+    # D60). Kalau di lapangan ternyata terbalik, set false.
+    striker_search_original_is_right: true
+    # sector_bias_x_ratio_per_step [0.50, 0.70, 0.30, 0.25] -> persen servo 19.
+    striker_sector_pct_per_step: [50.0, 70.0, 30.0, 25.0]
+    # Bola yang dikunci detektor DITOLAK kalau |servo 19 - sektor| melebihi ini
+    # (hanya sebelum approach selesai). 100 = gerbang sektor mati.
+    striker_sector_gate_pct: 40.0
+    # post_kick_ignore_front_ball_sec. Dihitung dari saat kepala menyala lagi
+    # sesudah INIT pasca-tendang. "Jauh" = servo 20 <= auto_demo_tilt_limit_deg.
+    striker_post_kick_ignore_sec: 1.5
+    striker_post_kick_ignore_yaw_deg: 25.0
+    # Status terima/tolak dibuang sesudah bola hilang selama ini (= target_lost_sec
+    # detektor bola: sesudah itu detektor boleh mengunci bola lain).
+    striker_gate_release_sec: 1.5
+
+    # ---- Titik 2: setpoint orbit (keeper_offset_adaptation) ----------------------
+    striker_keeper_min_conf: 0.50          # min_conf_robot
+    striker_goalpost_min_conf: 0.45        # min_conf_goalpost
+    striker_ema_alpha: 0.45                # ema_smoothing_alpha
+    striker_keeper_width_offset_multiplier: 1.35
+    striker_min_offset_frame_ratio: 0.08
+    striker_max_offset_frame_ratio: 0.22
+    # Sisi celah saat gawang tidak terlihat: -1 kiri kiper, +1 kanan, 0 = ikut yaw (B).
+    striker_gap_side_per_step: [0.0, -1.0, 1.0, 1.0]
+    # Cadangan terakhir (tanpa kiper & gawang): target yaw per bola, derajat,
+    # + = KIRI. Tanda DIBALIK dari panduan 02 (0, -22, +18, +35) atas keputusan
+    # operator: dari A (sisi kanan) gawang ada di kiri. WAJIB dicek di lapangan.
+    striker_gyro_target_yaw_per_step: [0.0, 22.0, -18.0, -35.0]
+    # Kamera: lebar 640 (camera_param.yaml), setengah FOV = fov_width_deg /
+    # fov_height_deg di head_tracking.yaml.
+    striker_image_width_px: 640.0
+    striker_half_hfov_deg: 35.2
+    striker_half_vfov_deg: 21.6
+
+    # ---- lirik sebelum orbit (AIM_LOOK) --------------------------------------------
+    striker_aim_look_enable: true
+    striker_aim_look_tilt_servo_deg: 180.0   # servo 20 saat melirik (180 = lurus)
+    striker_aim_look_wait_sec: 1.5           # batas tunggu kepala sampai (absolut >= 1,0 s)
+    striker_aim_look_tol_deg: 3.0
+    striker_aim_collect_sec: 0.6             # detektor kiper/gawang menyala selama ini
+    striker_aim_reacquire_sec: 4.0           # batas pelacak mengunci bola lagi
+
+    # ---- yaw gyro (pengganti magnetometer) ------------------------------------------
+    # +1: angular_velocity.z positif = memutar ke KIRI. Cek: putar robot ke kiri
+    # dengan tangan, log yaw harus naik.
+    striker_gyro_z_sign: 1.0
+    striker_gyro_bias_tau_sec: 2.0
+    striker_gyro_max_dt_sec: 0.1

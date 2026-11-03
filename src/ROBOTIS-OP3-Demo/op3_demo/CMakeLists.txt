@@ -12,6 +12,8 @@ find_package(op3_walking_module_msgs REQUIRED)
 find_package(op3_action_module_msgs REQUIRED)
 find_package(robotis_math REQUIRED)
 find_package(op3_ball_detector_msgs REQUIRED)
+# demo_striker: deteksi kiper/gawang dari yolo_gawang_detector.py (Detection2DArray).
+find_package(vision_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 find_package(Eigen3 REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -87,7 +89,33 @@ ament_target_dependencies(self_test_node
   YAML_CPP
 )
 
-install(TARGETS op_demo_node self_test_node
+# demo_striker (KSTI 2026): program TERPISAH dari op_demo_node. StrikerDemo =
+# salinan AutoDemo (D60) + penyesuaian panduan striker; tidak dipasang ke tombol.
+add_executable(op_striker_node
+  src/striker_node.cpp
+  src/striker/striker_demo.cpp
+  src/striker/striker_strategy.cpp
+  src/auto_demo/studio_walking_versions.cpp
+)
+
+ament_target_dependencies(op_striker_node
+  rclcpp
+  ament_index_cpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  robotis_controller_msgs
+  op3_walking_module_msgs
+  op3_action_module_msgs
+  robotis_math
+  op3_ball_detector_msgs
+  vision_msgs
+  Boost
+  Eigen3
+  YAML_CPP
+)
+
+install(TARGETS op_demo_node self_test_node op_striker_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -123,6 +151,12 @@ if(BUILD_TESTING)
   ament_target_dependencies(walking_ready_reference_test YAML_CPP)
   target_compile_definitions(walking_ready_reference_test PRIVATE
     OP3_DEMO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  # demo_striker: logika panduan (pengarah search, gerbang bola, target orbit, yaw gyro).
+  ament_add_gtest(striker_strategy_test
+    test/striker_strategy_test.cpp
+    src/striker/striker_strategy.cpp
+    TIMEOUT 60
   )
 endif()
 
