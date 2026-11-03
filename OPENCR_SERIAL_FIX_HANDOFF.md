@@ -2,7 +2,7 @@
 
 > **Untuk agen Claude Code / chat berikutnya.** Ini SATU dokumen gabungan (menggantikan
 > `TROUBLESHOOT_OPENCR_POWER.md` yang lama). Isinya: diagnosis + fix lengkap untuk error
-> serial OpenCR di robot OP3. Sudah terbukti di robot ini (branch `ALPHONSE_NEW`) dan
+> serial OpenCR di robot OP3. Sudah terbukti di robot ini (branch `ALPHONSE_NEW_V3`) dan
 > kembarannya. Kerjakan berurutan.
 >
 > **Aturan #1 — jangan hardcode.** Semua nilai konkret (nama container, nomor `ttyUSB`,

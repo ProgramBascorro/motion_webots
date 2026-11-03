@@ -17,7 +17,7 @@ di robot.
 ## 1. Langkah cepat
 
 ```bash
-git clone -b ALPHONSE_NEW https://github.com/ProgramBascorro/motion_webots.git
+git clone -b ALPHONSE_NEW_V3 https://github.com/ProgramBascorro/motion_webots.git
 cd motion_webots
 
 # 1. Sesuaikan alamat serial dengan perangkat yang tercolok di robot ini.

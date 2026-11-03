@@ -6,7 +6,7 @@ Semua yang di bawah ini boleh disalin mentah ke robot lain.
 Nilai `x/y/z_offset` dan kawan-kawannya **wajib diturunkan ulang per robot** —
 itu urusan dokumen lain, namanya berbeda tiap branch:
 
-| | `ALPHONSE_NEW` | `CHRONUS_NEW` |
+| | `ALPHONSE_NEW_V3` | `CHRONUS_NEW` |
 |---|---|---|
 | Penurunan FK + teori | `ROBOT1_WALKING_HANDOFF.md` | `CLAUDE_ROBOT_HANDOFF.md` §1, §10 |
 | Skrip FK | `scripts/walking_ready_fk.py` | `scripts/init_baru_fk.py` (isi sama) |
@@ -452,7 +452,7 @@ Salin apa adanya:
 Turunkan ulang per robot — **jangan disalin**:
 
 - [ ] `param.yaml` `x/z_offset`, `pitch_offset`, `hip_pitch_offset`
-      → `scripts/walking_ready_fk.py --write` (sejak 23 Okt 2026 di `ALPHONSE_NEW_V2`
+      → `scripts/walking_ready_fk.py --write` (sejak 23 Okt 2026 di `ALPHONSE_NEW_V3`
       membaca `.bin` langsung, menulis `data/walking_ready_reference.json` untuk
       Studio + D60, dan menggeser versi tersimpan; `init_baru_fk.py` di `CHRONUS_NEW`
       masih versi lama dengan `--yaml <export page 2>`)

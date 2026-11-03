@@ -8,7 +8,7 @@ Bahasanya sengaja sederhana. Kalau ada istilah yang harus dipakai, dijelaskan
 sekali lalu dipakai konsisten.
 
 - **Ditulis:** 27 Agustus 2026
-- **Cabang sumber:** `ALPHONSE_NEW` (commit terakhir `eb0a45a`)
+- **Cabang sumber:** `ALPHONSE_NEW_V3` (bernama `ALPHONSE_NEW` saat panduan ini ditulis; commit terakhir waktu itu `eb0a45a`)
 - **Cabang tujuan:** `CHRONUS_NEW`
 - **Repo:** `https://github.com/ProgramBascorro/motion_webots.git`
 
@@ -16,7 +16,7 @@ sekali lalu dipakai konsisten.
 
 ## 0. Baca ini dulu — tiga aturan yang tidak boleh dilanggar
 
-### Aturan 1: JANGAN `git merge ALPHONSE_NEW`
+### Aturan 1: JANGAN `git merge ALPHONSE_NEW_V3`
 
 Per hari ini kedua cabang berbeda di **99 berkas, 8410 baris tambah, 2726 baris
 hapus**. CHRONUS punya kerjaannya sendiri (simulasi Webots, bridge domain,
@@ -150,10 +150,10 @@ Hasil di CHRONUS saat dokumen ini ditulis: **semuanya "BELUM"**, kecuali
 ### Melihat isi perubahan aslinya
 
 ```bash
-git fetch origin ALPHONSE_NEW
-git log --oneline origin/CHRONUS_NEW..origin/ALPHONSE_NEW     # daftar commit
-git show <hash>                                               # isi satu commit
-git diff origin/CHRONUS_NEW..origin/ALPHONSE_NEW -- <berkas>  # beda satu berkas
+git fetch origin ALPHONSE_NEW_V3
+git log --oneline origin/CHRONUS_NEW..origin/ALPHONSE_NEW_V3     # daftar commit
+git show <hash>                                                  # isi satu commit
+git diff origin/CHRONUS_NEW..origin/ALPHONSE_NEW_V3 -- <berkas>  # beda satu berkas
 ```
 
 ---
