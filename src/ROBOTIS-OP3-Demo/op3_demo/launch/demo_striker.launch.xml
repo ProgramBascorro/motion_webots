@@ -262,6 +262,13 @@
   <!-- Umur maksimum pembacaan yaw IMU yang masih dipakai tahap putar, detik. -->
   <arg name="auto_demo_yaw_max_age_sec" default="1.0"/>
 
+  <!-- UJI DIAM (robot duduk/menggantung): with_striker_node:=false menjalankan
+       semuanya KECUALI op_striker_node. Manager di sini boot_init_page -1, jadi
+       tanpa node ini TIDAK ADA page 2 dan tidak ada sendi yang digerakkan: servo
+       hanya menahan pose sekarang. Dipakai scripts/striker_cek_diam.py
+       (gyro / deteksi / gerbang). Bawaan true = demo striker biasa. -->
+  <arg name="with_striker_node" default="true"/>
+  <group if="$(var with_striker_node)">
   <node pkg="op3_demo" exec="op_striker_node" output="screen"
         launch-prefix="$(var aux_launch_prefix)">
     <param from="$(find-pkg-share op3_demo)/config/striker_params.yaml"/>
@@ -321,4 +328,5 @@
     <param name="auto_demo_page_getup_back" value="$(var auto_demo_page_getup_back)" type="float"/>
     <param name="auto_demo_yaw_max_age_sec" value="$(var auto_demo_yaw_max_age_sec)" type="float"/>
   </node>
+  </group>
 </launch>
