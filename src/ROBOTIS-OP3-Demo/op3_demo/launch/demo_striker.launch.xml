@@ -90,7 +90,9 @@
        enable_at_start false: tidak ada inferensi tambahan selama bola dikejar;
        op_striker_node menyalakannya lewat <namespace>/enable hanya saat AIM_LOOK.
        Inti CPU dan batas utas sama dengan detektor YOLO (0-2, OMP 2). -->
-  <arg name="striker_detector_model" default="model/robot_torso_288x480_int8_openvino_model"/>
+  <!-- 5 Nov 2026: robot_torso_v2 (sama dengan detektor bola, lihat
+       yolo_ball_detector_openvino_params.yaml). v1: model/robot_torso_288x480_int8_openvino_model -->
+  <arg name="striker_detector_model" default="model/robot_torso_v2_288x480_int8_openvino_model"/>
   <arg name="striker_image_topic" default="/usb_cam_node/image_raw/compressed"/>
   <node pkg="op3_ball_detector" exec="yolo_gawang_detector.py" namespace="kiper_detector_node"
         name="yolo_kiper_detector" output="screen" launch-prefix="taskset -c 0-2">

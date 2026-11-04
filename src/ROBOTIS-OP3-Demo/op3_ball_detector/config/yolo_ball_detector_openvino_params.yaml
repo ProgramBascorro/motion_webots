@@ -140,7 +140,25 @@
     #   active_classes: []
     #   display_class_names: ["gawang=Gawang"]
     #   max_detections: 10
-    model_path: "model/robot_torso_288x480_int8_openvino_model"
+    # DIGANTI 2026-11-05 ke "robot_torso_v2"
+    # (~/Downloads/robot_torso_v2-20261104T170046Z-1-001.zip, YOLO11n, 100 epoch,
+    # kelas SAMA PERSIS dengan v1 -> target/active/display_class_names tidak berubah).
+    # Rantai sama dengan v1: ekspor 288x480 di container op3 (YOLO_AUTOINSTALL=false),
+    # INT8 di container --rm (--ignore-head, kalibrasi 660 frame: calib_frames +
+    # calib_frames_demo_2026-09-18 + calib_frames_gawang_rf_2026-10-30).
+    # Gerbang scripts/compare_ball_models.py, 288x480, conf 0,30, v1 INT8 -> v2 INT8:
+    #   bola  tes_infer.mp4 60 frame  : 52/60 -> 60/60, conf avg 0,724 -> 0,833, MIN 0,383 -> 0,616
+    #   tiang gawang RF 260 frame     : 212 -> 222,     conf avg 0,652 -> 0,736 (MIN 0,302 / 0,307,
+    #                                   frame terlemah memang mepet 0,30 di KEDUA bobot)
+    #   tiang ruangan ALPHONSE 200    : 200 -> 200,     conf avg 0,708 -> 0,769, MIN 0,677 -> 0,753
+    #   kecepatan                     : 19,5 -> 19,8 ms (arsitektur sama)
+    #   INT8 vs FP32 v2               : bola 60 = 60 (1,67x lebih cepat), tiang 230 -> 222
+    # Kelas robot belum bisa digerbang offline (tidak ada frame robot) -> diuji hidup.
+    #
+    # KEMBALI ke robot_torso v1 (direktori ditinggal utuh), ganti 1 baris di sini
+    # + default striker_detector_model di op3_demo/launch/demo_striker.launch.xml:
+    #   model_path: "model/robot_torso_288x480_int8_openvino_model"
+    model_path: "model/robot_torso_v2_288x480_int8_openvino_model"
 
     # OpenVINO carries no task in the way ultralytics auto-detects reliably;
     # set it explicitly. This is a detection model.
