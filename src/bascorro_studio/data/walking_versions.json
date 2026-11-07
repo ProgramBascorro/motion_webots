@@ -1,13 +1,50 @@
 {
   "format": "bascorro-studio/walking-versions",
   "formatVersion": 1,
-  "revision": 147,
-  "savedAt": "2026-11-01T16:29:34.565Z",
-  "activeVersionId": "6c9822d8-0067-44ce-8839-72c8ee483051",
+  "revision": 176,
+  "savedAt": "2026-11-07T11:26:40.702Z",
+  "activeVersionId": "5e8a5dbe-dbcf-44f4-a244-6d3e644504be",
   "ui": {
     "relativeDisplay": false
   },
   "versions": [
+    {
+      "id": "39b77c6d-ffdf-45aa-912d-47f9a381d63d",
+      "name": "Putar Kanan RL-B",
+      "createdAt": 1793802098553,
+      "updatedAt": 1793802098553,
+      "params": {
+        "init_x_offset": 0.0163,
+        "init_y_offset": 0.03,
+        "init_z_offset": 0.042,
+        "init_roll_offset": 0,
+        "init_pitch_offset": 0.005,
+        "init_yaw_offset": 0,
+        "period_time": 0.565,
+        "dsp_ratio": 0.42,
+        "step_fb_ratio": 0.25,
+        "soft_start_time": 0.005,
+        "x_move_amplitude": 0.001,
+        "y_move_amplitude": 0.023,
+        "z_move_amplitude": 0.037,
+        "angle_move_amplitude": 0.135,
+        "angle_move_amplitude_turn_in": -0.05,
+        "move_aim_on": false,
+        "balance_enable": false,
+        "balance_hip_roll_gain": 0.35,
+        "balance_knee_gain": 0.4,
+        "balance_ankle_roll_gain": 0.7,
+        "balance_ankle_pitch_gain": 0.9,
+        "y_swap_amplitude": 0,
+        "z_swap_amplitude": 0,
+        "arm_swing_gain": 0,
+        "pelvis_offset": 0.05,
+        "hip_pitch_offset": 0.14,
+        "p_gain": 16,
+        "i_gain": 0,
+        "d_gain": 0
+      }
+    },
     {
       "id": "6c9822d8-0067-44ce-8839-72c8ee483051",
       "name": "Putar Kanan New RL",
@@ -197,10 +234,10 @@
       "id": "471aacf7-fd22-48aa-95fb-00a3001dafbf",
       "name": "JALAN MENUJU MEKKAH",
       "createdAt": 1788784920036,
-      "updatedAt": 1789753052331,
+      "updatedAt": 1793996536134,
       "params": {
         "init_x_offset": 0.0163,
-        "init_y_offset": 0,
+        "init_y_offset": 0.03,
         "init_z_offset": 0.042,
         "init_roll_offset": 0,
         "init_pitch_offset": 0.0138,
@@ -530,7 +567,7 @@
       "id": "3b19ce2b-82e6-436a-9159-3f6d2f8b9d1e",
       "name": "Putar Kiri New",
       "createdAt": 1788360280434,
-      "updatedAt": 1793546978027,
+      "updatedAt": 1793803788186,
       "params": {
         "init_x_offset": 0.0163,
         "init_y_offset": 0.03,
@@ -538,7 +575,7 @@
         "init_roll_offset": 0,
         "init_pitch_offset": 0.0138,
         "init_yaw_offset": 0,
-        "period_time": 0.53,
+        "period_time": 0.49,
         "dsp_ratio": 0.4,
         "step_fb_ratio": 0.25,
         "soft_start_time": 0.005,
@@ -712,5 +749,5 @@
       }
     }
   ],
-  "poseReferenceId": "page2-ef907cce549f"
+  "poseReferenceId": "page2-a10204f178b4"
 }
