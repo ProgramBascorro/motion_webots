@@ -1,26 +1,26 @@
 {
   "format": "bascorro-studio/walking-ready-reference",
   "formatVersion": 1,
-  "id": "page2-140aca222c75",
-  "generatedAt": "2026-11-07T11:29:21.969Z",
+  "id": "page2-a7b2fb8827de",
+  "generatedAt": "2026-11-07T18:14:36.297Z",
   "generator": "scripts/walking_ready_fk.py",
   "source": {
     "actionFile": "src/ROBOTIS-OP3/op3_action_module/data/ALPHONSE.bin",
     "page": 2,
     "pageName": "WALKING_READY",
     "legRaw": {
-      "r_hip_yaw": 2010,
-      "r_hip_roll": 2124,
-      "r_hip_pitch": 2605,
-      "r_knee": 1234,
-      "r_ank_pitch": 1703,
-      "r_ank_roll": 2027,
-      "l_hip_yaw": 2035,
+      "r_hip_yaw": 2037,
+      "r_hip_roll": 2148,
+      "r_hip_pitch": 2576,
+      "r_knee": 1227,
+      "r_ank_pitch": 1702,
+      "r_ank_roll": 2057,
+      "l_hip_yaw": 2064,
       "l_hip_roll": 1913,
       "l_hip_pitch": 1493,
-      "l_knee": 2854,
+      "l_knee": 2871,
       "l_ank_pitch": 2375,
-      "l_ank_roll": 2027
+      "l_ank_roll": 2036
     }
   },
   "fitted": [
@@ -34,25 +34,25 @@
     "hip_pitch_offset"
   ],
   "offsets": {
-    "init_x_offset": 0.0163,
-    "init_z_offset": 0.042,
+    "init_x_offset": 0.0094,
+    "init_z_offset": 0.0428,
     "init_roll_offset": 0,
-    "init_pitch_offset": 0.0138,
+    "init_pitch_offset": 0.0537,
     "init_yaw_offset": 0,
     "hip_pitch_offset": 0.1396
   },
   "residualDeg": {
-    "r_hip_yaw": 3.34,
-    "r_hip_roll": -6.68,
-    "r_hip_pitch": -0.07,
-    "r_knee": 0.33,
-    "r_ank_pitch": 0.78,
-    "r_ank_roll": 1.85,
-    "l_hip_yaw": 1.14,
+    "r_hip_yaw": 0.97,
+    "r_hip_roll": -8.79,
+    "r_hip_pitch": 1.21,
+    "r_knee": -0.12,
+    "r_ank_pitch": 0.82,
+    "r_ank_roll": -0.79,
+    "l_hip_yaw": -1.41,
     "l_hip_roll": 11.87,
-    "l_hip_pitch": -0.1,
-    "l_knee": 0.38,
-    "l_ank_pitch": 0.8,
-    "l_ank_roll": 1.85
+    "l_hip_pitch": 1.17,
+    "l_knee": -0.06,
+    "l_ank_pitch": 0.85,
+    "l_ank_roll": 1.05
   }
 }

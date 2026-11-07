@@ -12,11 +12,11 @@
       "createdAt": 1789753062104,
       "updatedAt": 1793294319417,
       "params": {
-        "init_x_offset": 0.0163,
+        "init_x_offset": 0.0094,
         "init_y_offset": 0.03,
-        "init_z_offset": 0.042,
+        "init_z_offset": 0.0428,
         "init_roll_offset": 0,
-        "init_pitch_offset": 0.0138,
+        "init_pitch_offset": 0.0537,
         "init_yaw_offset": 0,
         "period_time": 0.65,
         "dsp_ratio": 0.18,
@@ -44,5 +44,5 @@
       }
     }
   ],
-  "poseReferenceId": "page2-140aca222c75"
+  "poseReferenceId": "page2-a7b2fb8827de"
 }

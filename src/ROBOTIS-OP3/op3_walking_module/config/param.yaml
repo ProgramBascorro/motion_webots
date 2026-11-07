@@ -66,11 +66,11 @@
 # dengan berkas ini -- itu yang dilihat operator sebelum menekan Load.
 #
 # NOTE: sending "save" on /robotis/walking/command rewrites this file and drops comments.
-x_offset: 0.0163
+x_offset: 0.0094
 y_offset: 0
-z_offset: 0.042
+z_offset: 0.0428
 roll_offset: 0
-pitch_offset: 0.790681757280536
+pitch_offset: 3.0767833598525205
 yaw_offset: 0
 hip_pitch_offset: 7.9984904662224929
 period_time: 800
