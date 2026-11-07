@@ -1,8 +1,8 @@
 {
   "format": "bascorro-studio/walking-versions",
   "formatVersion": 1,
-  "revision": 176,
-  "savedAt": "2026-11-07T11:26:40.702Z",
+  "revision": 177,
+  "savedAt": "2026-11-07T11:29:22.004Z",
   "activeVersionId": "5e8a5dbe-dbcf-44f4-a244-6d3e644504be",
   "ui": {
     "relativeDisplay": false
@@ -749,5 +749,5 @@
       }
     }
   ],
-  "poseReferenceId": "page2-a10204f178b4"
+  "poseReferenceId": "page2-140aca222c75"
 }
