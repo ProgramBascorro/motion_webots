@@ -8,19 +8,22 @@ sudah di-source), dan alat diagnosa justru harus tetap jalan ketika
 lingkungannya bermasalah. Cukup os.open + termios.
 
     scripts/op3_ping.py                          # scan ID 1-20 + 200 di port OP3.robot
-    scripts/op3_ping.py --port /dev/ttyACM0      # port lain
+    scripts/op3_ping.py --port /dev/ttyOPENCR --ids 200   # sub controller saja
     scripts/op3_ping.py --ids 200                # satu ID saja
     scripts/op3_ping.py --baud 1000000           # baud lain (default 2000000)
 
-Membacanya di robot ini (CHRONUS):
-    - Semua diam, termasuk 200  -> bukan servo mati. Bus DXL-nya yang tidak ada:
+Membacanya di robot ini (CHRONUS), yang jalur servo dan sub controller-nya
+SUDAH DIPISAH (firmware "opencr_op3 edited by Fayyadh Raja Gula"):
+    - /dev/ttyOP3 = servo ID 1-20 saja. ID 200 diam di sini, dan itu BENAR --
+      firmware memindahkan DXL_PORT dari Serial3 ke Serial, jadi sub controller
+      tidak lagi ada di bus TTL. Jangan diperlakukan sebagai kerusakan.
+    - /dev/ttyOPENCR = ID 200 saja. Kalau di sana kosong, IMU dan magnetometer
+      tidak akan muncul di ROS: cek `lsusb | grep 0483` dan `ls -l /dev/ttyOPENCR`.
+    - Semua diam di /dev/ttyOP3 -> bukan servo mati. Bus DXL-nya yang tidak ada:
       cek `lsusb | grep 0403` dan `ls -l /dev/ttyOP3`.
-    - 20 servo + ID 200 menjawab di /dev/ttyOP3 -> susunan normal, board di-flash
-      opencr_op3 standar (ID 200 di DXL_PORT = Serial3, bus TTL yang sama).
     - Sebagian ID diam berurutan dari satu titik ke bawah -> kabel putus di
       antara servo terakhir yang menjawab dan yang pertama diam, bukan 4 servo
       rusak berbarengan.
-    - /dev/ttyACM0 selalu kosong: itu konsol debug OpenCR, bukan bus DXL.
 
 Kolom err menampakkan bit hardware-error yang ter-latch di servo (overload,
 overheating, dsb) -- err != 0 berarti servo menjawab tapi sedang mengeluh.

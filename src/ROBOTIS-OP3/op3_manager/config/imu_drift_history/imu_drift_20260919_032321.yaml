@@ -1,0 +1,8 @@
+# Kalibrasi drift (bias) gyro IMU -- ditulis scripts/calib_imu_drift.py
+# Tanggal: 2026-09-18 23:37:44
+# gyro_z sebelum +0.0000 -> sesudah +0.0004 deg/s; sisa hanyutan +0.10 deg/menit selama 60 dtk
+# Dipakai open_cr_module sebagai bias awal kompensasi hanyutan.
+# Berlaku sesudah op3_manager start ulang. Jangan disunting tangan.
+/**:
+  ros__parameters:
+    gyro_bias_dps: 0.001663

@@ -13,13 +13,29 @@ from typing import Dict, List, Optional, Tuple
 import rclpy
 from rclpy.node import Node
 from robotis_controller_msgs.msg import StatusMsg
-from sensor_msgs.msg import Image, Imu, JointState
-from std_msgs.msg import String
+from sensor_msgs.msg import Image, Imu, JointState, MagneticField
+from std_msgs.msg import Float64MultiArray, String
 from std_srvs.srv import Trigger
+
+
+# Nilai register mag_status pada firmware OpenCR fw 0x03 (dxl_hw_op3.h).
+# Nama dipakai apa adanya di UI supaya operator tahu kenapa yaw belum bergerak.
+MAG_STATUS_LABEL = {
+    0: "no_sensor",
+    1: "settling",
+    2: "ok",
+    3: "calibrating",
+}
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
+
+
+def wrap180(deg: float) -> float:
+    """Rapikan selisih sudut ke -180..180 supaya lompatan 359 -> 1 tidak
+    terbaca sebagai drift 358 derajat."""
+    return (deg + 180.0) % 360.0 - 180.0
 
 
 def quat_to_rpy(x: float, y: float, z: float, w: float) -> Tuple[float, float, float]:
@@ -121,6 +137,7 @@ class StudioAgent(Node):
             "heartbeat_topics",
             [
                 "/robotis/open_cr/imu",
+                "/robotis/open_cr/mag_status",
                 "/robotis/present_joint_states",
                 "/robotis/status",
                 "/vision/yolo/debug",
@@ -134,6 +151,8 @@ class StudioAgent(Node):
             "bag_topics",
             [
                 "/robotis/open_cr/imu",
+                "/robotis/open_cr/mag",
+                "/robotis/open_cr/mag_status",
                 "/robotis/present_joint_states",
                 "/robotis/status",
                 "/vision/yolo/debug",
@@ -152,6 +171,9 @@ class StudioAgent(Node):
         self._last_pitch = None
         self._last_yaw = None
         self._last_imu_time = None
+        self._mag_field: Optional[Dict[str, float]] = None
+        self._mag_status: Optional[Dict[str, float]] = None
+        self._last_mag_time = None
         self._joint_names: List[str] = []
         self._joint_effort: Dict[str, float] = {}
         self._fall_state = "upright"
@@ -179,6 +201,12 @@ class StudioAgent(Node):
         self.events_pub = self.create_publisher(String, "/bascorro_studio/events", 10)
 
         self.create_subscription(Imu, "/robotis/open_cr/imu", self._imu_cb, 10)
+        self.create_subscription(
+            MagneticField, "/robotis/open_cr/mag", self._mag_cb, 10
+        )
+        self.create_subscription(
+            Float64MultiArray, "/robotis/open_cr/mag_status", self._mag_status_cb, 10
+        )
         self.create_subscription(StatusMsg, "/robotis/status", self._status_cb, 10)
         self.create_subscription(
             JointState, "/robotis/present_joint_states", self._joint_cb, 10
@@ -213,6 +241,45 @@ class StudioAgent(Node):
         self._last_pitch = pitch
         self._last_yaw = yaw
         self._check_fall()
+
+    def _mag_cb(self, msg: MagneticField) -> None:
+        self._mark_heartbeat("/robotis/open_cr/mag")
+        # Dikembalikan ke mikrotesla: angka Tesla (orde 1e-5) tidak terbaca di
+        # tabel maupun grafik, sedangkan uT adalah satuan yang dipakai datasheet
+        # AK8963 dan yang dipakai orang saat menilai kewajaran medan magnet.
+        self._mag_field = {
+            "x_ut": msg.magnetic_field.x * 1e6,
+            "y_ut": msg.magnetic_field.y * 1e6,
+            "z_ut": msg.magnetic_field.z * 1e6,
+        }
+        self._mag_field["norm_ut"] = math.sqrt(
+            self._mag_field["x_ut"] ** 2
+            + self._mag_field["y_ut"] ** 2
+            + self._mag_field["z_ut"] ** 2
+        )
+
+    def _mag_status_cb(self, msg: Float64MultiArray) -> None:
+        self._mark_heartbeat("/robotis/open_cr/mag_status")
+        # Urutan dari open_cr_module::publishMagStatus:
+        #   status, heading_deg, yaw_mag_deg, yaw_gyro_deg, mag_x, mag_y, mag_z
+        if len(msg.data) < 7:
+            return
+        self._last_mag_time = time.monotonic()
+        code = int(msg.data[0])
+        self._mag_status = {
+            "code": code,
+            "state": MAG_STATUS_LABEL.get(code, "unknown"),
+            "heading_deg": msg.data[1],
+            "yaw_mag_deg": msg.data[2],
+            "yaw_gyro_deg": msg.data[3],
+            # Selisih yaw kompas terhadap yaw gyro. Inilah angka yang dipakai
+            # saat tuning: gyro melayang, kompas tidak, jadi selisih yang terus
+            # membesar adalah ukuran drift gyro selama sesi berjalan.
+            "yaw_drift_deg": wrap180(msg.data[2] - msg.data[3]),
+            "raw_x": msg.data[4],
+            "raw_y": msg.data[5],
+            "raw_z": msg.data[6],
+        }
 
     def _status_cb(self, msg: StatusMsg) -> None:
         self._mark_heartbeat("/robotis/status")
@@ -471,10 +538,24 @@ class StudioAgent(Node):
                 else None,
             }
 
+        mag = None
+        if self._mag_status is not None:
+            mag = dict(self._mag_status)
+            if self._mag_field is not None:
+                mag.update(self._mag_field)
+            # "stale" dipisahkan dari "no_sensor": yang pertama berarti modul ROS
+            # berhenti mengirim, yang kedua berarti modul mengirim tapi papannya
+            # tidak punya magnetometer. Keduanya perlu tindakan yang berbeda.
+            mag["stale"] = (
+                self._last_mag_time is None
+                or (time.monotonic() - self._last_mag_time) > 1.0
+            )
+
         payload = {
             "timestamp": time.time(),
             "battery": battery,
             "imu": imu,
+            "mag": mag,
             "fall": {
                 "state": self._fall_state,
                 "last_reason": self._last_fall_reason,

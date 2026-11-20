@@ -1,0 +1,36 @@
+# Kalibrasi batas geser kiper D58 -- dibuat scripts/calib_batas_geser.py
+# JANGAN diedit tangan; ulangi `rekam` lalu `hitung`.
+# Batas demo: waktu efektif (integral skala soft start) tengah->tepi + ekor per segmen.
+valid: true
+tanggal: "2026-11-12T00:56:49"
+setengah_lebar_area_m: 0.900
+kanan:
+  tepi_efektif_sec: 13.7706
+  ekor_sec: 0.1760
+  langkah: 46.29
+  asal: semua   # semua = kuadrat terkecil semua rekaman berjarak; tengah/ujung = rekaman terbaru
+  jarak_tepi_m: 0.9000   # null = pakai setengah_lebar_area_m
+  kecepatan_cm_per_dtk: 6.536
+  toleransi_saran_m: 0.173   # kaki 0.0875 + ayun 0.010 + galat 2sigma (v & hanyut 30 segmen)
+  cocok: {rekaman: 4, galat_baku_kecepatan_cm_per_dtk: 0.182, galat_baku_ekor_cm: 0.516, rms_cm: 3.47, loo_positif_maks_cm: 6.72}
+  catatan: "kuadrat terkecil 4 rekaman berjarak: RMS 3.5 cm, LOO +6.7 cm"
+  y_move: -0.0200
+  period_sec: 0.5950
+  soft_start_sec: 0.500
+  terus: {asal: ujung, efektif_sec: 26.8483, mentah_sec: 27.098, segmen: 1, jarak_m: 1.7550, waktu: "2026-11-11T17:40:48"}
+  putus: {asal: ujung, efektif_sec: 25.6654, mentah_sec: 28.915, segmen: 13, jarak_m: 1.8000, waktu: "2026-11-11T17:42:56"}
+kiri:
+  tepi_efektif_sec: 9.2126
+  ekor_sec: -0.0385
+  langkah: 30.71
+  asal: semua   # semua = kuadrat terkecil semua rekaman berjarak; tengah/ujung = rekaman terbaru
+  jarak_tepi_m: 0.9000   # null = pakai setengah_lebar_area_m
+  kecepatan_cm_per_dtk: 9.769
+  toleransi_saran_m: 0.157   # kaki 0.0875 + ayun 0.010 + galat 2sigma (v & hanyut 30 segmen)
+  cocok: {rekaman: 4, galat_baku_kecepatan_cm_per_dtk: 0.177, galat_baku_ekor_cm: 0.455, rms_cm: 2.21, loo_positif_maks_cm: 4.76}
+  catatan: "kuadrat terkecil 4 rekaman berjarak: RMS 2.2 cm, LOO +4.8 cm"
+  y_move: 0.0290
+  period_sec: 0.6000
+  soft_start_sec: 0.500
+  terus: {asal: ujung, efektif_sec: 18.1860, mentah_sec: 18.436, segmen: 1, jarak_m: 1.7700, waktu: "2026-11-11T17:48:09"}
+  putus: {asal: ujung, efektif_sec: 18.8074, mentah_sec: 21.307, segmen: 10, jarak_m: 1.7800, waktu: "2026-11-11T17:50:04"}

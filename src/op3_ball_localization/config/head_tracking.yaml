@@ -26,11 +26,35 @@ head_tracking_node:
     # Up-facing angles are intentionally excluded — the ball sits on the floor.
     scan_enabled: true
     scan_period_sec: 1.8           # seconds per position (move + focus dwell) — a bit faster
-    scan_pan_rad: 0.7              # pan amplitude at extremes (~40°)
+    # 90 derajat kiri dan kanan dari tengah (tengah = 0). Pasangan posisi
+    # "forward" memakai +-p penuh, pasangan "down" memakai +-0,7p.
+    # CATATAN: head_control_module memotong head_pan di +-85 derajat, jadi
+    # yang benar-benar tercapai adalah +-85, simetris kiri-kanan.
+    scan_pan_rad: 1.5708           # 90 derajat
     # NOTE on this robot the head_tilt sign for the absolute scan command is
     # POSITIVE = look DOWN (negative pointed the head UP). Keep these positive.
-    scan_tilt_forward_rad: 0.25    # forward tilt (~+14°, looking a little down)
-    scan_tilt_down_rad: 0.55       # down tilt (~+31°, looking toward floor near the feet)
+    # Dua ketinggian searching, dari sudut SERVO yang diukur operator (skala
+    # 0-360 derajat = raw x 360/4096). Dikonversi seperti robotis_framework
+    # untuk XM430-W350 (raw 2048 = 0 rad, raw 4095 = +pi; offset head_tilt = 0):
+    #   sendi = (raw - 2048) * pi / 2047
+    #   servo 210 derajat = raw 2389 -> +30,0 derajat sendi (0,5238 rad)  NORMAL
+    #   servo 230 derajat = raw 2617 -> +50,0 derajat sendi (0,8733 rad)  MENUNDUK
+    # Positif = menunduk di robot ini.
+    scan_tilt_forward_rad: 0.5238  # servo 210 derajat
+    scan_tilt_down_rad: 1.0128     # servo 238 derajat
+    # Salinan batas keras head_tilt di head_control_module, dipakai untuk cek
+    # "kepala sudah sampai". Ikut modulnya: kini +58,03 derajat = servo 238,
+    # dinaikkan supaya sapuan bawah 238 tidak dipotong.
+    head_tilt_max_rad: 1.0128      # +58,03 derajat (servo 238)
+
+    # OBSERVING MODE KIPER (sumber "gk" = D58 mode kiper, operator 2026-11-08).
+    # Tilt dari kalibrasi jarak (scripts/calib_jarak_kamera.py): +12 deg sendi =
+    # servo 20 ~192 memuat bola ~0,45-4,2 m sekaligus. Scan tengah -> kiri ->
+    # tengah -> kanan, selalu mulai dari tengah; arah terakhir ditahan dulu.
+    gk_scan_tilt_rad: 0.2094       # +12 derajat (servo 192)
+    gk_scan_pan_rad: 0.6109        # 35 derajat (kamera sendiri +-33 deg)
+    gk_lost_timeout: 1.5
+    gk_scan_period_sec: 1.2
 
     # Camera field of view copied from the original tracker
     fov_width_deg: 35.2

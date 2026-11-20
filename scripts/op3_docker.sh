@@ -26,15 +26,19 @@
 #     dan studio yang sedang jalan di dalamnya. Di sini container dijalankan
 #     detached dengan `sleep infinity`, jadi umurnya tidak terikat satu jendela.
 #
-# Susunan serial robot ini (CHRONUS) -- beda dari ALPHONSE, jangan disamakan:
-#   /dev/ttyOP3  symlink udev ke U2D2 (FTDI 0403:6014). Satu port ini membawa
-#                servo ID 1-20 DAN sub controller ID 200, karena board di-flash
-#                opencr_op3 standar yang melayani ID 200 di DXL_PORT = Serial3.
-#   /dev/ttyACM0 micro-USB OpenCR. Konsol debug/flash saja; tidak pernah membalas
-#                paket DXL. Kalau ttyOP3 sampai menunjuk ke sini, semua 20 joint
-#                akan "does NOT respond!!".
-#   Symlink itu dibuat oleh /etc/udev/rules.d/99-op3-opencr.rules di HOST, bukan
-#   oleh kernel -- makanya doctor ikut memeriksa rule-nya.
+# Susunan serial robot ini (CHRONUS), DUA jalur terpisah sejak board memakai
+# firmware "opencr_op3 edited by Fayyadh Raja Gula":
+#   /dev/ttyOP3    symlink udev ke U2D2 (FTDI 0403:6014). Membawa servo ID 1-20
+#                  saja. ID 200 TIDAK ada lagi di sini.
+#   /dev/ttyOPENCR symlink udev ke micro-USB OpenCR (0483:5740). Membawa sub
+#                  controller ID 200 saja -- IMU, magnetometer, tombol, buzzer.
+#                  Firmware memindahkan DXL_PORT dari Serial3 ke Serial, jadi
+#                  port ini sekarang bus DXL sungguhan, bukan konsol debug.
+#   Kalau ttyOP3 sampai menunjuk ke perangkat CDC, semua 20 joint akan
+#   "does NOT respond!!" -- dan sebaliknya, kalau ttyOPENCR menunjuk ke U2D2,
+#   IMU yang diam.
+#   Kedua symlink dibuat oleh /etc/udev/rules.d/99-op3-opencr.rules di HOST,
+#   bukan oleh kernel -- makanya doctor ikut memeriksa rule-nya.
 #
 # Pemakaian:
 #   scripts/op3_docker.sh up       # nyalakan container (idempoten)
@@ -70,9 +74,9 @@ container_exists() {
   [ -n "$($DOCKER ps -aq --filter "name=^${NAME}$" 2>/dev/null)" ]
 }
 
-# Port yang benar-benar diminta OP3.robot. Komentar dibuang dulu: file itu
-# menyebut /dev/ttyACM0 di dalam komentar justru untuk menerangkan bahwa port itu
-# TIDAK dipakai, dan grep polos akan salah menganggapnya sebagai port wajib.
+# Port yang benar-benar diminta OP3.robot. Komentar dibuang dulu: bagian
+# [ port info ] di berkas itu menerangkan pembagian jalur dengan menyebut nama
+# port di dalam komentar, dan grep polos akan salah menganggapnya port wajib.
 robot_file_ports() {
   [ -f "$ROBOT_FILE" ] || return 0
   sed 's/#.*//' "$ROBOT_FILE" | grep -oE '/dev/[^ |]+' | sort -u
@@ -88,14 +92,15 @@ cmd_doctor() {
     bad "  'does NOT respond!!'. Itu bukan servo rusak."
   fi
   if lsusb 2>/dev/null | grep -qi '0483:5740'; then
-    ok "OpenCR micro-USB terpasang (konsol debug; ID 200 tetap lewat bus TTL)"
+    ok "OpenCR micro-USB terpasang (0483:5740) -- jalur sub controller ID 200"
   else
-    warn "OpenCR micro-USB tidak terlihat -- tidak apa-apa untuk jalan normal,"
-    warn "  cuma tidak bisa flash / buka serial monitor lewat USB."
+    bad "OpenCR micro-USB TIDAK terlihat di lsusb. Sejak jalurnya dipisah, port"
+    bad "  inilah satu-satunya jalan ke ID 200: tanpa dia tidak ada IMU, tidak ada"
+    bad "  magnetometer, tidak ada tombol, dan tidak ada pembacaan tegangan."
   fi
 
   echo
-  echo "${BOLD}2. Symlink /dev/ttyOP3 + udev rule${RST}"
+  echo "${BOLD}2. Symlink /dev/ttyOP3, /dev/ttyOPENCR + udev rule${RST}"
   # Di robot ini nama port di OP3.robot bukan bawaan kernel, tapi symlink buatan
   # udev. Kalau rule-nya belum terpasang, ttyOP3 tidak ada dan semua yang di
   # bawah ikut gagal -- sekali periksa di sini menghemat menebak-nebak.
@@ -129,6 +134,24 @@ cmd_doctor() {
     warn "  biarkan udev yang membuatnya."
   else
     bad "/dev/ttyOP3 tidak ada."
+  fi
+  if [ -L /dev/ttyOPENCR ]; then
+    local cr_target
+    cr_target="$(readlink -f /dev/ttyOPENCR)"
+    case "$cr_target" in
+      *ttyACM*) ok "/dev/ttyOPENCR -> $cr_target (micro-USB OpenCR, benar)" ;;
+      *ttyUSB*)
+        bad "/dev/ttyOPENCR -> $cr_target. Itu U2D2, bukan OpenCR. Selama symlink"
+        bad "  ini salah, ID 200 tidak akan menjawab dan IMU diam total."
+        ;;
+      *) warn "/dev/ttyOPENCR -> $cr_target (bukan ttyACM, periksa lagi)" ;;
+    esac
+  elif [ -e /dev/ttyOPENCR ]; then
+    warn "/dev/ttyOPENCR ada tapi bukan symlink -- node buatan tangan? Hapus dan"
+    warn "  biarkan udev yang membuatnya."
+  else
+    bad "/dev/ttyOPENCR tidak ada -- rule udev-nya versi lama (yang tanpa SYMLINK)."
+    bad "  Pasang ulang dari repo, lihat pesan di atas."
   fi
 
   echo

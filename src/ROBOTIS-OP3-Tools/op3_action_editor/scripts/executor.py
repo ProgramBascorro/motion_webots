@@ -5,6 +5,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import termios
 import rclpy
 import time
@@ -34,6 +35,65 @@ def ensure_action_file(action_file_path: str, default_path: str) -> None:
         return
     os.makedirs(os.path.dirname(action_file_path), exist_ok=True)
     shutil.copyfile(default_path, action_file_path)
+
+def robot_file_without_sensors(source_path: str) -> str:
+    """Salinan OP3.robot tanpa baris sensor (sub controller ID 200).
+
+    Kenapa: robotis_controller melakukan bulk read ke SETIAP port pada tiap
+    siklus kontrol 8 ms. Pada robot ini, papan OpenCR masih duduk di jalur TTL
+    servo, jadi tiap kali ia menjawab lewat USB CDC ia ikut menahan jalur itu.
+    Pada 8 ms ia menahannya nyaris tanpa jeda dan bus servo mati: 0 byte balasan
+    dari 20 servo, dan paket sync-write goal_position tidak pernah diterapkan
+    walau paketnya sah di kabel (CRC benar, terbaca di write() ke port).
+
+    Gejalanya menyamar sebagai "play tidak sesuai data page": yang mendarat cuma
+    sebagian acak dari 20 sendi -- kepala hampir tidak pernah -- sehingga sendi
+    yang kebetulan sudah berada di pose page terlihat benar dan sisanya terlihat
+    macet. Diukur: tanpa polling ID 200 => 20/20 sendi mendarat; dengan polling
+    8 ms => 0 balasan dan hanya ~9/20 sendi mendarat, berpindah-pindah tiap coba.
+
+    Editor tidak memerlukan IMU/tombol sama sekali. ID 200 tetap dipakai lewat
+    parameter device_name untuk menyalakan daya DXL sekali di awal (main.cpp),
+    dan itu satu transaksi, bukan polling -- jadi tidak merusak bus.
+
+    Berkas dihasilkan ulang tiap kali jalan supaya tidak pernah basi terhadap
+    OP3.robot. Kalau gagal, kembalikan berkas aslinya: lebih baik jalan dengan
+    bus terganggu daripada tidak jalan sama sekali.
+    """
+    try:
+        with open(source_path, 'r') as f:
+            lines = f.read().splitlines()
+
+        kept = [ln for ln in lines
+                if ln.lstrip().startswith('#') or not ln.lstrip().startswith('sensor')]
+
+        # Buang juga baris [ port info ] yang sudah tidak diacu perangkat mana pun,
+        # supaya controller tidak membuka port yang tidak dipakai.
+        used_ports = set()
+        for ln in kept:
+            if ln.lstrip().startswith('#'):
+                continue
+            fields = [x.strip() for x in ln.split('|')]
+            if len(fields) >= 2 and fields[0] == 'dynamixel':
+                used_ports.add(fields[1])
+
+        result = []
+        for ln in kept:
+            stripped = ln.lstrip()
+            if not stripped.startswith('#') and stripped.startswith('/dev/'):
+                port = stripped.split('|')[0].strip()
+                if port not in used_ports:
+                    continue
+            result.append(ln)
+
+        out_path = os.path.join(tempfile.gettempdir(), 'OP3_action_editor.robot')
+        with open(out_path, 'w') as f:
+            f.write('\n'.join(result) + '\n')
+        return out_path
+    except Exception as e:
+        print(f"Failed to strip sensors from {source_path}: {e}", file=sys.stderr)
+        return source_path
+
 
 SUB_CONTROLLER_ID = 200
 FIRST_SERVO_ID = 1
@@ -141,7 +201,7 @@ def _openable(dev: str) -> bool:
 
 
 def ensure_opencr_port(servo_link: str = '/dev/ttyOP3',
-                       sub_link: str = '/dev/ttyOP3') -> None:
+                       sub_link: str = '/dev/ttyOPENCR') -> None:
     """Point the servo port name at whatever is actually plugged in now.
 
     OP3.robot references stable names, but a board that re-enumerates (unplug,
@@ -149,16 +209,16 @@ def ensure_opencr_port(servo_link: str = '/dev/ttyOP3',
     goes stale -> "Error opening serial port". So probe who answers and repoint the
     link. Idempotent; safe on every launch; degrades quietly off-hardware.
 
-    Stock opencr_op3 wiring on CHRONUS: the OpenCR serves the sub controller (ID 200
-    -- IMU, button, buzzer, DXL power) on DXL_PORT = Serial3, the TTL bus alongside
-    the servos, so both roles land on one port and only that one link is rewritten.
-    Its micro-USB CDC (/dev/ttyACM0) is a debug console and answers no DXL packet.
+    Wiring on CHRONUS is split: servos on the U2D2, sub controller ID 200 (IMU,
+    magnetometer, button, buzzer, DXL power) on the OpenCR micro-USB, because the
+    firmware moves DXL_PORT from Serial3 to Serial. Two real ports, so both links
+    are rewritten.
 
     Pick by probing, not by liveness -- who answers decides, so the same code keeps
-    working on a board flashed with opencr_op3_usb, which serves ID 200 over its
-    micro-USB instead. That case is reported rather than guessed at: OP3.robot has
-    to give the OPEN-CR sensor that separate port, and pointing both links at one
-    tty would put two PortHandlers on a single fd.
+    working on a board flashed with stock opencr_op3, which puts ID 200 back on the
+    servo bus. That case is reported rather than guessed at: OP3.robot would have to
+    give the OPEN-CR sensor the servo port again, and pointing both links at one tty
+    would put two PortHandlers on a single fd.
 
     A port nobody answered on is never adopted. Pointing the link at "the first
     live tty" only moves the failure downstream, where it turns into twenty
@@ -186,22 +246,28 @@ def ensure_opencr_port(servo_link: str = '/dev/ttyOP3',
     if sub_port is None:
         print(f'ensure_opencr_port: OpenCR not answering (ID {SUB_CONTROLLER_ID} '
               f'silent on {", ".join(live)}) -- no IMU, no button. Check it is '
-              f'powered and flashed (stock opencr_op3 puts ID 200 on the TTL bus).',
+              f'powered and that its micro-USB is plugged in -- that is the only '
+              f'route to ID 200 now.',
               file=sys.stderr)
     elif sub_port == servo_port:
-        # Stock wiring: ID 200 rides the servo bus, so servo_link already covers it.
-        print(f'ensure_opencr_port: OpenCR found on {sub_port} '
-              f'(ID {SUB_CONTROLLER_ID}, shared with the servos) -- IMU available',
-              file=sys.stderr)
-    elif servo_port is None:
-        print(f'ensure_opencr_port: ID {SUB_CONTROLLER_ID} answers on {sub_port} but no '
-              f'servo does -- the OpenCR is up, the servo bus is not.', file=sys.stderr)
+        print(f'ensure_opencr_port: ID {SUB_CONTROLLER_ID} answers on the servo port '
+              f'{sub_port} -- this board runs stock opencr_op3, which keeps ID 200 on '
+              f'the TTL bus. OP3.robot in this workspace expects it on {sub_link}, so '
+              f'the OPEN-CR sensor stays unreachable until the board is reflashed or '
+              f'OP3.robot is pointed back at the servo port.', file=sys.stderr)
     elif sub_link == servo_link:
         print(f'ensure_opencr_port: ID {SUB_CONTROLLER_ID} answers on {sub_port}, not on '
-              f'the servo port {servo_port} -- this OpenCR serves the sub controller '
-              f'over its own port (opencr_op3_usb). Give the OPEN-CR sensor line in '
-              f'OP3.robot that port instead of {servo_link}.', file=sys.stderr)
+              f'the servo port {servo_port}, but both links are configured as the same '
+              f'name -- pointing them at one tty would put two PortHandlers on a single '
+              f'fd. Give the OPEN-CR sensor line in OP3.robot its own port.',
+              file=sys.stderr)
     else:
+        # Decided on its own, never gated on the servo bus: two separate ports now,
+        # so an unpowered servo bus is no reason to leave the OpenCR link unset --
+        # that is exactly the bench state used to tune the magnetometer.
+        if servo_port is None:
+            print(f'ensure_opencr_port: ID {SUB_CONTROLLER_ID} answers on {sub_port} -- '
+                  f'the OpenCR is up, the servo bus is not.', file=sys.stderr)
         print(f'ensure_opencr_port: OpenCR found on {sub_port} '
               f'(ID {SUB_CONTROLLER_ID}) -- IMU available', file=sys.stderr)
         _point_link(sub_link, sub_port)
@@ -235,14 +301,19 @@ def main(args=None):
     gazebo_robot_name_default = 'robotis_op3'
 
     offset_file_path_default = get_package_share_directory('op3_manager') + '/config/offset.yaml'
-    robot_file_path_default = get_package_share_directory('op3_manager') + '/config/OP3.robot'
+    robot_file_path_default = robot_file_without_sensors(
+        get_package_share_directory('op3_manager') + '/config/OP3.robot')
     init_file_path_default = get_package_share_directory('op3_manager') + '/config/dxl_init_OP3.yaml'
     action_file_path_default = resolve_action_file_default()
     action_file_path = os.environ.get('OP3_ACTION_FILE', '').strip() or action_file_path_default
-    # device_name is only the port used to power on sub controller ID 200, which
-    # rides the servo bus here (stock opencr_op3); the servos come from OP3.robot.
-    # ensure_opencr_port() just below resolves that port and confirms ID 200 on it.
-    device_name_default = '/dev/ttyOP3'
+    # device_name is only the port used to power on sub controller ID 200; the servos
+    # come from OP3.robot. The buses are split on this board -- the firmware serves ID
+    # 200 over the OpenCR micro-USB CDC, not the TTL bus -- so this has to be the
+    # OpenCR port. Pointing it at the servo port makes the power-on talk to a bus where
+    # ID 200 is silent, and the editor reports the OpenCR as missing even though it is
+    # plugged in and answering. Same default as SUB_CONTROLLER_DEVICE in main.cpp;
+    # ensure_opencr_port() just below repoints the link at whoever answers now.
+    device_name_default = '/dev/ttyOPENCR'
     if not gazebo_default:
         ensure_opencr_port()
 

@@ -1,0 +1,12 @@
+
+path: /kaggle/input/notebooks/muhammadmiftah21/landmark-yolo-tes/landmark_yolo_cloud
+
+train: train/images
+val: val/images
+
+names:
+  0: L
+  1: T
+  2: X
+  3: goalpost
+  4: center_circle

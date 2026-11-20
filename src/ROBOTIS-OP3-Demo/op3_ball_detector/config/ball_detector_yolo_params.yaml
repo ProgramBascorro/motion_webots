@@ -1,0 +1,122 @@
+# Parameters for scripts/ball_detector.py -- the standalone BALL detector that
+# runs the weights in model/ball_model.
+#
+# The landmark detector is a separate program with its own file, see
+# config/landmark_detector_params.yaml.
+#
+# Applied via the "/**" wildcard so they reach the node regardless of the
+# namespace/name it is launched under.
+/**:
+  ros__parameters:
+    # Empty = pick the best weights in model/ball_model automatically, matched
+    # to the runtimes installed here:
+    #   openvino present  -> ball_yolov8n_openvino_model/  (robot container)
+    #   onnxruntime       -> ball_yolov8n.onnx
+    #   otherwise         -> ball_yolov8n_best.pt
+    # Set an explicit path (absolute, or relative to the package share dir) to
+    # pin one, e.g. "model/ball_model/ball_yolov8n_best.pt".
+    # Pinned to the FP32 rectangular 384x640 export. The rectangle matches
+    # the 640x360 camera, so letterbox padding almost vanishes: 39.4 -> 25.6 ms
+    # against the 640x640 square, with detections unchanged.
+    #
+    # DO NOT point this back at ball_yolov8n_384x640_int8_openvino_model
+    # without re-quantizing first. That INT8 build is BROKEN: on frames scaled
+    # to this robot's own 640x360 camera geometry it passed
+    # confidence_threshold 0.5 on 0 of 547 frames, against 326/547 for the
+    # FP32 build here. It looked fine only because it was gated on the
+    # full-size frames of tes_infer.mp4, where the ball fills much more of the
+    # image than it ever does on the robot.
+    #
+    # The cause was the calibration set: the 300 frames in model/ball_model/
+    # calib_frames were recorded with the lens covered (mean brightness ~7 of
+    # 255). Post-training quantization learns each layer's activation range by
+    # RUNNING the model on those samples, so a black set teaches it ranges
+    # near zero and real, lit scenes then clip. Re-record with the ball at
+    # several distances -- especially far and small, the case INT8 lost --
+    # and re-gate with compare_ball_models.py, which now evaluates at camera
+    # geometry.
+    #
+    # 2026-09-17: switched to the v2 weights (Downloads/model_baru, trained on
+    # merged_ball_v2, class {0: ball}). Exported the same way as the v1 build
+    # (FP32, imgsz=384,640) so nothing else in this file changes. The v1
+    # directory ball_yolov8n_384x640_openvino_model is kept for rollback.
+    #
+    # 2026-11-03: switched to the robot_torso weights (YOLO11n,
+    # Downloads/robot_torso_training_results.zip, 6 classes {0: ball,
+    # 1: goalpost, 2: l, 3: robot, 4: t, 5: x}). Exported the same way (FP32,
+    # imgsz=384,640). Only ball/robot are active (gawang dropped 2026-11-09,
+    # not needed by the goalkeeper), see target_classes.
+    # Class 1 is RENAMED "goalpost" -> "gawang" in the export's metadata.yaml
+    # (the .pt still says goalpost). A fresh export brings "goalpost" back:
+    # edit metadata.yaml again, or target_classes below stops matching.
+    # Roll back to v2 = model_path ".../ball_v2_yolov8n_384x640_openvino_model"
+    # plus target_classes ["ball"].
+    #
+    # 2026-11-07: switched to robot_torso_v2 (YOLO11n, ultralytics 8.4.201,
+    # Downloads/robot_torso_v2-20261107T100119Z-1-001.zip, same 6 classes).
+    # Exported the same way (FP32, imgsz=384,640) and class 1 renamed
+    # goalpost -> gawang in metadata.yaml again. Roll back to robot_torso v1 =
+    # model_path ".../robot_torso_yolo11n_384x640_openvino_model".
+    model_path: "model/ball_model/robot_torso_v2_yolo11n_384x640_openvino_model"
+
+    # OpenVINO / .onnx carry no task metadata ultralytics can rely on.
+    model_task: "detect"
+
+    # Subscribe to a CompressedImage (true) or a raw Image (false) on image_in.
+    use_compressed: true
+
+    # Detection thresholds.
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+
+    # MUST match the imgsz the weights were exported with. Every export in
+    # model/ball_model is 640 (see the metadata.yaml next to the .xml).
+    imgsz: 640
+
+    # Rectangular export shape as [height, width]; [0, 0] = unused, keep
+    # the square imgsz above. Set this only to a shape the weights were
+    # actually exported with -- the anchor grid is baked in at export.
+    imgsz_hw: [384, 640]
+
+    # CPU-only runtimes here; FP16 would need a GPU build.
+    device: "cpu"
+    half: false
+    # Ball + goalposts + several robots can share one frame.
+    max_detections: 20
+
+    # Classes detected at all. The robot_torso model also has l/t/x (field
+    # line intersections); leaving them out drops them inside predict().
+    # All three are published on /ball_detector_node/detections.
+    target_classes: ["ball", "robot"]
+
+    # Which of the target classes are "the ball": only these reach
+    # circle_set and ball_center, so gawang/robot boxes are never chased.
+    ball_classes: ["ball"]
+
+    # Inference loop rate (Hz), always on the freshest camera frame. It is a
+    # POLLING rate, not a promise: the pipeline can never beat the camera.
+    # Arithmetic for a 30 FPS camera (33.3 ms period) at ~20 ms inference:
+    # the timer must fire faster than 1/(33.3-20 ms) = 75 Hz or it adds a
+    # wait of its own on top of every frame. Rule of thumb: >= 4x the camera
+    # rate. Costs nothing extra -- a tick with no new frame returns at once.
+    detection_rate: 120.0
+
+    # Publish an annotated debug image on image_out (raw) and
+    # image_out/compressed (JPEG). Each is only built while something
+    # subscribes to it, so leaving this on costs nothing during a demo.
+    # Watch image_out/compressed in rqt: ~33 KB/frame instead of ~675 KB.
+    publish_image: true
+    image_out_jpeg_quality: 70
+    detection_frame_id: "detector"
+
+    # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
+    enable_at_start: true
+
+    # Ball center as geometry_msgs/PointStamped in [0,1] image coords (only
+    # while a ball is seen), feeding op3_ball_localization/head_tracking_node.
+    # Set "" to disable. Absolute (leading /) so it is global across namespaces.
+    ball_center_topic: "/vision/yolo/ball_center"
+
+    # How often the FPS line is logged, in seconds. The node also prints an
+    # FPS summary when it stops.
+    fps_log_period: 5.0

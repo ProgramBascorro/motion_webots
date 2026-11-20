@@ -3,9 +3,9 @@
 # namespace/name it is launched under.
 /**:
   ros__parameters:
-    # Absolute path to the YOLO weights. Leave empty to use the model that
-    # ships with this package: <share>/op3_ball_detector/model/best.pt
-    model_path: "model/v8n.pt"
+    # Absolute path to the YOLO weights, or relative to the package share dir.
+    # This is the torch fallback; OpenVINO is much faster on this Intel CPU.
+    model_path: "model/ball_model/ball_yolov8n_best.pt"
 
     # Model task. .pt weights carry this in metadata, so "detect" just matches;
     # mainly relevant for .onnx (see the *_onnx_params.yaml).
@@ -18,16 +18,18 @@
     confidence_threshold: 0.5
     iou_threshold: 0.45
     imgsz: 640
+    imgsz_hw: [0, 0]
     device: "cpu"          # "cpu" or e.g. "cuda:0" when a GPU is available
     half: false            # FP16 inference (GPU only)
     max_detections: 10
 
-    # Model class names to treat as "the ball". best.pt exposes "Bola-baru".
+    # Model class names to treat as "the ball". ball_model exposes "ball".
     # If none of these match the model, every class is treated as a ball.
-    target_classes: ["Bola-baru"]
+    target_classes: ["ball"]
 
-    # Inference loop rate (Hz). Always uses the freshest camera frame.
-    detection_rate: 30.0
+    # Inference loop rate (Hz). Must run WELL ABOVE the camera rate - see the
+    # note in yolo_ball_detector_openvino_params.yaml.
+    detection_rate: 120.0
 
     # Publish an annotated debug image on image_out.
     publish_image: true

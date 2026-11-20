@@ -28,30 +28,43 @@ import {
   Save,
   Send,
   Square,
-  Trash2
+  Trash2,
+  Brain,
+  Target
 } from "lucide-react";
 import ActionEditor from "./ActionEditor.jsx";
 import WalkingSim from "./WalkingSim.jsx";
 import GamepadVisualizer from "./GamepadVisualizer.jsx";
 import ChartPage from "./ChartPage.jsx";
 import TuningPage from "./TuningPage.jsx";
+import RlTrainingPage from "./RlTrainingPage.jsx";
+import ActionTrainingPage from "./ActionTrainingPage.jsx";
+import KalibrasiBatasGeser from "./KalibrasiBatasGeser.jsx";
 import {
   computeDefaultRosbridgeUrl,
   normalizeRosbridgeUrl,
+  readRosUrlPreference,
   rewriteLoopbackToCurrentHost,
+  writeRosUrlPreference,
 } from "./net/rosbridge.js";
 import {
   WALKING_BOOL_FIELDS,
   normalizeWalkingParams,
   parseWalkingNumber,
+  toWalkingParamMsg,
 } from "./walkingParams.js";
 
-const SHARED_ROS_URL_KEY = "bascorro.shared_ros_url.v1";
-const LEGACY_ACTION_ROS_URL_KEY = "op3RosUrl";
 const WALKING_VERSION_STORAGE_KEY = "bascorro.walking_versions.v1";
 const TELEOP_COMMAND_TOPIC = "/op3_joy_teleop/command";
 const TELEOP_STATUS_TOPIC = "/op3_joy_teleop/status";
-const INIT_BARU_PAGE_NUM = 2;
+// Tombol "Init Pose" memutar action page 2. Di robot ini halaman itu bernama
+// WALKING_READY: pose berdiri hasil tera operator di action editor, dan acuan
+// yang dipakai offset Init Pose milik walking module.
+const WALKING_READY_PAGE_NUM = 2;
+// Jeda supaya op3_manager sempat memindahkan controller ke action_module
+// sebelum nomor halaman dikirim -- pelanggan page_num baru ada setelah pindah,
+// jadi pesan yang dikirim terlalu dini hilang tanpa jejak.
+const ACTION_MODULE_SETTLE_MS = 600;
 const DEFAULT_OVERLAY_TOPIC =
   import.meta.env.VITE_OVERLAY_TOPIC || "/vision/yolo/debug";
 
@@ -82,10 +95,10 @@ const WALKING_PARAM_HELP = {
     risk: "Bias terlalu jauh bikin satu kaki lebih berat dan langkah jadi pincang."
   },
   init_z_offset: {
-    artinya: "Tinggi badan dasar saat gait walking dihitung.",
+    artinya: "Tinggi badan dasar saat gait walking dihitung. HARUS LEBIH BESAR DARI 0.",
     fungsi: "Menentukan seberapa jongkok/tinggi postur robot ketika berjalan.",
-    tuning: "Lebih rendah biasanya lebih stabil tapi servo lebih berat. Lebih tinggi terasa ringan tapi mudah goyang.",
-    risk: "Terlalu rendah bisa membebani lutut; terlalu tinggi bisa membuat kaki kehilangan clearance."
+    tuning: "Diukur di robot ini (period 2,5 s, dsp 0,50, foot 25 mm): z 0,002 memberi ayun lutut 34,2 deg; z 0,010 memberi 45,8 deg; z -0,010 dan -0,025 membuat KAKI TIDAK BERGERAK SAMA SEKALI (ayun 0,1 deg). Mulai dari 0,002.",
+    risk: "NILAI NOL ATAU NEGATIF MEMBEKUKAN KAKI. IK memakai ep[2] = z_offset - panjang_kaki, jadi z_offset negatif meminta telapak lebih jauh dari pinggul daripada panjang kaki itu sendiri -- tidak ada solusi, computeLegAngle() gagal, dan kaki menahan pose terakhir tanpa pesan galat yang terlihat. Gejalanya menyamar: gait masih 'jalan' kalau foot_height dibesarkan sampai telapak kembali terjangkau, dan hasilnya ayunan lutut raksasa yang terasa cepat dan kasar."
   },
   init_roll_offset: {
     artinya: "Offset sudut roll badan pada posture awal walking.",
@@ -233,6 +246,13 @@ const WALKING_PARAM_HELP = {
   },
 };
 
+WALKING_PARAM_HELP.soft_start_time = {
+  artinya: "Lama (detik) x move, y move, dan tinggi angkat kaki naik dari nol ke nilai penuh setiap kali robot mulai berjalan dari diam.",
+  fungsi: "Langkah pertama tidak langsung penuh: kaki mula-mula menyeret kecil lalu membesar mulus. Skalanya naik terus tiap siklus 8 ms, bukan bertahap per langkah, jadi tidak ada lonjakan kaki. Angle move (belok) tidak ikut.",
+  tuning: "0 = mati (langsung penuh). 1-3 detik biasanya enak. Hanya berlaku saat MULAI dari diam -- Start ulang saat sudah berjalan tidak mengecilkan langkah lagi.",
+  risk: "Terlalu lama membuat langkah awal lambat terasa 'ragu'. Begitu di-Apply, robot LANGSUNG menyimpannya ke param.yaml sendiri -- tidak perlu Save to Robot, dan tetap berlaku setelah robot mati-nyala. Ikut tersimpan juga di versi walking."
+};
+
 const WALKING_PARAM_GROUPS = [
   {
     title: "Init Pose",
@@ -264,6 +284,7 @@ const WALKING_PARAM_GROUPS = [
       { key: "z_move_amplitude", label: "Z move amplitude / foot height", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_move_amplitude },
       { key: "angle_move_amplitude", label: "Angle move amplitude", unit: "rad", step: 0.005, ...WALKING_PARAM_HELP.angle_move_amplitude },
       { key: "move_aim_on", label: "Move aim on", type: "bool", ...WALKING_PARAM_HELP.move_aim_on },
+      { key: "soft_start_time", label: "Soft start", unit: "s", step: 0.1, ...WALKING_PARAM_HELP.soft_start_time },
     ],
   },
   // Balance dan bentuk gait sengaja DIPISAH. Checkbox "Balance enable" hanya
@@ -273,7 +294,7 @@ const WALKING_PARAM_GROUPS = [
   // bernama "Balance", jadi terbaca seolah checkbox itu mengatur semuanya juga.
   {
     title: "Balance (IMU)",
-    description: "Gain koreksi dari IMU. Hanya bagian ini yang dimatikan checkbox Balance enable.",
+    description: "Hanya ini yang dimatikan checkbox Balance enable. Koreksi gyro ke 8 sendi kaki: hip roll, knee, ankle pitch, ankle roll (kiri+kanan). Cuma jalan saat gait berjalan.",
     fields: [
       { key: "balance_enable", label: "Balance enable", type: "bool", ...WALKING_PARAM_HELP.balance_enable },
       { key: "balance_hip_roll_gain", label: "Hip roll gain", unit: "gain", step: 0.01, ...WALKING_PARAM_HELP.balance_hip_roll_gain },
@@ -284,7 +305,7 @@ const WALKING_PARAM_GROUPS = [
   },
   {
     title: "Bentuk Gait",
-    description: "Ayunan badan dan lengan. Murni gait -- tetap jalan walau balance dimatikan.",
+    description: "Bagian dari pola langkah itu sendiri, BUKAN IMU. Balance enable tidak mempengaruhi satu pun field di sini -- ayunan lengan misalnya datang dari computeArmAngle(), disetir x_move_amplitude.",
     fields: [
       { key: "y_swap_amplitude", label: "Y swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.y_swap_amplitude },
       { key: "z_swap_amplitude", label: "Z swap amplitude", unit: "m", step: 0.001, ...WALKING_PARAM_HELP.z_swap_amplitude },
@@ -475,6 +496,9 @@ const StatCard = ({ title, icon: Icon, value, subValue, status = "neutral" }) =>
   );
 };
 
+const BUTTON_BASE =
+  "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
 const SectionHeader = ({ title, children }) => (
   <div className="flex justify-between items-center mb-4">
     <h2 className="text-lg font-bold font-display text-gray-800">{title}</h2>
@@ -483,25 +507,23 @@ const SectionHeader = ({ title, children }) => (
 );
 
 function resolveInitialRosUrl() {
-  const envDefault = computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL);
-  if (typeof window === "undefined") return envDefault;
-  try {
-    const shared = localStorage.getItem(SHARED_ROS_URL_KEY);
-    if (shared) return rewriteLoopbackToCurrentHost(shared, window.location);
-    const legacy = localStorage.getItem(LEGACY_ACTION_ROS_URL_KEY);
-    if (legacy) return rewriteLoopbackToCurrentHost(legacy, window.location);
-  } catch {
-    return envDefault;
+  if (typeof window === "undefined") {
+    return { url: computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL), manual: false };
   }
-  return envDefault;
+  return readRosUrlPreference(
+    window.localStorage,
+    window.location,
+    import.meta.env.VITE_ROSBRIDGE_URL
+  );
 }
 
 export default function App() {
   const initialRosUrl = useMemo(() => resolveInitialRosUrl(), []);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [rosUrl, setRosUrl] = useState(initialRosUrl);
-  const [rosUrlDraft, setRosUrlDraft] = useState(initialRosUrl);
+  const [rosUrl, setRosUrl] = useState(initialRosUrl.url);
+  const [rosUrlManual, setRosUrlManual] = useState(initialRosUrl.manual);
+  const [rosUrlDraft, setRosUrlDraft] = useState(initialRosUrl.url);
   const [rosState, setRosState] = useState("disconnected");
   
   // Data State
@@ -529,6 +551,11 @@ export default function App() {
   const [activeWalkingVersionId, setActiveWalkingVersionId] = useState("");
   const [teleopStatus, setTeleopStatus] = useState(null);
   const [teleopStatusAt, setTeleopStatusAt] = useState(null);
+  // Kalibrasi yaw lima titik. Seluruh keadaan (rekaman, pemetaan, tabel)
+  // datang dari apply_node di robot -- peramban tidak menyimpan apa pun sendiri,
+  // supaya membuka Studio dari alamat/perangkat lain melihat rekaman yang sama.
+  const [yawCal, setYawCal] = useState(null);
+  const [yawCalBusy, setYawCalBusy] = useState(false);
   
   // Vision
   const [overlayTopic, setOverlayTopic] = useState(DEFAULT_OVERLAY_TOPIC);
@@ -568,6 +595,7 @@ export default function App() {
   
   // Topic/Service Refs
   const metricsSubRef = useRef(null);
+  const imuCommandPubRef = useRef(null);
   const eventsSubRef = useRef(null);
   const overlaySubRef = useRef(null);
   const joySubRef = useRef(null);
@@ -577,6 +605,28 @@ export default function App() {
   const walkingCommandPubRef = useRef(null);
   const walkingParamPubRef = useRef(null);
   const walkingGetServiceRef = useRef(null);
+  // Layanan parameter ROS node /op3_walking_module (untuk soft_start_time).
+  const walkingNodeSetParamRef = useRef(null);
+  const walkingNodeGetParamRef = useRef(null);
+  // Penyimpanan versi walking di ROBOT (apply_node), bukan di localStorage --
+  // lihat komentar panjang di apply_node.walking_versions_path().
+  const studioRequestPubRef = useRef(null);
+  const studioResultSubRef = useRef(null);
+  // Menahan satu siklus tulis-balik: daftar yang baru saja DIBACA dari robot
+  // tidak perlu langsung dikirim balik ke robot.
+  const skipVersionPushRef = useRef(true);
+  // Gerbang anti-hapus. TANPA ini ada balapan yang MENGHAPUS daftar di robot:
+  // effect penyimpan ikut bergantung pada rosState, jadi saat status berubah jadi
+  // "connected" ia langsung mendorong isi walkingVersions -- dan pada peramban
+  // yang localStorage-nya kosong isinya [], sehingga berkas di robot ditimpa
+  // daftar kosong ~400 ms SEBELUM jawaban walking_versions_get sempat datang.
+  // Sekarang: tidak ada dorongan sama sekali sampai satu jawaban get diterima.
+  // Kalau apply_node mati, akibatnya cuma "tidak tersimpan di robot", bukan
+  // "terhapus dari robot".
+  const versionsSyncedRef = useRef(false);
+  // Sekali per sambungan: isi tabel Walking dengan parameter yang BENAR-BENAR
+  // dipakai robot, bukan WALKING_DEFAULT_PARAMS.
+  const walkingAutoLoadedRef = useRef(false);
   // Tracks whether walking_module is the active control module. Walking commands
   // (start/stop/balance) are ignored by op3_walking_module unless it is enabled.
   const walkingModuleEnabledRef = useRef(false);
@@ -600,24 +650,54 @@ export default function App() {
   }, [rosUrl]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(SHARED_ROS_URL_KEY, rosUrl);
-      localStorage.removeItem(LEGACY_ACTION_ROS_URL_KEY);
-    } catch {
-      // Ignore storage failures in restrictive browser contexts.
-    }
-  }, [rosUrl]);
+    writeRosUrlPreference(window.localStorage, rosUrl, rosUrlManual);
+  }, [rosUrl, rosUrlManual]);
 
   useEffect(() => {
     showOverlayRef.current = showOverlay;
   }, [showOverlay]);
 
+  // Setelah ROS di-restart lalu Studio dibuka lagi, tabel Walking dulu selalu
+  // menampilkan WALKING_DEFAULT_PARAMS -- terbaca seperti "tuning saya hilang,
+  // balik ke default", padahal robotnya menjalankan angka lain dan versi
+  // tersimpannya masih utuh. Sekarang tabel diisi sekali dari robot begitu
+  // tersambung, lewat jalur Load yang sama, jadi yang tampil adalah yang
+  // benar-benar dipakai robot.
+  useEffect(() => {
+    if (rosState !== "connected") {
+      walkingAutoLoadedRef.current = false;
+      return;
+    }
+    if (walkingAutoLoadedRef.current) return;
+    walkingAutoLoadedRef.current = true;
+    const timer = window.setTimeout(() => loadWalkingParams(), 800);
+    return () => window.clearTimeout(timer);
+  }, [rosState]);
+
   useEffect(() => {
     try {
+      // Tetap disimpan di peramban, tapi sekarang cuma singgahan supaya tabel
+      // sudah terisi sebelum rosbridge tersambung. Yang berkuasa adalah robot.
       localStorage.setItem(WALKING_VERSION_STORAGE_KEY, JSON.stringify(walkingVersions));
     } catch {
       // Browser storage can fail in private or restricted contexts.
     }
+
+    // Belum pernah membaca daftar dari robot -> jangan menulis apa pun ke sana.
+    if (!versionsSyncedRef.current) return;
+    // Jangan kirim balik daftar yang baru saja dibaca DARI robot.
+    if (skipVersionPushRef.current) {
+      skipVersionPushRef.current = false;
+      return;
+    }
+    if (!studioRequestPubRef.current) return;
+    studioRequestPubRef.current.publish(
+      new ROSLIB.Message({
+        data: JSON.stringify({ action: "walking_versions_put", versions: walkingVersions }),
+      })
+    );
+    // rosState SENGAJA tidak masuk deps: perubahan status sambungan saja tidak
+    // boleh memicu penulisan. Hanya perubahan daftar yang boleh.
   }, [walkingVersions]);
 
   useEffect(() => {
@@ -712,6 +792,11 @@ export default function App() {
       name: "/robotis/action/page_num",
       messageType: "std_msgs/Int32",
     });
+    imuCommandPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/robotis/open_cr/imu_command",
+      messageType: "std_msgs/String",
+    });
 
     yoloSetServiceRef.current = new ROSLIB.Service({
       ros,
@@ -732,6 +817,81 @@ export default function App() {
       ros,
       name: "/robotis/health_check",
       serviceType: "std_srvs/srv/Trigger",
+    });
+    // Sambungan baru: lupakan status sinkron sambungan sebelumnya.
+    versionsSyncedRef.current = false;
+    studioRequestPubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/bascorro_studio/request",
+      messageType: "std_msgs/String",
+    });
+    studioResultSubRef.current = new ROSLIB.Topic({
+      ros,
+      name: "/bascorro_studio/result",
+      messageType: "std_msgs/String",
+    });
+    studioResultSubRef.current.subscribe((msg) => {
+      let payload;
+      try {
+        payload = JSON.parse(msg.data);
+      } catch {
+        return;
+      }
+      if (typeof payload?.action === "string" && payload.action.startsWith("yaw_calib_")) {
+        setYawCalBusy(false);
+        // Balasan SELALU membawa keadaan lengkap, termasuk saat ok=false, jadi
+        // tabel tetap tersegarkan walau satu langkah ditolak.
+        if (Array.isArray(payload.table)) setYawCal(payload);
+        if (payload.message) sendStatus(payload.message, payload.ok === false);
+        else if (payload.ok === false) sendStatus("Kalibrasi yaw gagal", true);
+        return;
+      }
+      if (payload?.action !== "walking_versions_get") return;
+      if (payload.ok !== true || !Array.isArray(payload.versions)) return;
+      const incoming = payload.versions
+        .filter((item) => item?.id && item?.params)
+        .map((item) => ({
+          id: String(item.id),
+          name: String(item.name || "Untitled"),
+          createdAt: Number(item.createdAt || Date.now()),
+          updatedAt: Number(item.updatedAt || item.createdAt || Date.now()),
+          params: normalizeWalkingParams(item.params),
+        }));
+      // DIGABUNG, bukan diganti. Saat pertama kali dipakai, berkas di robot masih
+      // kosong sementara versi lama pengguna ada di localStorage peramban ini.
+      // Kalau daftar robot langsung menimpa, versi lama itu terhapus dari layar
+      // DAN dari localStorage (effect di bawah ikut menulis) -- persis kehilangan
+      // yang sedang diperbaiki. Jadi: yang ada di robot dipakai, yang cuma ada di
+      // peramban ini dipertahankan lalu didorong naik ke robot.
+      setWalkingVersions((prev) => {
+        const known = new Set(incoming.map((item) => item.id));
+        const localOnly = prev.filter((item) => !known.has(item.id));
+        // Tidak ada yang baru dari sisi peramban -> tidak perlu tulis balik.
+        skipVersionPushRef.current = localOnly.length === 0;
+        return [...incoming, ...localOnly];
+      });
+      // Sejak titik ini isi robot sudah diketahui, jadi mendorong aman.
+      versionsSyncedRef.current = true;
+    });
+    // Tarik daftar versi begitu tersambung.
+    window.setTimeout(() => {
+      studioRequestPubRef.current?.publish(
+        new ROSLIB.Message({ data: JSON.stringify({ action: "walking_versions_get" }) })
+      );
+      studioRequestPubRef.current?.publish(
+        new ROSLIB.Message({ data: JSON.stringify({ action: "yaw_calib_get" }) })
+      );
+    }, 400);
+
+    walkingNodeSetParamRef.current = new ROSLIB.Service({
+      ros,
+      name: "/op3_walking_module/set_parameters",
+      serviceType: "rcl_interfaces/srv/SetParameters",
+    });
+    walkingNodeGetParamRef.current = new ROSLIB.Service({
+      ros,
+      name: "/op3_walking_module/get_parameters",
+      serviceType: "rcl_interfaces/srv/GetParameters",
     });
     walkingGetServiceRef.current = new ROSLIB.Service({
       ros,
@@ -767,6 +927,7 @@ export default function App() {
 
     return () => {
       metricsSubRef.current?.unsubscribe();
+      imuCommandPubRef.current = null;
       eventsSubRef.current?.unsubscribe();
       joySubRef.current?.unsubscribe();
       teleopStatusSubRef.current?.unsubscribe();
@@ -824,6 +985,7 @@ export default function App() {
       window.location
     );
     setRosUrl(next);
+    setRosUrlManual(true);
     setRosUrlDraft(next);
     sendStatus(`ROS bridge: ${next}`);
   };
@@ -831,6 +993,7 @@ export default function App() {
   const resetRosUrlAuto = () => {
     const next = computeDefaultRosbridgeUrl(import.meta.env.VITE_ROSBRIDGE_URL, window.location);
     setRosUrl(next);
+    setRosUrlManual(false);
     setRosUrlDraft(next);
     sendStatus(`ROS bridge reset: ${next}`);
   };
@@ -871,6 +1034,40 @@ export default function App() {
     setWalkingError("");
   };
 
+  // soft_start_time bukan bagian GetWalkingParam, jadi dibaca terpisah dari
+  // parameter node. Kalau node lama belum punya parameter ini, callback menerima
+  // null dan pemanggil memakai nilai tabel yang ada.
+  const readSoftStartTime = (onDone) => {
+    if (!walkingNodeGetParamRef.current) { onDone(null); return; }
+    walkingNodeGetParamRef.current.callService(
+      new ROSLIB.ServiceRequest({ names: ["soft_start_time"] }),
+      (res) => {
+        const v = res?.values?.[0];
+        const num = v?.type === PARAM_TYPES.double ? v.double_value
+          : v?.type === PARAM_TYPES.int ? v.integer_value : null;
+        onDone(Number.isFinite(num) ? num : null);
+      },
+      () => onDone(null)
+    );
+  };
+
+  const writeSoftStartTime = (seconds) => {
+    if (!walkingNodeSetParamRef.current) return;
+    walkingNodeSetParamRef.current.callService(
+      new ROSLIB.ServiceRequest({
+        parameters: [{ name: "soft_start_time", value: { type: PARAM_TYPES.double, double_value: Number(seconds) } }],
+      }),
+      (res) => {
+        const r = res?.results?.[0];
+        if (r && r.successful === false) {
+          setWalkingError(`Soft start ditolak robot: ${r.reason || "tanpa alasan"}`);
+          sendStatus(`Soft start ditolak: ${r.reason || ""}`, true);
+        }
+      },
+      (err) => sendStatus(`Soft start tidak terkirim: ${err?.message || err}`, true)
+    );
+  };
+
   const loadWalkingParams = () => {
     if (!walkingGetServiceRef.current || rosState !== "connected") {
       const message = "Walking params unavailable";
@@ -889,12 +1086,17 @@ export default function App() {
           sendStatus(message, true);
           return;
         }
-        const normalized = normalizeWalkingParams(res.parameters);
-        setWalkingParams(normalized);
-        setWalkingCurrentParams(normalized);
-        setWalkingLoaded(true);
-        setWalkingDirty(false);
-        sendStatus("Walking params loaded");
+        readSoftStartTime((softStart) => {
+          const normalized = normalizeWalkingParams({
+            ...res.parameters,
+            soft_start_time: softStart ?? walkingParams.soft_start_time,
+          });
+          setWalkingParams(normalized);
+          setWalkingCurrentParams(normalized);
+          setWalkingLoaded(true);
+          setWalkingDirty(false);
+          sendStatus("Walking params loaded");
+        });
       },
       (err) => {
         const message = err?.message || "Failed to load walking params";
@@ -914,10 +1116,15 @@ export default function App() {
       new ROSLIB.ServiceRequest({ get_param: true }),
       (res) => {
         if (!res?.parameters) return;
-        const normalized = normalizeWalkingParams(res.parameters);
-        setWalkingCurrentParams(normalized);
-        setWalkingLoaded(true);
-        if (label) sendStatus(`${label} (robot: balance_enable=${normalized.balance_enable})`);
+        readSoftStartTime((softStart) => {
+          const normalized = normalizeWalkingParams({
+            ...res.parameters,
+            soft_start_time: softStart ?? walkingParams.soft_start_time,
+          });
+          setWalkingCurrentParams(normalized);
+          setWalkingLoaded(true);
+          if (label) sendStatus(`${label} (robot: balance_enable=${normalized.balance_enable})`);
+        });
       },
       () => {}
     );
@@ -928,6 +1135,30 @@ export default function App() {
   // bool on the robot) gets undone by the next Apply if the grid checkbox is still
   // checked. Keep the UI state in sync with the command, then read back from the
   // robot as proof it actually landed.
+  const sendImuCommand = (command, label) => {
+    if (!imuCommandPubRef.current || rosState !== "connected") {
+      sendStatus("IMU command publisher unavailable", true);
+      return;
+    }
+    imuCommandPubRef.current.publish(new ROSLIB.Message({ data: command }));
+    sendStatus(label);
+  };
+
+  // Satu pintu ke apply_node untuk semua langkah kalibrasi yaw. Balasannya
+  // ditangani di pelanggan /bascorro_studio/result di atas.
+  const sendYawCalib = (action, extra = {}) => {
+    if (!studioRequestPubRef.current || rosState !== "connected") {
+      sendStatus("Robot belum tersambung", true);
+      return;
+    }
+    setYawCalBusy(true);
+    studioRequestPubRef.current.publish(
+      new ROSLIB.Message({ data: JSON.stringify({ action, ...extra }) })
+    );
+    // Jangan menggantung selamanya kalau apply_node mati.
+    window.setTimeout(() => setYawCalBusy(false), 4000);
+  };
+
   const sendBalanceCommand = (enable) => {
     const ok = sendWalkingCommand(enable ? "balance on" : "balance off");
     if (!ok) return;
@@ -946,7 +1177,10 @@ export default function App() {
     }
 
     const payload = normalizeWalkingParams(walkingParams);
-    walkingParamPubRef.current.publish(new ROSLIB.Message(payload));
+    // soft_start_time dibuang dari pesan (bukan field WalkingParam) dan dikirim
+    // sebagai parameter node -- lihat WALKING_NODE_PARAM_FIELDS.
+    walkingParamPubRef.current.publish(new ROSLIB.Message(toWalkingParamMsg(payload)));
+    writeSoftStartTime(payload.soft_start_time);
     setWalkingParams(payload);
     setWalkingCurrentParams(payload);
     setWalkingLoaded(true);
@@ -954,6 +1188,37 @@ export default function App() {
     setWalkingLastAppliedAt(Date.now());
     setWalkingError("");
     sendStatus("Walking params applied");
+    return true;
+  };
+
+  // Apply yang benar-benar MEMINDAHKAN robot ke stance init-nya, tanpa Start.
+  //
+  // applyWalkingParams() sendiri cuma menerbitkan ke /robotis/walking/set_params.
+  // walkingParameterCallback() memang selalu menerima (`walking_param_ = *msg`,
+  // tanpa syarat, di thread spin modul sendiri), tapi yang menggerakkan kaki
+  // adalah process() -- dan process() hanya dipanggil controller kalau
+  // walking_module sedang memegang sendi. Kalau modulnya belum aktif, Apply
+  // diam-diam tidak berefek apa-apa sampai ada yang menekan Start atau Enable
+  // Module, dan itulah keluhannya: parameter Init Pose baru kelihatan setelah
+  // Start.
+  //
+  // Urutannya PARAMETER DULU, BARU MODUL, bukan sebaliknya. onModuleEnable()
+  // memasang capture_init_pose_, lalu siklus berikutnya menuju stance netral
+  // dari offset yang sedang dipegang modul. Kalau modul diaktifkan lebih dulu,
+  // robot bergerak dua kali: ke stance offset LAMA, lalu ke yang baru setelah
+  // parameter menyusul. Dengan urutan ini modul sudah memegang angka baru
+  // sebelum siklus pertamanya, jadi satu gerakan saja -- tetap dilandaikan
+  // iniPoseTraGene (minimum-jerk, minimal 1,5 detik).
+  const applyWalkingParamsNow = () => {
+    if (!applyWalkingParams()) return false;
+    if (walkingModuleEnabledRef.current) return true;
+
+    // Beri jeda kecil supaya pesan parameter sudah sampai ke modul sebelum
+    // controller menyerahkan sendi kepadanya.
+    window.setTimeout(() => {
+      ensureWalkingModuleEnabled();
+      sendStatus("Walking module diaktifkan — robot bergerak ke posisi init");
+    }, 200);
     return true;
   };
 
@@ -1129,16 +1394,21 @@ export default function App() {
   };
 
   const handleInitPose = () => {
-    if (!controlModulePubRef.current || !actionPagePubRef.current) {
-      sendStatus("Init pose unavailable: ROS publishers not ready", true);
+    // Tombol ini memutar action page 2 (WALKING_READY) apa adanya. Perpindahan
+    // ke walking module adalah hal lain, dipicu Apply & Start -- stance neutral
+    // yang dihitung walking module dari offset Init Pose sengaja ditera supaya
+    // sama dengan geometri WALKING_READY, jadi serah-terimanya mulus.
+    if (!controlModulePubRef.current || !actionPagePubRef.current || rosState !== "connected") {
+      sendStatus("Init Pose: action module tidak tersedia", true);
       return;
     }
     walkingModuleEnabledRef.current = false;
     controlModulePubRef.current.publish(new ROSLIB.Message({ data: "action_module" }));
+    sendStatus(`Init Pose: pindah ke action_module -> page ${WALKING_READY_PAGE_NUM}...`);
     window.setTimeout(() => {
-      actionPagePubRef.current?.publish(new ROSLIB.Message({ data: INIT_BARU_PAGE_NUM }));
-    }, 500);
-    sendStatus(`INIT_BARU page ${INIT_BARU_PAGE_NUM} sent`);
+      actionPagePubRef.current?.publish(new ROSLIB.Message({ data: WALKING_READY_PAGE_NUM }));
+      sendStatus(`Init Pose: memutar page ${WALKING_READY_PAGE_NUM} (WALKING_READY)`);
+    }, ACTION_MODULE_SETTLE_MS);
   };
 
   const handleSoftStop = () => {
@@ -1308,6 +1578,21 @@ export default function App() {
   const system = metrics?.system || {};
   const network = metrics?.network || {};
   const imu = metrics?.imu || {};
+  const mag = metrics?.mag || null;
+
+  // Warna kartu magnetometer mengikuti status firmware, bukan sekadar ada/tidak
+  // ada data: "settling" itu normal selama 3 detik pertama setelah OpenCR menyala
+  // dan tidak boleh terbaca sebagai kerusakan.
+  const magState = mag?.stale ? "stale" : mag?.state || "no_data";
+  const MAG_STATE_STYLE = {
+    ok: { box: "bg-green-50 text-green-600", note: "Yaw kompas valid" },
+    settling: { box: "bg-yellow-50 text-yellow-700", note: "Mengunci referensi 0 derajat, tunggu ~3 detik" },
+    calibrating: { box: "bg-blue-50 text-blue-700", note: "Putar robot pelan 1 putaran penuh (20 detik)" },
+    no_sensor: { box: "bg-red-100 text-red-600", note: "Papan tidak mengirim data magnetometer" },
+    stale: { box: "bg-red-100 text-red-600", note: "Topik mag_status berhenti mengalir" },
+    no_data: { box: "bg-gray-100 text-gray-500", note: "Menunggu data dari open_cr_module" },
+  };
+  const magStyle = MAG_STATE_STYLE[magState] || MAG_STATE_STYLE.no_data;
   const torque = metrics?.torque || {};
   const healthOk = healthResult?.ok || [];
   const healthFailed = healthResult?.failed || [];
@@ -1382,6 +1667,20 @@ export default function App() {
             <span>Walking</span>
           </button>
           <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "rl" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("rl"); setSidebarOpen(false); }}
+          >
+            <Brain size={20} className={activeTab === "rl" ? "text-accent-yellow" : ""} />
+            <span>RL Training</span>
+          </button>
+          <button
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "actrain" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
+            onClick={() => { setActiveTab("actrain"); setSidebarOpen(false); }}
+          >
+            <Target size={20} className={activeTab === "actrain" ? "text-accent-yellow" : ""} />
+            <span>Action Training</span>
+          </button>
+          <button
             className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${activeTab === "teleop" ? "bg-undip-blue text-white shadow-md border border-accent-yellow/20" : "hover:bg-white/5 hover:text-white"}`}
             onClick={() => { setActiveTab("teleop"); setSidebarOpen(false); }}
           >
@@ -1449,7 +1748,7 @@ export default function App() {
 
   const renderWalking = () => {
     const rosConnected = rosState === "connected";
-    const walkingButtonBase = "inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+    const walkingButtonBase = BUTTON_BASE;
     const currentValue = (field) => {
       if (!walkingCurrentParams) return "not loaded";
       return formatWalkingValue(walkingCurrentParams[field.key], field);
@@ -1484,23 +1783,33 @@ export default function App() {
       <div className="h-full p-4 md:p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto flex flex-col gap-6">
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            {/* Badge dibuat sama seperti ALPHONSE: kata Indonesia + tooltip, dan
+                waktu Apply terakhir ikut jadi badge di baris yang sama daripada
+                baris teks tersendiri. "Dirty/Synced" tidak pernah menjelaskan
+                dirty terhadap apa. */}
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold font-display text-gray-900">Walking</h2>
-              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}>
-                {walkingDirty ? "Dirty" : "Synced"}
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingDirty ? "bg-yellow-100 text-yellow-700" : "bg-green-50 text-green-700"}`}
+                title={walkingDirty ? "Ada perubahan di tabel yang belum di-Apply ke robot" : "Isi tabel sudah sama dengan yang dipakai robot"}
+              >
+                {walkingDirty ? "Belum di-Apply" : "Tersinkron"}
               </span>
-              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}>
-                {walkingLoaded ? "Runtime Loaded" : "Defaults"}
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${walkingLoaded ? "bg-blue-50 text-undip-blue" : "bg-gray-100 text-gray-500"}`}
+                title={walkingLoaded ? "Angka diambil dari robot lewat Load/Apply" : "Belum pernah Load \u2014 masih nilai default dari walkingParams.js"}
+              >
+                {walkingLoaded ? "Runtime" : "Default"}
               </span>
+              {walkingLastAppliedAt && (
+                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-[10px] font-mono text-gray-500" title="Waktu Apply terakhir dari browser ini">
+                  Apply: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
+                </span>
+              )}
             </div>
             <p className="mt-1 text-sm text-gray-500">
-              Alur: <b>Enable Module</b> → atur parameter → <b>Apply</b> → <b>Start</b>. Satuan runtime: detik, meter, radian.
+              Alur: atur parameter → <b>Apply</b> (robot langsung ke posisi init, modul diaktifkan otomatis) → <b>Start</b> kalau mau berjalan. Satuan runtime: detik, meter, radian.
             </p>
-            {walkingLastAppliedAt && (
-              <p className="mt-1 text-xs text-gray-400 font-mono">
-                Terakhir Apply: {new Date(walkingLastAppliedAt).toLocaleTimeString()}
-              </p>
-            )}
             {walkingError && (
               <p className="mt-2 text-xs text-red-600 font-mono">{walkingError}</p>
             )}
@@ -1514,7 +1823,7 @@ export default function App() {
               <button title="Baca parameter yang sedang aktif di robot ke tabel." className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`} onClick={loadWalkingParams} disabled={!rosConnected}>
                 <Download size={14} /> Load
               </button>
-              <button title="Kirim semua parameter ke runtime robot (tanpa langsung jalan)." className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`} onClick={() => applyWalkingParams()} disabled={!rosConnected}>
+              <button title="Kirim semua parameter ke robot DAN langsung bawa robot ke posisi init-nya. Walking module diaktifkan otomatis kalau belum, jadi tidak perlu Start dulu untuk melihat offset Init Pose." className={`${walkingButtonBase} bg-blue-50 text-undip-blue border border-blue-100 hover:bg-blue-100`} onClick={applyWalkingParamsNow} disabled={!rosConnected}>
                 <Send size={14} /> Apply
               </button>
               <button title="Kirim parameter lalu langsung mulai berjalan." className={`${walkingButtonBase} bg-green-600 text-white hover:bg-green-700`} onClick={applyWalkingAndStart} disabled={!rosConnected}>
@@ -1545,96 +1854,115 @@ export default function App() {
               <button title="Matikan balance control." className={`${walkingButtonBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`} onClick={() => sendBalanceCommand(false)} disabled={!rosConnected}>
                 Balance Off
               </button>
+              <div className="h-5 w-px bg-gray-300 mx-1" />
               <button title="Simpan parameter ke file di robot supaya tetap dipakai setelah restart." className={`${walkingButtonBase} bg-yellow-50 text-yellow-700 border border-yellow-100 hover:bg-yellow-100`} onClick={() => sendWalkingCommand("save", "Walking params save command sent")} disabled={!rosConnected}>
                 <Save size={14} /> Save to Robot
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-bold text-gray-900">Walking Versions</h3>
-                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase text-gray-500">
-                    Browser local
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Saved versions are browser-local only. Loading a version updates the UI and waits for Apply before publishing to ROS.
-                </p>
-              </div>
-              <div className="grid w-full grid-cols-1 gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto_auto_auto] xl:max-w-4xl">
-                <input
-                  type="text"
-                  value={walkingVersionName}
-                  onChange={(e) => setWalkingVersionName(e.target.value)}
-                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
-                  placeholder="Version name"
-                />
-                <select
-                  value={activeWalkingVersionId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    const version = walkingVersions.find((item) => item.id === id);
-                    setActiveWalkingVersionId(id);
-                    setWalkingVersionName(version?.name || "");
-                  }}
-                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
-                >
-                  <option value="">Select version</option>
-                  {walkingVersions.map((version) => (
-                    <option key={version.id} value={version.id}>
-                      {version.name} - {new Date(version.updatedAt).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
-                  onClick={saveWalkingVersion}
-                >
-                  <Save size={14} /> Save Version
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
-                  onClick={loadWalkingVersion}
-                  disabled={!selectedWalkingVersion}
-                >
-                  Load Version
-                </button>
-                <button
-                  className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
-                  onClick={deleteWalkingVersion}
-                  disabled={!selectedWalkingVersion}
-                >
-                  <Trash2 size={14} /> Delete
-                </button>
-              </div>
+          {/* Kalibrasi batas geser kiper D58 (2026-11-12): perekamnya
+              scripts/calib_batas_geser.py layan; panel ini tidak menggerakkan robot. */}
+          <KalibrasiBatasGeser ros={rosRef.current} rosState={rosState} />
+
+          {/* PRESET CEPAT -- dirapatkan seperti ALPHONSE: satu kartu berisi tiga
+              tombol kecil, bukan tiga kartu besar selebar layar. Urutannya juga
+              dibalik supaya preset (yang mengisi tabel) datang sebelum Versi
+              Tersimpan (yang juga mengisi tabel), bukan sesudahnya. */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-gray-800">Preset Cepat</h3>
+              <span className="text-[10px] text-gray-400">Klik untuk mengisi tabel dengan nilai preset — belum dikirim ke robot, tetap perlu Apply</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("tiny")}
+                title="Langkah uji paling aman: pelan dan sangat pendek"
+              >
+                <div className="text-xs font-bold text-gray-900">Tiny Test</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">Period 0.85s, maju 3mm, balance on.</div>
+              </button>
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("stop")}
+                title="Nolkan amplitudo gerak tanpa mengubah postur dan gain"
+              >
+                <div className="text-xs font-bold text-gray-900">Stop Motion</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">x/y/turn = 0, postur &amp; gain tetap.</div>
+              </button>
+              <button
+                className="text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-undip-blue/40 hover:bg-white transition-all"
+                onClick={() => applyWalkingPreset("balance")}
+                title="Kembalikan gain balance ke nilai repo"
+              >
+                <div className="text-xs font-bold text-gray-900">Balance Defaults</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">Hip 0.35, knee 0.4, ankle 0.7/0.9.</div>
+              </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("tiny")}
-            >
-              <div className="text-sm font-bold text-gray-900">Tiny Test</div>
-              <div className="mt-1 text-xs text-gray-500">Slow 0.85s period, 3mm forward, balance on.</div>
-            </button>
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("stop")}
-            >
-              <div className="text-sm font-bold text-gray-900">Stop Motion</div>
-              <div className="mt-1 text-xs text-gray-500">Zero x/y/turn amplitudes while keeping posture and gains.</div>
-            </button>
-            <button
-              className="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-4 hover:border-undip-blue/40 hover:shadow-md transition-all"
-              onClick={() => applyWalkingPreset("balance")}
-            >
-              <div className="text-sm font-bold text-gray-900">Balance Defaults</div>
-              <div className="mt-1 text-xs text-gray-500">Restore repo balance gains: hip 0.35, knee 0.4, ankle 0.7/0.9.</div>
-            </button>
+          {/* VERSI TERSIMPAN -- satu baris ringkas, bukan kartu tinggi. */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-gray-800">Versi Tersimpan</h3>
+              <span
+                className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500"
+                title="Disimpan di robot (walking_versions.json di samping berkas .bin action), bukan di peramban. Jadi versi yang sama muncul dari alamat, perangkat, atau peramban mana pun."
+              >
+                Tersimpan di robot
+              </span>
+              <span className="text-[10px] text-gray-400">Load hanya mengisi tabel — tetap perlu Apply untuk kirim ke robot</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
+              <input
+                type="text"
+                value={walkingVersionName}
+                onChange={(e) => setWalkingVersionName(e.target.value)}
+                className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
+                placeholder="Nama versi…"
+              />
+              <select
+                value={activeWalkingVersionId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const version = walkingVersions.find((item) => item.id === id);
+                  setActiveWalkingVersionId(id);
+                  setWalkingVersionName(version?.name || "");
+                }}
+                className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-undip-blue focus:outline-none focus:ring-2 focus:ring-undip-blue/20"
+              >
+                <option value="">— Pilih versi —</option>
+                {walkingVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.name} · {new Date(version.updatedAt).toLocaleString()}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={`${walkingButtonBase} bg-undip-blue text-white hover:bg-opacity-90`}
+                onClick={saveWalkingVersion}
+                title="Simpan isi tabel saat ini sebagai versi baru di browser"
+              >
+                <Save size={14} /> Save
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+                onClick={loadWalkingVersion}
+                disabled={!selectedWalkingVersion}
+                title="Isi tabel dengan parameter dari versi terpilih"
+              >
+                Load
+              </button>
+              <button
+                className={`${walkingButtonBase} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
+                onClick={deleteWalkingVersion}
+                disabled={!selectedWalkingVersion}
+                title="Hapus versi terpilih dari browser"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
           </div>
 
           <WalkingSim rosUrl={rosUrl} active={activeTab === "walking"} />
@@ -1663,6 +1991,14 @@ export default function App() {
                             {dirty && <span className="w-2 h-2 rounded-full bg-yellow-400" title="Changed" />}
                           </div>
                           <div className="mt-1 text-[11px] text-gray-400 font-mono break-all">{field.key}{field.unit ? ` (${field.unit})` : ""}</div>
+                          {field.key === "init_z_offset" &&
+                            parseWalkingNumber(walkingParams.init_z_offset, 1) <= 0 && (
+                            // Diam-diam mematikan gait, jadi harus terlihat di layar --
+                            // bukan cuma di tooltip yang perlu di-hover.
+                            <div className="mt-1 rounded bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700">
+                              z_offset ≤ 0 membekukan kaki: IK tidak punya solusi. Pakai 0,002 atau lebih.
+                            </div>
+                          )}
                         </div>
 
                         {field.type === "bool" ? (
@@ -2001,6 +2337,259 @@ export default function App() {
           </div>
         </div>
 
+        {/* Magnetometer Card */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Magnetometer / Yaw" />
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500" title="Arah kompas absolut, 0-360 derajat. Tidak bergantung arah robot saat dinyalakan.">Heading</span>
+              <strong className="font-mono text-gray-900">{formatNumber(mag?.heading_deg, 1)}°</strong>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500" title="Yaw dari magnetometer, relatif arah robot saat OpenCR dinyalakan. Inilah yaw yang dipakai /robotis/open_cr/imu.">Yaw (mag)</span>
+              <strong className="font-mono text-gray-900">{formatNumber(mag?.yaw_mag_deg, 1)}°</strong>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500" title="Yaw lama hasil integrasi gyro. Disimpan firmware sebagai pembanding.">Yaw (gyro)</span>
+              <strong className="font-mono text-gray-900">{formatNumber(mag?.yaw_gyro_deg, 1)}°</strong>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500" title="Selisih yaw kompas terhadap yaw gyro. Angka yang terus membesar = drift gyro, dan itu yang dikoreksi magnetometer.">Drift gyro</span>
+              <strong className="font-mono text-gray-900">{formatNumber(mag?.yaw_drift_deg, 1)}°</strong>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-50">
+              <span className="text-sm text-gray-500" title="Kuat medan magnet total. Nilai wajar di dalam ruangan sekitar 25-65 uT. Jauh di luar itu = ada besi/magnet dekat sensor, kalibrasi tidak akan menolong.">Field</span>
+              <strong className="font-mono text-gray-900">{formatNumber(mag?.norm_ut, 1)} µT</strong>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {["x", "y", "z"].map((axis) => (
+                <div key={axis} className="bg-gray-50 rounded-lg py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-400">{axis}</div>
+                  <div className="font-mono text-xs text-gray-800">{formatNumber(mag?.[`${axis}_ut`], 1)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className={`text-center p-2 rounded-lg text-xs font-bold uppercase tracking-wider ${magStyle.box}`}>
+              {magState}
+            </div>
+            <p className="text-[11px] text-gray-500 text-center -mt-2">{magStyle.note}</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                title="Darurat: nol-kan yaw di arah robot saat ini. Normalnya tidak perlu -- yaw sudah nol menghadap ke arah robot saat dinyalakan. Menekan ini membuang geser tetap yang mengoreksi medan servo, jadi pakai hanya kalau robot terlanjur diputar sebelum servo hidup."
+                className={`${BUTTON_BASE} col-span-2 bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+                onClick={() => sendImuCommand("zero_yaw", "Yaw di-nol-kan di arah sekarang")}
+                disabled={rosState !== "connected"}
+              >
+                Zero Yaw
+              </button>
+              <button
+                title="Kalibrasi bias gyro. Robot harus benar-benar diam selama proses."
+                className={`${BUTTON_BASE} col-span-2 bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+                onClick={() => sendImuCommand("calibrate_gyro", "Kalibrasi gyro: jangan gerakkan robot")}
+                disabled={rosState !== "connected"}
+              >
+                Calibrate Gyro
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Kalibrasi Yaw -- lima titik, direkam operator */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+          <SectionHeader title="Kalibrasi Yaw" />
+          {(() => {
+            const cal = yawCal;
+            const rows = cal?.table || [];
+            const recorded = new Set(cal?.recorded || []);
+            const complete = (cal?.missing || [1]).length === 0;
+            const src = cal?.source || "gyro";
+            const gap = cal?.back_gap_deg || {};
+            const fmt = (v, d = 1) =>
+              typeof v === "number" && Number.isFinite(v) ? v.toFixed(d) : "—";
+            const conn = rosState === "connected";
+            return (
+              <div className="flex flex-col gap-3">
+                <p className="text-[11px] leading-relaxed text-gray-500">
+                  Putar robot ke tiap posisi fisik, tahan diam, lalu tekan <b>Rekam</b>.
+                  Nilai sensor disimpan apa adanya. Pemetaan baru dihitung setelah
+                  kelima titik lengkap dan kamu menekan Terapkan.
+                  <span className="font-bold text-gray-700"> Kiri = positif, kanan = negatif.</span>
+                </p>
+
+                {/* Pilih sumber sinyal. Keduanya direkam bersamaan, jadi berpindah
+                    sumber tidak perlu merekam ulang. */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Sumber</span>
+                  {["gyro", "compass"].map((opt) => (
+                    <button
+                      key={opt}
+                      title={opt === "gyro"
+                        ? "Yaw integrasi gyro. Mulus, melayang ~0,4 derajat/menit. Disarankan di robot ini."
+                        : "Heading magnetometer. Absolut, tapi di robot ini terukur melayang +33 derajat per 300 detik saat diam dan melompat saat servo aktif."}
+                      className={`${BUTTON_BASE} flex-1 ${src === opt
+                        ? "bg-undip-blue text-white"
+                        : "bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100"}`}
+                      onClick={() => sendYawCalib("yaw_calib_apply", { source: opt })}
+                      disabled={!conn || yawCalBusy || !complete}
+                    >
+                      {opt === "gyro" ? "Gyro" : "Kompas"}
+                      {Number.isFinite(gap[opt]) && (
+                        <span className="ml-1 font-mono text-[10px] opacity-70">
+                          ±{fmt(gap[opt])}°
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {(Number.isFinite(gap.gyro) || Number.isFinite(gap.compass)) && (
+                  <p className="-mt-1 text-[10px] text-gray-400">
+                    Angka di tombol = selisih antara rekaman kiri 180 dan kanan 180.
+                    Keduanya arah fisik yang sama, jadi makin kecil makin bisa dipercaya.
+                  </p>
+                )}
+
+                {/* Tabel: target, sensor terekam, hasil koreksi, galat */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-left text-gray-400">
+                        <th className="py-1 pr-2 font-bold uppercase">Target</th>
+                        <th className="py-1 pr-2 font-bold uppercase">Sensor</th>
+                        <th className="py-1 pr-2 font-bold uppercase">Koreksi</th>
+                        <th className="py-1 pr-2 font-bold uppercase">Galat</th>
+                        <th className="py-1 font-bold uppercase">Rekam</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(rows.length ? rows : [0, 90, 180, -90, -180].map((t) => ({ target: t })))
+                        .map((row) => {
+                        const t = row.target;
+                        const has = recorded.has(t);
+                        const err = row.err_new;
+                        return (
+                          <tr key={t} className="border-t border-gray-50">
+                            <td className="py-1.5 pr-2 font-bold text-gray-800">
+                              {t > 0 ? `+${t}` : t}°
+                              <span className="ml-1 font-normal text-gray-400">
+                                {t === 0 ? "awal" : t > 0 ? "kiri" : "kanan"}
+                              </span>
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono text-gray-600">
+                              {has ? `${fmt(row.raw)}°` : "—"}
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono font-bold text-gray-900">
+                              {typeof row.yaw_new === "number" ? `${fmt(row.yaw_new)}°` : "—"}
+                            </td>
+                            <td className={`py-1.5 pr-2 font-mono ${
+                              typeof err !== "number" ? "text-gray-400"
+                                : Math.abs(err) < 3 ? "text-green-600" : "text-yellow-700"}`}>
+                              {typeof err === "number" ? `${err >= 0 ? "+" : ""}${fmt(err)}°` : "—"}
+                            </td>
+                            <td className="py-1.5">
+                              <div className="flex gap-1">
+                                <button
+                                  className={`${BUTTON_BASE} flex-1 ${has
+                                    ? "bg-green-50 text-green-700 border border-green-100 hover:bg-green-100"
+                                    : "bg-undip-blue text-white hover:bg-opacity-90"}`}
+                                  onClick={() => sendYawCalib("yaw_calib_record", { target: t })}
+                                  disabled={!conn || yawCalBusy}
+                                  title={has ? "Rekam ulang titik ini" : "Rekam nilai sensor di posisi ini"}
+                                >
+                                  {has ? "Ulang" : "Rekam"}
+                                </button>
+                                {cal?.applied && (
+                                  // Verifikasi merekam yaw SESUDAH koreksi di posisi
+                                  // ini. Itulah galat sebenarnya -- beda dengan kolom
+                                  // koreksi yang dihitung dari rekaman itu sendiri.
+                                  <button
+                                    className={`${BUTTON_BASE} px-2 ${row.basis === "verifikasi"
+                                      ? "bg-green-600 text-white"
+                                      : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}
+                                    onClick={() => sendYawCalib("yaw_calib_record", { target: t, verify: true })}
+                                    disabled={!conn || yawCalBusy}
+                                    title="Putar robot ke posisi ini, lalu tekan untuk mengukur galat sebenarnya"
+                                  >
+                                    ✓
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {rows.some((r) => r.basis === "rekaman") && (
+                  // Galat nol di sini TIDAK membuktikan apa-apa: pemetaan dipasang
+                  // pada rekamannya sendiri. Yang membuktikan adalah verifikasi.
+                  <p className="rounded bg-blue-50 px-2 py-1.5 text-[10px] leading-relaxed text-blue-800">
+                    Kolom koreksi masih dihitung dari rekaman yang sama, jadi galatnya
+                    nol menurut konstruksi. Untuk galat yang sebenarnya: terapkan dulu,
+                    putar robot ke tiap titik lagi, lalu tekan tombol <b>✓</b> di baris itu.
+                  </p>
+                )}
+
+                {cal?.mapping_error?.[src] && (
+                  <p className="rounded bg-yellow-50 px-2 py-1.5 text-[10px] leading-relaxed text-yellow-800">
+                    {cal.mapping_error[src]}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className={`${BUTTON_BASE} bg-undip-blue text-white hover:bg-opacity-90`}
+                    onClick={() => sendYawCalib("yaw_calib_apply")}
+                    disabled={!conn || yawCalBusy || !complete}
+                    title={complete
+                      ? "Hitung pemetaan dari kelima titik, tulis ke robot, dan pakai sekarang"
+                      : "Rekam kelima titik dulu"}
+                  >
+                    Terapkan
+                  </button>
+                  <button
+                    className={`${BUTTON_BASE} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+                    onClick={() => sendYawCalib("yaw_calib_get")}
+                    disabled={!conn || yawCalBusy}
+                    title="Baca ulang rekaman dan status dari robot"
+                  >
+                    Segarkan
+                  </button>
+                  <button
+                    className={`${BUTTON_BASE} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+                    onClick={() => sendYawCalib("yaw_calib_disable")}
+                    disabled={!conn || yawCalBusy || !cal?.applied}
+                    title="Matikan pemetaan sementara untuk membandingkan dengan perilaku lama. Rekaman dan berkas tidak dihapus."
+                  >
+                    Matikan
+                  </button>
+                  <button
+                    className={`${BUTTON_BASE} bg-red-50 text-red-600 border border-red-100 hover:bg-red-100`}
+                    onClick={() => sendYawCalib("yaw_calib_clear")}
+                    disabled={!conn || yawCalBusy || recorded.size === 0}
+                    title="Hapus semua titik yang sudah direkam dan mulai dari awal"
+                  >
+                    Hapus Rekaman
+                  </button>
+                </div>
+
+                <div className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider ${
+                  cal?.applied ? "bg-green-50 text-green-700"
+                    : complete ? "bg-yellow-50 text-yellow-700"
+                    : "bg-gray-100 text-gray-500"}`}>
+                  {cal?.applied
+                    ? `Dipakai — sumber ${src === "gyro" ? "gyro" : "kompas"}`
+                    : complete ? "Lengkap, belum diterapkan"
+                    : `${recorded.size} dari 5 titik direkam`}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
         {/* Demo Control */}
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
           <SectionHeader title="Demo Control" />
@@ -2310,6 +2899,31 @@ export default function App() {
           </div>
           <div className={activeTab === "walking" ? "h-full" : "hidden"}>
             {renderWalking()}
+          </div>
+          <div className={activeTab === "rl" ? "h-full" : "hidden"}>
+            <RlTrainingPage
+              ros={rosRef.current}
+              rosState={rosState}
+              sendStatus={sendStatus}
+              studioParams={walkingParams}
+              studioVersionName={walkingVersions.find((v) => v.id === activeWalkingVersionId)?.name || ""}
+              walkingVersions={walkingVersions}
+              onBeforeWalking={restoreFullSpeed}
+            />
+          </div>
+          <div className={activeTab === "actrain" ? "h-full" : "hidden"}>
+            <ActionTrainingPage
+              ros={rosRef.current}
+              rosState={rosState}
+              sendStatus={sendStatus}
+              onBeforeAction={() => {
+                // Sama dengan Init Pose: kaki pindah ke action_module, jadi Start
+                // walking berikutnya harus mengaktifkan walking_module lagi; batas
+                // kecepatan Torque ON dilepas supaya page diputar dengan laju aslinya.
+                walkingModuleEnabledRef.current = false;
+                restoreFullSpeed();
+              }}
+            />
           </div>
           <div className={activeTab === "teleop" ? "h-full" : "hidden"}>
             {renderTeleop()}

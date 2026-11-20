@@ -48,6 +48,7 @@ readonly M_BUILD="build"
 readonly M_DOCTOR="doctor"
 readonly M_INSTALL_DEPS="install_deps"
 readonly M_ROS_ENV="ros_env"
+readonly M_CALIBRATION="calibration"
 readonly M_DOCKER_BUILD="docker_build"
 readonly M_DOCKER_RUN="docker_run"
 readonly M_DOCKER_COMPOSE_UP="docker_compose_up"
@@ -67,6 +68,9 @@ readonly MENU_ENUMS=(
   "$M_DOCKER_COMPOSE_UP"
   "$M_DOCKER_STOP"
   "$M_EXIT_TMUX"
+  # Calibration duduk tepat sebelum Quit: dia menyalakan op3_manager sendiri
+  # (robot ke pose INIT), jadi tempatnya bukan di antara pilihan setup.
+  "$M_CALIBRATION"
   "$M_QUIT"
 )
 
@@ -78,6 +82,7 @@ menu_label() {
     "$M_DOCTOR")        echo "Health check" ;;
     "$M_INSTALL_DEPS")  echo "Install deps" ;;
     "$M_ROS_ENV")       echo "Set ROS env" ;;
+    "$M_CALIBRATION")   echo "Calibration" ;;
     "$M_DOCKER_BUILD")  echo " Docker build" ;;
     "$M_DOCKER_RUN")    echo "Container: start + shell" ;;
     "$M_DOCKER_COMPOSE_UP") echo "Container: start" ;;
@@ -96,6 +101,7 @@ menu_emoji() {
     "$M_DOCTOR")        echo "🩺" ;;
     "$M_INSTALL_DEPS")  echo "📦" ;;
     "$M_ROS_ENV")       echo "🌐" ;;
+    "$M_CALIBRATION")   echo "🧭" ;;
     "$M_DOCKER_BUILD")  echo "🏗️" ;;
     "$M_DOCKER_RUN")    echo "🐳" ;;
     "$M_DOCKER_COMPOSE_UP") echo "🐳" ;;
@@ -131,6 +137,7 @@ choice_to_enum() {
     "Health check")      echo "$M_DOCTOR" ;;
     "Install deps")      echo "$M_INSTALL_DEPS" ;;
     "Set ROS env")       echo "$M_ROS_ENV" ;;
+    "Calibration")       echo "$M_CALIBRATION" ;;
     "Docker build")      echo "$M_DOCKER_BUILD" ;;
     "Container: start + shell") echo "$M_DOCKER_RUN" ;;
     "Container: start") echo "$M_DOCKER_COMPOSE_UP" ;;
@@ -318,6 +325,19 @@ while true; do
       else
         echo "OP3_ACTION_FILE unchanged."
       fi
+      ;;
+
+    "$M_CALIBRATION")
+      # Kalibrasi yaw IMU (magnetometer OpenCR) 5 titik. Di host lewat
+      # /docker-entrypoint.sh supaya ROS terpasang; env ROS_DOMAIN_ID/LOCALHOST
+      # disamakan alat itu sendiri dengan op3_manager yang sedang hidup.
+      if [[ -f /.dockerenv ]]; then
+        python3 "$WS/scripts/calib_imu_yaw.py"
+      else
+        docker exec -it "${OP3_CONTAINER_NAME:-op3}" /docker-entrypoint.sh \
+          python3 /ros2_ws/scripts/calib_imu_yaw.py
+      fi
+      echo "calib_imu_yaw.py selesai (kode $?)."
       ;;
 
     "$M_DOCKER_BUILD")

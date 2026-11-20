@@ -29,6 +29,15 @@ class HeadTrackingNode(Node):
         self._ball_center_topic = str(
             self.declare_parameter("ball_center_topic", "/vision/yolo/ball_center").value
         )
+        # Mode kiper D58 (KSTI 2026, operator 2026-11-07): titik halang striker +
+        # bolanya, diterbitkan InterceptDemo dalam format yang sama dengan
+        # ball_center. Sumber yang menggerakkan kepala dipilih lewat
+        # /ball_tracker/command "target_gk" / "target_ball"; bawaan "ball", dan
+        # "stop" selalu mengembalikannya ke "ball" -- D56 tidak berubah.
+        self._gk_target_topic = str(
+            self.declare_parameter("gk_target_topic", "/vision/gk/target_center").value
+        )
+        self._source = "ball"
 
         # PID gains copied from the original OP3 ball tracker defaults.
         self._p_gain = float(self.declare_parameter("p_gain", 0.30).value)
@@ -50,6 +59,34 @@ class HeadTrackingNode(Node):
         self._scan_enabled = bool(self.declare_parameter("scan_enabled", True).value)
         self._scan_period_sec = float(self.declare_parameter("scan_period_sec", 2.5).value)
         self._scan_pan_rad = float(self.declare_parameter("scan_pan_rad", 0.7).value)
+        # OBSERVING MODE KIPER (sumber "gk", operator 2026-11-08). Tilt dari kalibrasi
+        # jarak (scripts/calib_jarak_kamera.py): servo 20 ~192 = +12 deg sendi memuat
+        # bola ~0,45-4,2 m sekaligus -- tidak menunduk ke rumput. Pan sempit, mulai
+        # dari tengah, dan arah terakhir ditahan dulu sebelum scan.
+        self._gk_scan_tilt_rad = float(
+            self.declare_parameter("gk_scan_tilt_rad", math.radians(12.0)).value)
+        self._gk_scan_pan_rad = abs(float(
+            self.declare_parameter("gk_scan_pan_rad", math.radians(35.0)).value))
+        self._gk_lost_timeout = float(self.declare_parameter("gk_lost_timeout", 1.5).value)
+        self._gk_scan_period_sec = float(self.declare_parameter("gk_scan_period_sec", 1.2).value)
+        # Cek "kepala sudah sampai". Batasnya SALINAN batas keras
+        # head_control_module (pan +-85, tilt -75..+30 derajat) -- target di luar
+        # itu dipotong modul, jadi kedatangan harus dibandingkan dengan target
+        # yang sudah dipotong, bukan dengan angka mentahnya.
+        self._head_pan_limit_rad = abs(float(
+            self.declare_parameter("head_pan_limit_rad", math.radians(85.0)).value))
+        self._head_tilt_min_rad = float(
+            self.declare_parameter("head_tilt_min_rad", math.radians(-75.0)).value)
+        self._head_tilt_max_rad = float(
+            self.declare_parameter("head_tilt_max_rad", math.radians(51.0)).value)
+        self._scan_arrive_tol_rad = float(
+            self.declare_parameter("scan_arrive_tol_rad", math.radians(3.0)).value)
+        # Pengaman kalau kepala tidak pernah sampai (servo latch, terhalang).
+        # Harus lebih lama dari perjalanan terpanjang: 170 derajat pada 42 deg/s
+        # (angle_unit dari op3_manager.launch.py, berlaku ke head_control_module
+        # lewat wildcard /** di berkas parameter launch) = 4,0 detik.
+        self._scan_arrive_timeout_sec = float(
+            self.declare_parameter("scan_arrive_timeout_sec", 10.0).value)
         self._scan_tilt_forward_rad = float(
             self.declare_parameter("scan_tilt_forward_rad", -0.10).value
         )
@@ -79,6 +116,21 @@ class HeadTrackingNode(Node):
         self._max_offset_tilt_rad = abs(
             float(self.declare_parameter("max_offset_tilt_rad", 0.20).value)
         )
+
+        # GOYANG PAN SAAT DIAM (D58, operator 2026-10-30, pengganti ayunan lengan):
+        # selama bola terlihat, head_pan (servo 19) berayun sinus kecil di sekitar
+        # posisi tracking. Hanya aktif lewat perintah "sway_on" (D58 saat robot
+        # diam); "sway_off"/"stop" mematikannya. Amplitudo sengaja di bawah lebar
+        # deadzone (0,10 -> ~4 deg pan) supaya PID tidak melawannya. head_tilt
+        # (servo 20) TIDAK digoyang: D58 membaca jarak bola dari servo itu.
+        self._sway_pan_rad = math.radians(abs(float(
+            self.declare_parameter("idle_sway_pan_deg", 3.0).value)))
+        self._sway_period_sec = max(0.5, float(
+            self.declare_parameter("idle_sway_period_sec", 3.0).value))
+        # Perintah offset head_control_module bergerak 0,1 dtk dan relatif terhadap
+        # goal SEKARANG; dikirim lebih jarang dari itu supaya tiap langkah tuntas.
+        self._sway_step_sec = max(0.15, float(
+            self.declare_parameter("idle_sway_step_sec", 0.2).value))
 
         self._pan_sign = float(self.declare_parameter("pan_sign", 1.0).value)
         self._tilt_sign = float(self.declare_parameter("tilt_sign", -1.0).value)
@@ -118,6 +170,12 @@ class HeadTrackingNode(Node):
             10,
         )
         self.create_subscription(
+            PointStamped,
+            self._gk_target_topic,
+            self._gk_target_callback,
+            10,
+        )
+        self.create_subscription(
             String,
             "/ball_tracker/command",
             self._tracker_command_callback,
@@ -129,6 +187,12 @@ class HeadTrackingNode(Node):
         self._last_ball_y: Optional[float] = None
         self._last_x_norm: float = 0.0
         self._last_y_norm: float = 0.0
+        # Ada deteksi YOLO baru yang belum dipakai untuk koreksi. Loop kontrol lebih
+        # cepat dari deteksi; tanpa penanda ini posisi bola yang SAMA dipakai
+        # berulang-ulang, dan karena perintahnya offset RELATIF, koreksinya menumpuk
+        # -> kepala kebablasan melewati tengah lalu balik: "mengangguk-angguk".
+        self._new_ball_sample: bool = False
+        self._last_sample_time: float = 0.0
         self._prev_pan_error = 0.0
         self._prev_tilt_error = 0.0
         self._pan_error_sum = 0.0
@@ -139,6 +203,10 @@ class HeadTrackingNode(Node):
         self._scan_active = False
         self._last_scan_cmd_time = 0.0
         self._scan_idx = 0
+        # Pola sapuan. "default" = pola lama (dipakai demo D56 lewat "start").
+        # "2d" = pola D58 lewat "start_2d": sapuan kiri-kanan di DUA ketinggian.
+        self._scan_mode = "2d"
+        self._scan_session = False   # True selama satu episode bola hilang (mode 2d)
 
         # Scan sweep: forward-left, forward-right, down-right, down-left.
         # Down positions use slightly narrower pan so the camera looks between
@@ -146,12 +214,34 @@ class HeadTrackingNode(Node):
         p = self._scan_pan_rad
         fw = self._scan_tilt_forward_rad
         dn = self._scan_tilt_down_rad
-        self._scan_positions = [
-            (-p, fw),
-            (+p, fw),
-            (+p * 0.7, dn),
-            (-p * 0.7, dn),
+        # Pola searching, dipakai D56 ("start") DAN D58 ("start_2d"). Urutan TETAP,
+        # empat langkah, berulang terus selama mode searching:
+        #
+        #   KANAN -> BAWAH -> KIRI -> ATAS -> (ulang dari KANAN)
+        #
+        # Tiap langkah mengubah satu sumbu saja, jadi jalurnya mengelilingi
+        # persegi: kanan-atas, kanan-bawah, kiri-bawah, kiri-atas.
+        # Tidak ada cermin, tidak ada pemilihan arah awal, tidak ada acak.
+        # Atas = scan_tilt_forward_rad (servo 210), bawah = scan_tilt_down_rad
+        # (servo 238). Batas kiri-kanan +-p. head_pan positif = kiri.
+        # SAMA PERSIS dengan BallTracker::scanBall() di op3_demo.
+        self._scan_positions_2d = [
+            (-p, fw),   # KANAN (atas)
+            (-p, dn),   # BAWAH (di kanan)
+            (+p, dn),   # KIRI  (bawah)
+            (+p, fw),   # ATAS  (di kiri)
         ]
+        self._present_pan = None
+        self._present_tilt = None
+        self._scan_target = None
+        self._sway_on = False
+        self._sway_applied = 0.0     # offset goyang yang sedang terpasang (rad)
+        self._sway_t0 = 0.0
+        self._last_sway_cmd_time = 0.0
+
+        self.create_subscription(
+            JointState, "/robotis/present_joint_states", self._present_joint_callback, 10
+        )
 
         self.create_timer(1.0 / self._control_rate, self._control_loop)
         if self._active:
@@ -166,10 +256,59 @@ class HeadTrackingNode(Node):
         )
         self.get_logger().info(f"  Scan enabled: {self._scan_enabled}")
 
+    def _set_source(self, source: str) -> None:
+        """Ganti sumber yang menggerakkan kepala ("ball" / "gk")."""
+        if source == self._source:
+            return
+        self._source = source
+        # Titik dari sumber lama tidak boleh menyetir kepala ke sumber baru:
+        # kosongkan, jadi sampai sampel baru datang kepala dianggap kehilangan
+        # sasaran (lost_timeout -> scan) seperti biasa.
+        self._last_ball_x = None
+        self._last_ball_y = None
+        self._last_ball_time = None
+        self._new_ball_sample = False
+        self._reset_pid()
+        self.get_logger().info(f"[CMD] sumber kepala = {source}")
+
     def _tracker_command_callback(self, msg: String) -> None:
         cmd = msg.data.strip().lower()
+        if cmd == "target_gk":
+            self._set_source("gk")
+            return
+        if cmd == "target_ball":
+            self._set_source("ball")
+            return
+        if cmd == "stop":
+            self._set_source("ball")
+        # "start_2d" = aktivasi yang sama dengan "start", tapi sapuannya memakai
+        # pola 2D. Hanya demo D58 yang mengirimnya; "start" (D56) tidak berubah.
+        if cmd in ("start", "start_2d"):
+            # Sejak 2026-09-10 kedua perintah memakai pola 2D yang sama; "start_2d"
+            # tetap diterima supaya demo D58 tidak perlu diubah.
+            new_mode = "2d"
+            if new_mode != self._scan_mode:
+                self._scan_mode = new_mode
+                self._scan_idx = 0
+                self._scan_session = False
+                self.get_logger().info(f"[CMD] scan mode = {new_mode}")
+            cmd = "start"
+        if cmd == "sway_on":
+            if not self._sway_on:
+                self._sway_on = True
+                self._sway_t0 = time.monotonic()
+                self.get_logger().info("[CMD] goyang pan saat diam ON")
+            return
+        if cmd == "sway_off":
+            if self._sway_on:
+                self._sway_on = False
+                self._unwind_sway()
+                self.get_logger().info("[CMD] goyang pan saat diam OFF")
+            return
         if cmd == "start" and not self._active:
             self._active = True
+            self._scan_session = False
+            self._scan_target = None
             self._reset_pid()
             self._last_ball_x = None
             self._last_ball_y = None
@@ -180,9 +319,14 @@ class HeadTrackingNode(Node):
             self.get_logger().info("[CMD] activated by start command")
         elif cmd == "stop" and self._active:
             self._active = False
+            self._sway_on = False
+            self._sway_applied = 0.0   # kepala dikirim ke posisi netral mutlak di bawah
             self._reset_pid()
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
+            self._scan_session = False
+            self._scan_target = None
+            # Indeks sapuan SENGAJA tidak direset: searching berikutnya lanjut.
             # Snap the head to a neutral forward pose so it doesn't keep
             # executing the last SCAN target after the stop.
             neutral = JointState()
@@ -193,6 +337,14 @@ class HeadTrackingNode(Node):
             self.get_logger().info("[CMD] deactivated by stop command")
 
     def _ball_center_callback(self, msg: PointStamped) -> None:
+        if self._source == "ball":
+            self._take_center(msg)
+
+    def _gk_target_callback(self, msg: PointStamped) -> None:
+        if self._source == "gk":
+            self._take_center(msg)
+
+    def _take_center(self, msg: PointStamped) -> None:
         """Track the latest normalized YOLO center point."""
         x_norm = float(msg.point.x)
         y_norm = float(msg.point.y)
@@ -216,6 +368,7 @@ class HeadTrackingNode(Node):
             self._last_ball_x = a * raw_x + (1.0 - a) * self._last_ball_x
             self._last_ball_y = a * raw_y + (1.0 - a) * self._last_ball_y
         self._last_ball_time = time.monotonic()
+        self._new_ball_sample = True
 
     def _control_loop(self) -> None:
         if not self._active:
@@ -227,12 +380,19 @@ class HeadTrackingNode(Node):
             self._last_ball_time is not None
             and self._last_ball_x is not None
             and self._last_ball_y is not None
-            and (now - self._last_ball_time) < self._lost_timeout
+            and (now - self._last_ball_time)
+            < (self._gk_lost_timeout if self._source == "gk" else self._lost_timeout)
         )
 
         if ball_visible:
+            self._scan_session = False
             self._track_ball(now)
+            if self._sway_on:
+                self._apply_sway(now)
         else:
+            # Searching memakai perintah MUTLAK, jadi offset goyang tidak tersisa.
+            self._sway_applied = 0.0
+            self._sway_t0 = now
             self._reset_pid()
             self._ensure_head_module_enabled(now)  # retry only when idle
             if self._scan_enabled:
@@ -246,22 +406,32 @@ class HeadTrackingNode(Node):
             self._scan_active = False
             self._last_scan_cmd_time = 0.0
 
-        # Deadzone: ball is within the inner box around image center, hold still.
-        # Stops YOLO detection jitter from turning into head oscillation when the
-        # ball is stationary.
-        if (
-            abs(self._last_ball_x) < self._center_deadzone
-            and abs(self._last_ball_y) < self._center_deadzone
-        ):
+        # Satu koreksi per deteksi baru. Tanpa ini loop 20 Hz mengulang offset
+        # relatif dari posisi bola yang sudah basi (deteksi lebih jarang dari loop,
+        # dan kamera baru "melihat" gerakan kepala sesudah jeda), jadi kepala
+        # kebablasan dan mengangguk sebelum bola akhirnya di tengah.
+        if not self._new_ball_sample:
+            return
+        self._new_ball_sample = False
+
+        # Deadzone PER SUMBU. Dulu kepala baru diam kalau X DAN Y sama-sama di
+        # tengah; selama bola masih agak ke samping, tilt ikut dikoreksi terus dari
+        # noise Y kecil milik YOLO -> naik-turun (mengangguk). Sekarang sumbu yang
+        # sudah di tengah tidak digerakkan, sumbu lainnya tetap dikejar.
+        x_in = abs(self._last_ball_x) < self._center_deadzone
+        y_in = abs(self._last_ball_y) < self._center_deadzone
+        if x_in and y_in:
             self._prev_pan_error = 0.0
             self._prev_tilt_error = 0.0
             return
 
         # Preserve the original OP3 sign convention.
-        pan_error = -math.atan(self._last_ball_x * math.tan(self._fov_width_rad))
-        tilt_error = -math.atan(self._last_ball_y * math.tan(self._fov_height_rad))
+        pan_error = 0.0 if x_in else -math.atan(self._last_ball_x * math.tan(self._fov_width_rad))
+        tilt_error = 0.0 if y_in else -math.atan(self._last_ball_y * math.tan(self._fov_height_rad))
 
-        delta_time = max(now - self._last_control_time, 1.0 / 240.0)
+        # Selang antar-DETEKSI (bukan antar-putaran loop) untuk suku D, supaya D
+        # tidak meledak saat dua deteksi berdekatan dihitung sebagai 1/240 dtk.
+        delta_time = max(now - self._last_control_time, 1.0 / 30.0)
         self._last_control_time = now
 
         pan_error_diff = (pan_error - self._prev_pan_error) / delta_time
@@ -306,15 +476,93 @@ class HeadTrackingNode(Node):
             throttle_duration_sec=0.5,
         )
 
+    def _publish_pan_offset(self, offset: float) -> None:
+        msg = JointState()
+        msg.name = [self._head_pan_joint, self._head_tilt_joint]
+        msg.position = [offset, 0.0]
+        msg.header.stamp = self.get_clock().now().to_msg()
+        self._head_offset_pub.publish(msg)
+
+    def _apply_sway(self, now: float) -> None:
+        if now - self._last_sway_cmd_time < self._sway_step_sec:
+            return
+        target = self._sway_pan_rad * math.sin(
+            2.0 * math.pi * (now - self._sway_t0) / self._sway_period_sec)
+        delta = target - self._sway_applied
+        if abs(delta) < math.radians(0.2):
+            return
+        self._publish_pan_offset(delta)
+        self._sway_applied = target
+        self._last_sway_cmd_time = now
+
+    def _unwind_sway(self) -> None:
+        if abs(self._sway_applied) > 1e-4:
+            self._publish_pan_offset(-self._sway_applied)
+        self._sway_applied = 0.0
+
+    def _present_joint_callback(self, msg: JointState) -> None:
+        for name, pos in zip(msg.name, msg.position):
+            if name == self._head_pan_joint:
+                self._present_pan = pos
+            elif name == self._head_tilt_joint:
+                self._present_tilt = pos
+
+    def _head_arrived(self) -> bool:
+        """True kalau posisi AKTUAL kepala sudah di target (yang sudah dipotong)."""
+        if self._scan_target is None or self._present_pan is None or self._present_tilt is None:
+            return False
+        pan, tilt = self._scan_target
+        lim = self._head_pan_limit_rad
+        pan = max(-lim, min(lim, pan))
+        tilt = max(self._head_tilt_min_rad, min(self._head_tilt_max_rad, tilt))
+        return (abs(self._present_pan - pan) <= self._scan_arrive_tol_rad
+                and abs(self._present_tilt - tilt) <= self._scan_arrive_tol_rad)
+
     def _ensure_scan_mode(self, now: Optional[float] = None) -> None:
         if now is None:
             now = time.monotonic()
-        # Custom sweep: move head through forward + down positions only (no
-        # ceiling-facing poses), dwelling at each so YOLO has time to detect.
-        if (now - self._last_scan_cmd_time) < self._scan_period_sec:
-            return
-        pan, tilt = self._scan_positions[self._scan_idx]
-        self._scan_idx = (self._scan_idx + 1) % len(self._scan_positions)
+
+        if not self._scan_session:
+            # Masuk (atau kembali) ke mode searching: LANJUTKAN urutan dari langkah
+            # terakhir, jangan dimulai ulang -- supaya perpindahannya tetap
+            # KANAN -> BAWAH -> KIRI -> ATAS walau searching sempat terhenti karena
+            # bola terdeteksi. Langkah pertama dikirim tanpa menunggu.
+            self._scan_session = True
+            self._scan_target = None
+            self._last_scan_cmd_time = 0.0
+            if self._source == "gk":
+                self._scan_idx = 0   # mode kiper: SELALU mulai dari tengah
+        elif self._scan_target is not None:
+            # Pindah ke langkah berikutnya HANYA kalau kepala benar-benar sudah
+            # sampai. Dulu langkah berganti tiap scan_period_sec saja, padahal
+            # menyeberang kiri<->kanan penuh (170 derajat pada 42 deg/s) butuh
+            # 4,0 detik -- setiap perjalanan ke kiri dipotong di tengah jalan dan
+            # kepala terjebak di sisi kanan. scan_period_sec tetap jadi waktu
+            # MINIMUM per posisi, jadi langkah pendek (turun/naik) tidak lebih cepat
+            # dari sebelumnya.
+            elapsed = now - self._last_scan_cmd_time
+            period = self._gk_scan_period_sec if self._source == "gk" else self._scan_period_sec
+            if elapsed < period:
+                return
+            if not self._head_arrived():
+                if elapsed < self._scan_arrive_timeout_sec:
+                    return
+                self.get_logger().warn(
+                    f"[SCAN] kepala tidak sampai ke target dalam "
+                    f"{self._scan_arrive_timeout_sec:.0f} dtk -- lanjut ke langkah berikutnya",
+                    throttle_duration_sec=5.0,
+                )
+
+        if self._source == "gk":
+            # tengah -> kiri -> tengah -> kanan, satu tilt (head_pan positif = kiri)
+            p, t = self._gk_scan_pan_rad, self._gk_scan_tilt_rad
+            positions = [(0.0, t), (+p, t), (0.0, t), (-p, t)]
+        else:
+            positions = self._scan_positions_2d
+        self._scan_idx %= len(positions)
+        pan, tilt = positions[self._scan_idx]
+        self._scan_idx = (self._scan_idx + 1) % len(positions)
+        self._scan_target = (pan, tilt)
 
         msg = JointState()
         msg.name = [self._head_pan_joint, self._head_tilt_joint]

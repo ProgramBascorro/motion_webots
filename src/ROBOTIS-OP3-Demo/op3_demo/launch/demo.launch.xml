@@ -2,14 +2,18 @@
 <launch>
   <arg name="with_manager" default="true"/>
 
-  <!-- Which ball-detector launch to run. Default = newest OpenVINO YOLO detector.
+  <!-- Which ball-detector launch to run. Default = the optimised ball-only
+       detector (ball_detector.launch.py: OpenVINO FP32 384x640, taskset on
+       P-cores, usb_cam respawn + exposure unbrake; weights from
+       config/ball_detector_yolo_params.yaml).
        Every option below starts usb_cam (namespace usb_cam_node) and publishes on
        /ball_detector_node/circle_set, so the soccer pipeline is unchanged. Swap
        without editing this file, e.g.:
+         ball_detector_launch:=yolo_ball_detector_openvino.launch.py (OpenVINO, no taskset)
          ball_detector_launch:=yolo_ball_detector_onnx.launch.py     (ONNX)
          ball_detector_launch:=yolo_ball_detector.launch.py          (PyTorch .pt)
          ball_detector_launch:=ball_detector_from_usb_cam.launch.py  (classic Hough) -->
-  <arg name="ball_detector_launch" default="yolo_ball_detector_openvino.launch.py"/>
+  <arg name="ball_detector_launch" default="ball_detector.launch.py"/>
 
   <!-- robotis op3 manager -->
   <include if="$(var with_manager)" file="$(find-pkg-share op3_manager)/launch/op3_manager.launch.py"/>
@@ -48,5 +52,131 @@
     <param name="d_gain" value="0.045" />
     <!-- Hand head control to head_tracking_node above (forward+down scan). -->
     <param name="use_head_control" value="false" />
+    <!-- MODE KIPER D58 (KSTI 2026, panduan ksti2026_GOALKEEPER_adaptasi_minimal,
+         operator 2026-11-07). Sasaran geser + kepala = striker lawan ("robot")
+         dan bola yang didekatinya; striker menendang -> page 14 maks 5 dtk; bola
+         tertahan -> tahan 2 dtk -> page 2. Gerakan (geser kiri/kanan, page 2/14)
+         tidak berubah. false = D58 lama persis. Ubah di sini lalu restart demo
+         (launch ter-symlink, tidak perlu rebuild). -->
+    <param name="intercept_gk_mode" value="true" />
+    <param name="intercept_gk_min_conf_ball" value="0.42" />
+    <param name="intercept_gk_min_conf_robot" value="0.48" />
+    <!-- FILTER ROBOT (operator 2026-11-12): benda di LUAR lapangan dikira robot. Striker hanya
+         dari kotak "robot" yang: kakinya (tepi bawah kotak, kalibrasi jarak servo 20) <= max_distance
+         maju dan <= max_lateral ke samping; tingginya min_h-max_h m dan tinggi/lebar >= min_aspect;
+         sudah terlihat >= 3 frame (jejak baru butuh keyakinan >= min_conf_robot_new, lanjutan cukup
+         min_conf_robot); dan bola terdekat <= striker_ball_max dari kakinya. Log 10 dtk
+         "KIPER robot ditolak" = alasan penolakan. Striker asli ditolak "samping" -> naikkan
+         max_lateral; "tinggi" -> lebarkan min_h/max_h. Jarak & tinggi dari model jarak BOLA = perkiraan
+         (simulasi: ~14 % lebih pendek dari meteran, benda di 3,5 m terbaca ~3,0 m). Di sudut observing
+         (servo 20 ~192) kepala robot lawan terpotong tepi atas gambar, jadi yang praktis menyaring benda
+         luar lapangan = jarak maju/samping kaki, keyakinan, jejak 3 frame, dan dekat bola. -->
+    <param name="intercept_gk_min_conf_robot_new" value="0.60" />
+    <param name="intercept_gk_robot_max_distance_m" value="3.0" />
+    <param name="intercept_gk_robot_max_lateral_m" value="2.0" />
+    <param name="intercept_gk_robot_min_h_m" value="0.25" />
+    <param name="intercept_gk_robot_max_h_m" value="1.2" />
+    <param name="intercept_gk_robot_min_aspect" value="0.8" />
+    <param name="intercept_gk_striker_ball_max_m" value="1.2" />
+    <param name="intercept_gk_ema_alpha" value="0.6" />
+    <!-- TOLERANSI GESER (operator 2026-11-09): simpangan samping striker+bola dari depan
+         kiper, dari kalibrasi jarak servo 20. Mulai geser > trigger, berhenti < release.
+         Bola tak terukur (tertutup kaki striker) -> cadangan dalam derajat. -->
+    <!-- 2026-11-11 operator: lebih peka, kiper berhadapan dengan bola (semula 0.10 / 0.04).
+         Satu langkah geser ~2-3 cm; pita 3 cm mencegah bolak-balik. -->
+    <param name="intercept_gk_lateral_trigger_m" value="0.06" />
+    <param name="intercept_gk_lateral_release_m" value="0.03" />
+    <param name="intercept_gk_trigger_deg" value="3.5" />
+    <param name="intercept_gk_release_deg" value="1.0" />
+    <!-- 2026-11-11 operator: sasaran = BOLA terpilih saja, kiper berhadapan dengannya
+         (semula 0.60 / 0.40 = titik di antara bola dan striker). Bola tetap dipilih sebagai
+         bola terdekat kaki striker; bola tertutup kaki striker (kasus 2) tetap ke striker. -->
+    <param name="intercept_gk_ball_x_weight" value="1.0" />
+    <param name="intercept_gk_striker_x_weight" value="0.0" />
+    <!-- striker "siap menendang" bila jarak kaki-bola <= rasio x lebar frame -->
+    <param name="intercept_gk_striker_close_ratio" value="0.18" />
+    <!-- batas geser bersama kiri-kanan (dtk) agar kaki tak keluar garis merah: TERA DI LAPANGAN -->
+    <!-- 2026-11-09 SEMENTARA 6,0 (operator; 3,5 memblokir geser 34-50 % waktu). Ganti dengan
+         setengah lebar area merah / kecepatan geser hasil ukur. -->
+    <param name="intercept_gk_max_sidestep_sec" value="6.0" />
+    <!-- BATAS GESER TERKALIBRASI (operator 2026-11-11): area kiper 1,8 m. Bila
+         data/kalibrasi_batas_geser.yaml valid (scripts/calib_batas_geser.py, geser via Studio
+         tengah->tepi), batas di atas DIGANTI posisi per arah; tanpa kalibrasi tetap 6,0 dtk.
+         Robot harus di TENGAH area saat D58 dinyalakan. Toleransi = berhenti sejauh ini sebelum
+         titik tepi kalibrasi (berhenti terlalu jauh -> turunkan; melewati tepi -> naikkan). -->
+    <param name="intercept_gk_edge_tolerance_m" value="0.15" />
+    <!-- 2026-11-12 dari 8 rekaman Studio (data/kalibrasi_batas_geser.yaml, toleransi_saran_m), SELURUH
+         kaki di dalam area: tepi luar telapak 8,75 cm + ayun 1 cm + galat 2 sigma (kecepatan dan hanyut
+         ~30 segmen = ~3 mnt main). Kanan 0,173 / kiri 0,157 m dibulatkan ke atas -> titik tengah robot
+         berhenti 0,72 m (kanan) / 0,74 m (kiri) dari tengah. Re-center (D58 OFF/ON di tengah) tiap kickoff.
+         Kaki berhenti jauh sebelum garis -> turunkan; menyentuh garis -> naikkan. Tanpa build. -->
+    <param name="intercept_gk_edge_tolerance_kanan_m" value="0.18" />
+    <param name="intercept_gk_edge_tolerance_kiri_m" value="0.16" />
+    <!-- tendangan = bola turun/membesar > ini px per frame, sesaat sesudah striker siap -->
+    <param name="intercept_gk_kick_velocity_px" value="14.0" />
+    <!-- page 14 maks (dtk) bila bola tak sampai di kaki; bola tertahan -> tahan (dtk). Jumlah <= 9 -->
+    <param name="intercept_gk_block_max_sec" value="5.0" />
+    <param name="intercept_gk_block_hold_sec" value="2.0" />
+    <!-- BOLA DEKAT dari kalibrasi jarak servo 20 (scripts/calib_jarak_kamera.py ->
+         data/kalibrasi_jarak_kamera.yaml, 2026-11-08). Jarak diukur dari ujung kaki.
+         Berkas kalibrasi tak ada -> kembali ke ambang servo20 lama. -->
+    <!-- 2026-11-09: tendangan piksel (kick_velocity_px) hanya MENGUNCI target bila
+         kalibrasi ada; page 14 hanya untuk bola yang BENAR-BENAR mendekat.
+         Bola diam tidak pernah memicu. Jatah saving reset saat D58 dinyalakan / dimatikan. -->
+    <param name="intercept_gk_max_saves" value="6" />
+    <!-- DEKAT: bola <= jarak ini yang mendekat >= slow_mps -> page 14 -->
+    <!-- 2026-11-11 operator: dikembalikan ke 0,6 (versi sebelum 0,4 tanggal 2026-11-10) -->
+    <param name="intercept_gk_save_distance_m" value="0.6" />
+    <!-- PENGAMAN BIAS (2026-11-10): PREDIKSI hanya bila bola <= predict_max_m; jarak dari servo 20
+         ditolak saat kepala bergerak (> head_still_dps) atau badan miring (|pitch - calib| > tol);
+         laju bola > max_ball_mps = tukar bola / lompatan. -->
+    <!-- 2026-11-11 operator: batas 1,0 dicabut lagi -> 2,5 = sama dengan jangkauan lacak
+         (track_max_distance_m), artinya PREDIKSI tanpa batas jarak seperti sebelum 2026-11-10 -->
+    <param name="intercept_gk_predict_max_m" value="2.5" />
+    <!-- 2026-11-11 operator: pengaman kepala DIMATIKAN (semula 10.0). Kepala mengikuti bola
+         yang mendekat, jadi bola yang sungguh datang justru tak terukur (log: tolak kepala
+         1210, saving 0/6). Kembalikan ke 10.0 untuk menyalakan lagi. -->
+    <param name="intercept_gk_head_still_dps" value="1000.0" />
+    <param name="intercept_gk_calib_pitch_deg" value="11.1" />
+    <!-- 2026-11-11 operator: pengaman pitch DIMATIKAN (semula 8.0; badan berayun saat geser /
+         berhenti melangkah -> tolak pitch 340). Bila saveball palsu saat badan miring muncul
+         lagi, nyalakan dengan toleransi longgar, mis. 20.0. -->
+    <param name="intercept_gk_pitch_tol_deg" value="180.0" />
+    <param name="intercept_gk_max_ball_mps" value="3.5" />
+    <!-- LATENSI KAMERA (2026-11-12): jarak dihitung dari sudut kepala SAAT gambar ditangkap =
+         waktu terima deteksi - latensi ini, jadi bola diam tak "bergerak" saat kepala bergerak.
+         Stempel usb_cam tak bisa dipakai (bug usb_cam 0.8.1: geser acak 0-1 dtk tiap start = asal
+         "latensi 900 ms" dulu). UKUR: python3 scripts/calib_jarak_kamera.py latensi, lalu isi.
+         0.0 = sudut kepala sekarang (perilaku lama). -->
+    <param name="intercept_gk_cam_latency_sec" value="0.0" />
+    <!-- PREDIKSI (2026-11-10, pengganti CEPAT): bola yang bergerak -> titik berhentinya dihitung
+         dari fit jarak-waktu; page 14 bila titik berhenti <= reach_m dari ujung kaki. Bola yang akan
+         berhenti sendiri di depan kiper tidak memicu. decel_prior dipakai sampai fit layak: TERA. -->
+    <param name="intercept_gk_reach_m" value="0.25" />
+    <param name="intercept_gk_decel_prior" value="1.5" />
+    <!-- true = pemicu hanya dicatat ([UJI] di log), tanpa page 14: untuk menera di lapangan -->
+    <param name="intercept_gk_save_dry_run" value="false" />
+    <param name="intercept_gk_slow_mps" value="0.25" />
+    <!-- CEPAT (2026-11-12): page 14 butuh 0,56 dtk sampai jongkok, jadi bola bergerak (>= approach_mps)
+         yang TIBA di zona kaki (reach_m) dalam <= react_sec -> page 14 sekarang, tak menunggu DEKAT.
+         2 frame berturut (1 bila bola itu terkunci TENDANGAN), lebar bbox harus tumbuh, titik berhenti
+         (decel_prior) <= reach_m, bola <= predict_max_m. react 0,65 = 0,56 page 14 + ~0,07 ganti modul.
+         Saving telat -> naikkan; saving palsu dari jauh -> turunkan. -->
+    <param name="intercept_gk_react_sec" value="0.65" />
+    <param name="intercept_gk_approach_mps" value="0.5" />
+    <!-- ttc_sec: tidak dipakai sejak CEPAT lama dihapus 2026-11-10 (diganti react_sec di atas) -->
+    <param name="intercept_gk_ttc_sec" value="1.0" />
+    <!-- waktu tiba <= ini -> berhenti melangkah dulu (bukan jongkok) -->
+    <param name="intercept_gk_prealert_ttc_sec" value="2.0" />
+    <!-- "mendekat" wajib turun bersih >= ini dalam 0,4 dtk (saring derau bola diam) -->
+    <param name="intercept_gk_min_drop_m" value="0.15" />
+    <!-- 2026-11-11: di zona DEKAT (<= save_distance_m) cukup turun >= ini (0,10 = 0,25 m/s x 0,4 dtk)
+         supaya bola pelan tetap terbaca bergerak; di luar zona tetap min_drop_m di atas -->
+    <param name="intercept_gk_near_min_drop_m" value="0.10" />
+    <!-- jarak > ini (luar kalibrasi) tidak dipakai -->
+    <param name="intercept_gk_track_max_distance_m" value="2.5" />
+    <!-- bola tertahan (selama page 14) bila < jarak ini, atau bola >= lebar ini terpotong tepi bawah -->
+    <param name="intercept_gk_feet_distance_m" value="0.25" />
+    <param name="intercept_gk_feet_min_w_px" value="120.0" />
   </node>
 </launch>

@@ -1,0 +1,35 @@
+# Kalibrasi jarak kamera CHRONUS -- dibuat scripts/calib_jarak_kamera.py fit
+# JANGAN diedit tangan; ulangi sapuan + fit.
+tanggal: "2026-11-07T17:53:32"
+gambar: {lebar: 640, tinggi: 360, cy0: 180.0}
+fy_px: 490.276
+# s20_setara = servo20 + atan((cy - cy0) / fy_px) * 180/pi
+model_terpilih: geometri
+geometri:   # jarak = H_m / tan((s20_setara - 180 + theta0_deg) deg) - c_m
+  H_m: 0.479718
+  theta0_deg: 12.5202
+  c_m: 0.0705878
+  rmse_cm: 1.84
+  loo_rmse_cm: 3.71
+polinomial:   # jarak = koef[0]*s^2 + koef[1]*s + koef[2], s = s20_setara
+  koef: [0.000935927355, -0.422922356, 47.8601028]
+  rmse_cm: 15.58
+  loo_rmse_cm: 29.26
+lebar_bbox:   # jarak = K_px_m / w_px - c_m (cadangan)
+  K_px_m: 83.2748
+  c_m: 0.342741
+  rmse_cm: 9.86
+rentang_data_m: [0.100, 2.500]
+observing:
+  servo20_rekomendasi: 191.95
+  setengah_fov_vertikal_deg: 20.16
+tabel:
+  - {jarak_m: 0.100, servo20_tengah: 239.199, sebaran_deg: 0.694, servo20_silang: null, w_px: 167.22, n: 5, servo20_terlihat: [229.31, 236.60]}
+  - {jarak_m: 0.200, servo20_tengah: 229.079, sebaran_deg: 0.489, servo20_silang: 229.021, w_px: 151.76, n: 9, servo20_terlihat: [219.37, 236.60]}
+  - {jarak_m: 0.300, servo20_tengah: 219.395, sebaran_deg: 0.352, servo20_silang: 219.336, w_px: 127.19, n: 12, servo20_terlihat: [207.51, 229.31]}
+  - {jarak_m: 0.500, servo20_tengah: 205.949, sebaran_deg: 0.108, servo20_silang: 205.717, w_px: 103.62, n: 14, servo20_terlihat: [193.28, 219.37]}
+  - {jarak_m: 0.750, servo20_tengah: 198.318, sebaran_deg: 0.125, servo20_silang: 198.281, w_px: 79.07, n: 16, servo20_terlihat: [183.16, 213.57]}
+  - {jarak_m: 1.000, servo20_tengah: 191.177, sebaran_deg: 0.074, servo20_silang: 191.097, w_px: 63.03, n: 17, servo20_terlihat: [175.08, 207.55]}
+  - {jarak_m: 1.500, servo20_tengah: 184.599, sebaran_deg: 0.091, servo20_silang: 184.611, w_px: 45.58, n: 17, servo20_terlihat: [171.22, 201.45]}
+  - {jarak_m: 2.000, servo20_tengah: 180.658, sebaran_deg: 0.162, servo20_silang: 180.665, w_px: 32.48, n: 15, servo20_terlihat: [171.21, 197.40]}
+  - {jarak_m: 2.500, servo20_tengah: 177.994, sebaran_deg: 0.249, servo20_silang: 177.929, w_px: 31.25, n: 14, servo20_terlihat: [171.22, 195.43]}

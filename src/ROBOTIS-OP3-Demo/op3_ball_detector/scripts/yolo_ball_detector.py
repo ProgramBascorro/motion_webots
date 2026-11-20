@@ -75,6 +75,19 @@ class YoloBallDetector(Node):
         self.iou_threshold = float(
             self.declare_parameter('iou_threshold', 0.45).value)
         self.imgsz = int(self.declare_parameter('imgsz', 640).value)
+        # Rectangular exports (e.g. 384x640, which fits a 16:9 camera with
+        # almost no letterbox padding) cannot be described by a single number:
+        # ultralytics reads an int as a SQUARE side. imgsz_hw spells the shape
+        # out as [height, width]. [0, 0] = unused, keep the square imgsz above.
+        # The value must match what the weights were exported with -- the
+        # anchor grid is baked in at export time and cannot be reshaped later.
+        hw = list(self.declare_parameter('imgsz_hw', [0, 0]).value or [])
+        if len(hw) == 2 and int(hw[0]) > 0 and int(hw[1]) > 0:
+            self.imgsz_arg = [int(hw[0]), int(hw[1])]
+            self.imgsz_desc = '%dx%d' % (hw[0], hw[1])
+        else:
+            self.imgsz_arg = self.imgsz
+            self.imgsz_desc = str(self.imgsz)
         self.device = str(self.declare_parameter('device', 'cpu').value)
         self.half = bool(self.declare_parameter('half', False).value)
         self.max_detections = int(
@@ -193,8 +206,12 @@ class YoloBallDetector(Node):
         # Warm-up so the first real frame is not penalised by lazy init.
         try:
             import numpy as np
-            dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
-            model.predict(dummy, imgsz=self.imgsz, device=self.device,
+            if isinstance(self.imgsz_arg, list):
+                dh, dw = self.imgsz_arg
+            else:
+                dh = dw = self.imgsz
+            dummy = np.zeros((dh, dw, 3), dtype=np.uint8)
+            model.predict(dummy, imgsz=self.imgsz_arg, device=self.device,
                           half=self.half, verbose=False)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().warn('Model warm-up skipped: %s' % exc)
@@ -274,7 +291,7 @@ class YoloBallDetector(Node):
                 cv_img,
                 conf=self.confidence_threshold,
                 iou=self.iou_threshold,
-                imgsz=self.imgsz,
+                imgsz=self.imgsz_arg,
                 device=self.device,
                 half=self.half,
                 max_det=self.max_detections,

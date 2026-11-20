@@ -1,3 +1,5 @@
+import os
+
 from launch import LaunchDescription
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
@@ -24,6 +26,12 @@ def generate_launch_description():
                 'robot_file_path': robot_file_path_default,
                 'init_file_path': init_file_path_default,
                 'device_name': device_name_default
-            }]
+            },
+                # Tabel kalibrasi yaw IMU (lihat op3_manager.launch.py).
+                os.path.join(get_package_share_directory('op3_manager'), 'config',
+                             'yaw_calibration.yaml'),
+                # Kalibrasi drift (bias) gyro IMU -- scripts/calib_imu_drift.py.
+                os.path.join(get_package_share_directory('op3_manager'), 'config',
+                             'imu_drift.yaml')]
         )
     ])

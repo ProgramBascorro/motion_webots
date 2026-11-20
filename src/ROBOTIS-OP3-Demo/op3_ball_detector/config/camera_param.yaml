@@ -1,13 +1,23 @@
 /**:
     ros__parameters:
+      # Plain /dev/video0 on purpose. The stable /dev/v4l/by-id/... name
+      # would survive the USB re-enumerations this C922 keeps doing, but
+      # usb_cam resolves that symlink itself and gets it WRONG: it reads the
+      # relative target "../../video0" and joins it against /dev/, so it opens
+      # "/dev/../../video0" and refuses to start. Tried and reverted -- do not
+      # "fix" this back to a by-id path without testing the node itself.
       video_device: "/dev/video0"
       framerate: 30.0
       io_method: "mmap"
       frame_id: "cam_link"
       pixel_format: "mjpeg2rgb"  # see usb_cam/supported_formats for list of supported formats
       av_device_format: "YUV422P"
-      image_width: 1280
-      image_height: 720
+      # 640x360 @ 30 is on the camera's own format list
+      # (v4l2-ctl --list-formats-ext). The models see width 640
+      # either way, so nothing is lost -- what goes away is the
+      # cost of decoding a 1280x720 MJPEG frame every 33 ms.
+      image_width: 640
+      image_height: 360
       camera_name: "camera"
       camera_info_url: "package://op3_ball_detector/config/camera_info.yaml"
       brightness: -1

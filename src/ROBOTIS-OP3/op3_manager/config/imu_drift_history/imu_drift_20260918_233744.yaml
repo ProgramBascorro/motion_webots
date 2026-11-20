@@ -1,0 +1,15 @@
+# Kalibrasi drift (bias) gyro IMU -- dibaca open_cr_module.
+#
+# BELUM DIKALIBRASI selama nilainya 0: bias dipelajari sendiri dari waktu diam.
+# Isi berkas ini dengan scripts/calib_imu_drift.py (jangan disunting tangan);
+# berlaku sesudah op3_manager start ulang.
+#
+# gyro_bias_dps = laju hanyut yaw gyro saat robot DIAM, derajat per detik.
+# Dipakai sebagai nilai awal kompensasi hanyutan, jadi yaw tidak melayang di
+# menit-menit pertama sebelum modul sempat mempelajarinya sendiri.
+#
+# Kunci /** supaya parameter sampai ke node open_cr_module di dalam proses
+# op3_manager (op3_manager.launch.py memuat berkas ini).
+/**:
+  ros__parameters:
+    gyro_bias_dps: 0.0

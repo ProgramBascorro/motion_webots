@@ -48,7 +48,12 @@ HeadControlModule::HeadControlModule()
 
   max_angle_[using_joint_name_["head_pan"]] = 85 * DEGREE2RADIAN;
   min_angle_[using_joint_name_["head_pan"]] = -85 * DEGREE2RADIAN;
-  max_angle_[using_joint_name_["head_tilt"]] = 30 * DEGREE2RADIAN;
+  // +58,03 derajat sendi = SERVO 238 derajat. Dinaikkan 2026-09-11 karena sapuan
+  // searching bawah diminta sampai servo 238; batas yang lebih kecil memotongnya
+  // dan sudutnya tidak pernah tercapai. Riwayat: bawaan +30 (servo 210) -> +51
+  // (servo 231) -> +55,03 (servo 235, agar ambang tendang 233 terjangkau) ->
+  // +58,03 (servo 238). Batas EEPROM servo ID 20 sendiri 0..4095 (dicek 2026-09-10).
+  max_angle_[using_joint_name_["head_tilt"]] = 58.03 * DEGREE2RADIAN;
   min_angle_[using_joint_name_["head_tilt"]] = -75 * DEGREE2RADIAN;
 
   target_position_ = Eigen::MatrixXd::Zero(1, result_.size());
@@ -65,12 +70,25 @@ HeadControlModule::~HeadControlModule()
   queue_thread_.join();
 }
 
+// Kecepatan rata-rata (deg/s) untuk gerak kepala ke POSISI TETAP (perintah
+// set_joint_states, mis. scan/searching), terpisah dari angle_unit yang tetap
+// dipakai koreksi tracking (set_joint_states_offset, x1.5). Operator 2026-09-19:
+// scan terlalu lama pada 30 deg/s, tracking dibiarkan 30. Bawaan = angle_unit,
+// jadi tanpa parameter ini perilakunya tidak berubah. Static di .cpp supaya
+// layout kelas (header) tidak berubah.
+static double g_angle_unit_scan = 0.0;
+
 void HeadControlModule::initialize(const int control_cycle_msec, robotis_framework::Robot *robot)
 {
   this->declare_parameter("angle_unit", 35.0);
   angle_unit_ = this->get_parameter("angle_unit").as_double();
+  this->declare_parameter("angle_unit_scan", angle_unit_);
+  g_angle_unit_scan = this->get_parameter("angle_unit_scan").as_double();
+  if (!(g_angle_unit_scan > 0.0))
+    g_angle_unit_scan = angle_unit_;
 
-  RCLCPP_WARN(this->get_logger(), "Head control - angle unit : %f", angle_unit_);
+  RCLCPP_WARN(this->get_logger(), "Head control - angle unit : %f (scan/posisi tetap : %f)",
+              angle_unit_, g_angle_unit_scan);
 
   queue_thread_ = std::thread(&HeadControlModule::queueThread, this);
 
@@ -127,6 +145,13 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
     return;
   }
 
+  // target_position_ dan moving_time_ dibaca jointTraGeneThread() yang mungkin
+  // masih berjalan untuk perintah sebelumnya; goal_position_ ditulis process().
+  // Semuanya di bawah tra_lock_. (process() -> finishMoving() -> generateScanTra()
+  // sudah memegang kunci ini, jadi kunci SENGAJA hanya diambil di sini, jalur
+  // callback -- bukan di generateScanTra().)
+  std::unique_lock<std::mutex> tra_guard(tra_lock_);
+
   // moving time
   moving_time_ = is_offset ? 0.1 : 1.0;               // default : 1 sec
 
@@ -161,7 +186,7 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
 
       // set time
       //double angle_unit = 35 * M_PI / 180;
-      double angle_unit = is_offset ? (angle_unit_ * M_PI / 180 * 1.5) : (angle_unit_ * M_PI / 180);
+      double angle_unit = is_offset ? (angle_unit_ * M_PI / 180 * 1.5) : (g_angle_unit_scan * M_PI / 180);
       double calc_moving_time = fabs(goal_position_.coeff(0, joint_index) - target_position_.coeff(0, joint_index)) / angle_unit;
       if (calc_moving_time > moving_time_)
         moving_time_ = calc_moving_time;
@@ -175,6 +200,9 @@ void HeadControlModule::setHeadJoint(const sensor_msgs::msg::JointState::SharedP
   // set mode
   is_direct_control_ = true;
   scan_state_ = NoScan;
+
+  // Lepas kunci SEBELUM membuat thread: thread itu langsung mengambil tra_lock_.
+  tra_guard.unlock();
 
   // generate trajectory
   tra_gene_thread_ = new std::thread(&HeadControlModule::jointTraGeneThread, this);
@@ -325,6 +353,15 @@ void HeadControlModule::onModuleEnable()
 
 void HeadControlModule::onModuleDisable()
 {
+  // Dipanggil thread ganti-modul di RobotisController, BUKAN thread process().
+  // calc_joint_tra_ di bawah ini berganti ukuran (N baris -> 1 baris = free +
+  // malloc), sementara jointTraGeneThread() -- thread terpisah yang dibuat tiap
+  // perintah kepala -- bisa sedang me-resize dan mengisi matriks yang sama. Tanpa
+  // tra_lock_ keduanya membebaskan memori yang sama: "double free or corruption",
+  // op3_manager mati acak -6/-11. Pemicunya kepala dipindah modul (page init
+  // saat boot, D58, head_tracking_node) selagi perintah scan kepala berdatangan.
+  std::lock_guard<std::mutex> lock(tra_lock_);
+
   // init value
   calc_joint_tra_ = goal_position_;
   tra_size_ = 0;
@@ -531,7 +568,15 @@ Eigen::MatrixXd HeadControlModule::calcMinimumJerkTraPVA(double pos_start, doubl
 
 void HeadControlModule::jointTraGeneThread()
 {
-  tra_lock_.lock();
+  // lock_guard, bukan lock()/unlock() manual: jalur keluar lebih awal di bawah
+  // tidak boleh meninggalkan tra_lock_ terkunci (process() akan macet selamanya).
+  std::lock_guard<std::mutex> lock(tra_lock_);
+
+  // Modul sudah dimatikan selagi thread ini menunggu kunci: trajektori untuk
+  // modul yang tidak memegang sendi tidak ada gunanya, dan onModuleDisable() baru
+  // saja mereset keadaannya -- jangan ditimpa lagi.
+  if (enable_ == false)
+    return;
 
   double smp_time = control_cycle_msec_ * 0.001;		// ms -> s
   int all_time_steps = int(moving_time_ / smp_time) + 1;
@@ -545,9 +590,14 @@ void HeadControlModule::jointTraGeneThread()
   }
   catch(std::exception &e)
   {
-    std::cout << "All step tile : " << all_time_steps << std::endl;
-    std::cout << e.what() << std::endl;
-    throw;
+    // Dulu "throw;" di sini. Thread ini di-detach, jadi exception tak tertangkap
+    // siapa pun -> std::terminate -> op3_manager mati -6 (dan tra_lock_ tertinggal
+    // terkunci). Lewati saja trajektori ini; perintah kepala berikutnya dicoba lagi.
+    RCLCPP_ERROR(this->get_logger(), "Gagal membuat trajektori kepala (%d langkah): %s",
+                 all_time_steps, e.what());
+    tra_size_ = 0;
+    tra_count_ = 0;
+    return;
   }
 
   for (std::map<std::string, robotis_framework::DynamixelState *>::iterator state_it = result_.begin();
@@ -575,8 +625,6 @@ void HeadControlModule::jointTraGeneThread()
 
   if (DEBUG)
     RCLCPP_INFO(this->get_logger(), "[ready] make trajectory : %d, %d", tra_size_, tra_count_);
-
-  tra_lock_.unlock();
 }
 
 void HeadControlModule::publishStatusMsg(unsigned int type, std::string msg)

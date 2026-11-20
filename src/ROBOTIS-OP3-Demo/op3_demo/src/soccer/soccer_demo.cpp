@@ -92,6 +92,7 @@ void SoccerDemo::setNode(rclcpp::Node::SharedPtr node)
     ball_tracker_.setNode(node);
     ball_follower_.setNode(node);
     head_tracker_cmd_pub_ = node_->create_publisher<std_msgs::msg::String>("/ball_tracker/command", 10);
+    reset_yaw_pub_ = node_->create_publisher<std_msgs::msg::String>("/robotis/open_cr/reset_yaw", 10);
   }
   else
   {
@@ -113,6 +114,7 @@ void SoccerDemo::setDemoEnable()
     cmd.data = "start";
     head_tracker_cmd_pub_->publish(cmd);
   }
+  resetYaw("demo soccer dinyalakan");
   startSoccerMode();
 }
 
@@ -491,6 +493,20 @@ bool SoccerDemo::isHeadJoint(const int &id)
   return false;
 }
 
+// Titik nol yaw IMU = arah robot saat demo DINYALAKAN (tombol D56/D58 atau
+// perintah). Saat dimatikan titik nol dibiarkan; dinyalakan lagi = diambil ulang
+// (permintaan operator 2026-09-18). open_cr_module mengambil offset pada sampel
+// kompas sah berikutnya.
+void SoccerDemo::resetYaw(const std::string &reason)
+{
+  if (reset_yaw_pub_ == nullptr)
+    return;
+  std_msgs::msg::String msg;
+  msg.data = reason;
+  reset_yaw_pub_->publish(msg);
+  RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Yaw IMU direset ke 0 (%s)", reason.c_str());
+}
+
 void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
 {
   if (enable_ == false)
@@ -508,6 +524,9 @@ void SoccerDemo::buttonHandlerCallback(const std_msgs::msg::String::SharedPtr ms
         RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Ignoring START press: still stopping (debounce)");
         return;
       }
+      // Hanya di sini (dan setDemoEnable/perintah), BUKAN di startSoccerMode():
+      // fungsi itu juga dipanggil otomatis sesudah tendang/bangun.
+      resetYaw("D56 menyalakan soccer lagi");
       startSoccerMode();
     }
   }
@@ -530,6 +549,7 @@ void SoccerDemo::demoCommandCallback(const std_msgs::msg::String::SharedPtr msg)
         RCLCPP_INFO(rclcpp::get_logger("SoccerDemo"), "Ignoring START command: still stopping (debounce)");
         return;
       }
+      resetYaw("perintah start soccer");
       startSoccerMode();
     }
   }

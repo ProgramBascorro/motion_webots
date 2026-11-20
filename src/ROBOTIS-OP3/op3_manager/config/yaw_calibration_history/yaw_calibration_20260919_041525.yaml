@@ -1,0 +1,11 @@
+# Kalibrasi yaw IMU (magnetometer OpenCR) 5 titik -- ditulis scripts/calib_imu_yaw.py
+# Tanggal: 2026-09-19 03:04:10
+# Heading mentah (putar kiri): titik1 78.63, titik2 199.89, titik3 268.46, titik4 337.98, titik5 72.60
+# Selisih titik 5 vs titik 1: -6.03 deg
+# Bentang per 90 deg (0->90, 90->180, 180->270, 270->360): 124.27, 68.57, 69.52, 97.64
+# Berlaku sesudah op3_manager start ulang. Jangan disunting tangan.
+/**:
+  ros__parameters:
+    yaw_calib_enable: true
+    yaw_calib_measured_heading_deg: [75.62, 199.89, 268.46, 337.98]
+    yaw_calib_true_deg: [0.0, 90.0, 180.0, 270.0]

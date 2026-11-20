@@ -216,3 +216,7 @@ coverage/
 # ikut ter-commit isinya jadi salinan repo di dalam repo.
 .claude/settings.local.json
 .claude/worktrees/
+
+# Frame kalibrasi INT8: ratusan JPEG hasil rekaman, dibuat ulang kapan saja
+# dengan scripts/capture_calib_frames.py. Tidak untuk masuk repo.
+src/ROBOTIS-OP3-Demo/op3_ball_detector/model/ball_model/calib_frames/

@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <fstream>
+#include <atomic>
 #include <thread>
 #include <eigen3/Eigen/Eigen>
 #include <yaml-cpp/yaml.h>
@@ -126,7 +127,39 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   void loadWalkingParam(const std::string &path);
   void saveWalkingParam(std::string &path);
   void iniPoseTraGene(double mov_time);
-  bool computeNeutralLegAngle(double *neutral);
+  // Sudut sendi kaki untuk stance diam (swap/leg_move nol) -- neutral yang
+  // digelilingi ayunan gait. with_y_offset memilih siapa yang bertanya: penurunan
+  // bias mengirim false (supaya init_y_offset tidak saling meniadakan), pelacakan
+  // saat diam mengirim true (supaya lebar pijakan saat berdiri sama dengan saat
+  // berjalan). Alasan lengkapnya di computeNeutralLegAngle().
+  bool computeNeutralLegAngle(double *neutral, bool with_y_offset);
+  // Stance netral dari OFFSET RUJUKAN tetap (REF_* di bawah), bukan dari offset
+  // yang sedang dimuat. Dipakai HANYA untuk menurunkan walking_bias_.
+  bool computeReferenceLegAngle(double *neutral);
+
+  // Offset rujukan penurunan bias: hasil tera ke page 2 (tools_fit, RMS 5,26 deg,
+  // 2026-09-09) -- dengan offset persis sebesar ini robot berdiri tepat di page 2.
+  //
+  // KENAPA TETAP, bukan offset yang sedang dimuat: dulu bias diturunkan dari
+  // offset yang berlaku SAAT PENANGKAPAN, sehingga offset hanya berefek sebagai
+  // selisih terhadap dirinya sendiri. Operator mengubah pitch ke -0,07, badan
+  // maju, disimpan -- lalu setiap penangkapan ulang (restart manager, tombol Init
+  // Pose, Apply setelah Studio dibuka lagi) menangkap page 2 DENGAN -0,07 sudah
+  // di dalamnya, selisihnya nol, dan badan kembali ke page 2. Nilai tersimpan,
+  // efeknya lenyap. Dengan rujukan tetap, stance = page 2 + (efek offset sekarang
+  // - efek offset rujukan), sama berapa kali pun modul diaktifkan ulang.
+  //
+  // Sengaja konstanta, BUKAN kunci di param.yaml: perintah "save" menulis ulang
+  // param.yaml hanya dengan kunci yang dikenalnya, jadi kunci tambahan akan hilang,
+  // dan menyimpan offset hasil tuning ke sana tidak boleh ikut menggeser rujukan.
+  // Nilai y tidak ada: lebar pijakan sengaja ditinggalkan dari acuan bias (lihat
+  // computeNeutralLegAngle), jadi y_offset tetap tambahan lebar mutlak.
+  static constexpr double REF_X_OFFSET = -0.0427;
+  static constexpr double REF_Z_OFFSET = 0.002;
+  static constexpr double REF_ROLL_OFFSET_DEG = 1.140186;
+  static constexpr double REF_PITCH_OFFSET_DEG = -0.360963;
+  static constexpr double REF_YAW_OFFSET_DEG = -1.443854;
+  static constexpr double REF_HIP_PITCH_OFFSET_DEG = 6.543178;
 
   void setJointGains(int balancing_idx);
 
@@ -145,18 +178,65 @@ class WalkingModule : public robotis_framework::MotionModule, public robotis_fra
   Eigen::MatrixXd target_position_;
   Eigen::MatrixXd goal_position_;
   Eigen::MatrixXd init_position_;
-  // Walking stance is locked to the pose present when walking is enabled
-  // (WALKING_READY). captured_init_pose_ holds that pose; walking_bias_ = captured -
-  // neutral IK stance, so the gait oscillation is added on top of WALKING_READY.
+  // BERJALAN DI ATAS WALKING_READY. Pose yang tertangkap saat walking module
+  // diaktifkan (stance page 2) jadi DASAR MENTAH semua gerakan:
+  //   diam    -> goal = walking_bias_ + neutral(offset sekarang)
+  //   berjalan-> goal = walking_bias_ + sudut IK + balance
+  // walking_bias_ = pose tertangkap - stance netral IK, jadi tepat sesudah
+  // penangkapan keduanya sama persis (bias + neutral == tertangkap) dan
+  // mengaktifkan modul tidak menimbulkan lompatan sama sekali.
+  //
+  // Konsekuensinya offset Init Pose berubah arti: ia tidak lagi menentukan tinggi
+  // berdiri secara mutlak, melainkan MENGGESER stance relatif terhadap page 2.
+  // Itu yang diminta operator 2026-09-09 -- "init pose page 2 jadi init pose raw
+  // untuk semua gerakan di simpanan walking, tanpa mengubah parameternya".
+  // Membalik keputusan 2026-08-27 yang membuang bias ini.
+  //
+  // Untuk lengan walking_bias_ menyimpan pose PENUH (tidak dikurangi apa pun),
+  // sebab lengan tidak punya offset Init Pose sendiri.
   Eigen::MatrixXd captured_init_pose_;
   Eigen::MatrixXd walking_bias_;
   bool capture_init_pose_;
+  // False sampai sebuah penangkapan menghasilkan bias yang sahih (IK bisa gagal).
+  // Selama belum sahih, kaki menahan pose tertangkap apa adanya.
+  bool walking_bias_valid_;
   Eigen::MatrixXi joint_axis_direction_;
   std::map<std::string, int> joint_table_;
   int walking_state_;
   int init_pose_count_;
   op3_walking_module_msgs::msg::WalkingParam walking_param_;
   double previous_x_move_amplitude_;
+
+  //-- Soft start amplitudo x/y/z/angle -----------------------------------
+  // Saat gait mulai, x_move (maju/mundur), y_move (geser kiri/kanan), z_move
+  // (tinggi angkat kaki) dan angle_move (putar kiri/kanan) naik dari nol ke nilai
+  // penuh selama soft_start_time_ detik. angle_move ikut sejak 2026-09-18
+  // (permintaan operator: putar kiri/kanan juga harus mulai pelan).
+  //
+  // Skala dinaikkan KONTINU tiap siklus, bukan per batas fase seperti ROBOTIS
+  // mengganti amplitudo: fase 1 adalah saat kaki kiri di titik TERTINGGI, jadi
+  // menaikkan tinggi angkat kaki bertahap di situ membuat kaki melonjak tiap
+  // tahap. Dengan skala linear yang menerus, lintasan kaki = skala(t) x lintasan
+  // asli -- perkalian dua fungsi mulus, tanpa loncatan.
+  //
+  // Durasinya parameter ROS "soft_start_time" milik node ini (bisa diubah dari
+  // Bascorro Studio lewat /op3_walking_module/set_parameters) dan tersimpan di
+  // param.yaml, BUKAN field WalkingParam: menambah field pesan mengharuskan
+  // rosbridge di-restart lebih dulu, kalau tidak rosbridge menolak SELURUH
+  // WalkingParam dan Apply mati total (pernah terjadi dengan y_optional).
+  static constexpr double SOFT_START_MAX_SEC = 30.0;
+  std::atomic<double> soft_start_time_;    // detik; 0 = soft start mati
+  std::atomic<bool> soft_start_request_;   // dipasang "start", dikonsumsi process()
+  bool soft_start_active_;
+  double soft_start_elapsed_;
+  double soft_start_scale_;                // 0..1, dipakai updateMovementParam()
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr soft_start_param_cb_;
+  // Tulis HANYA baris soft_start_time di param.yaml (komentar dan kunci lain
+  // utuh), langsung saat parameternya diterima. Tanpa ini nilai yang di-Apply
+  // dari Studio cuma hidup di memori: satu-satunya jalan ke param.yaml adalah
+  // perintah "save", yang diabaikan diam-diam kalau walking_module belum aktif,
+  // jadi setelah restart soft start kembali ke nilai lama.
+  void persistSoftStartTime(double seconds);
 
   //
   int balancing_idx_;

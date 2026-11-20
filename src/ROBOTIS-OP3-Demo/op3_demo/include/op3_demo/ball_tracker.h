@@ -20,6 +20,8 @@
 #define BALL_TRACKING_H_
 
 #include <cmath>
+#include <utility>
+#include <vector>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/int32.hpp>
@@ -87,6 +89,9 @@ protected:
   // void ballTrackerCommandCallback(const std_msgs::msg::String::SharedPtr msg);
   void publishHeadJoint(double pan, double tilt);
   void scanBall();
+  // Muat pola searching 2D dari head_tracking.yaml (sumber angka yang sama
+  // dengan head_tracking_node), supaya kedua jalur searching identik.
+  void loadScanPattern();
 
   //image publisher/subscriber
   // rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
@@ -115,6 +120,25 @@ protected:
   double x_error_sum_, y_error_sum_;
   rclcpp::Time prev_time_;
   double p_gain_, d_gain_, i_gain_;
+
+  // Pola searching 2D: daftar (pan, tilt) absolut, satu langkah per panggilan
+  // scanBall(). Arah awal mengikuti sisi tempat bola terakhir terlihat.
+  std::vector<std::pair<double, double>> scan_pattern_;
+  std::size_t scan_idx_;
+  bool scan_session_;
+  double last_seen_pan_;
+
+  // Posisi AKTUAL kepala, untuk menunggu tiap langkah sapuan benar-benar sampai.
+  void presentJointCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+  bool headArrived() const;
+  void publishScanTarget();
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr present_joint_sub_;
+  double present_pan_, present_tilt_;
+  bool present_seen_;
+  std::pair<double, double> scan_target_;
+  rclcpp::Time scan_target_time_;
+  double head_pan_limit_, head_tilt_min_, head_tilt_max_;
+  double scan_arrive_tol_, scan_arrive_timeout_;
 };
 }
 

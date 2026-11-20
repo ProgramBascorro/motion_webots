@@ -21,9 +21,12 @@
 #include <std_msgs/msg/int32.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include <chrono>
+
 #include "op3_demo/soccer_demo.h"
 #include "op3_demo/action_demo.h"
 #include "op3_demo/vision_demo.h"
+#include "op3_demo/intercept_demo.h"
 #include "robotis_math/robotis_linear_algebra.h"
 #include "robotis_controller_msgs/msg/sync_write_item.hpp"
 
@@ -33,7 +36,12 @@ enum Demo_Status
   SoccerDemo = 1,
   VisionDemo = 2,
   ActionDemo = 3,
+  // DemoCount tetap 4: ia dipakai sebagai modulus saat tombol "mode" memutar
+  // pilihan demo (soccer -> vision -> action). InterceptDemo sengaja bernilai di
+  // LUAR putaran itu supaya siklus tombol mode D56 tidak berubah sedikit pun --
+  // demo ini hanya bisa dipanggil lewat tombol D58 / mode_command "intercept".
   DemoCount = 4,
+  InterceptDemo = 5,
 };
 
 void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -65,10 +73,20 @@ Demo_Status current_status = Ready;
 Demo_Status desired_status = Ready;
 bool apply_desired = false;
 
+// Jendela abai untuk tombol D58 ("user"). Satu tekan fisik di robot ini terukur
+// menghasilkan 19 pesan berturut-turut (pantulan kontak; debounce 30 ms di
+// firmware OpenCR tidak cukup untuk sakelar ini), dan tiap pesan adalah satu
+// toggle -- efeknya demo start/stop berkali-kali dan terlihat "diam saja".
+// Lebarnya diminta operator 100 ms (semula 800 ms, menyalin debounce start milik
+// SoccerDemo) supaya tombol terasa responsif untuk start/stop cepat.
+std::chrono::steady_clock::time_point user_debounce_until_ = std::chrono::steady_clock::now();
+const int USER_DEBOUNCE_MS = 100;
+
 rclcpp::Node::SharedPtr node;
 std::shared_ptr<robotis_op::SoccerDemo> soccer_demo;
 std::shared_ptr<robotis_op::ActionDemo> action_demo;
 std::shared_ptr<robotis_op::VisionDemo> vision_demo;
+std::shared_ptr<robotis_op::InterceptDemo> intercept_demo;
 std::shared_ptr<robotis_op::OPDemo> current_demo;
 
 //node main
@@ -98,14 +116,20 @@ int main(int argc, char **argv)
   soccer_demo = std::make_shared<robotis_op::SoccerDemo>();
   action_demo = std::make_shared<robotis_op::ActionDemo>();
   vision_demo = std::make_shared<robotis_op::VisionDemo>();
+  intercept_demo = std::make_shared<robotis_op::InterceptDemo>();
 
   // set node
   soccer_demo->setNode(node);
   action_demo->setNode(node);
   vision_demo->setNode(node);
+  intercept_demo->setNode(node);
 
   bool use_head_control = node->declare_parameter<bool>("use_head_control", true);
   soccer_demo->setUsingHeadControl(use_head_control);
+  // D58 memakai pemilik kepala yang sama dengan D56. Sebelumnya dipaksa false,
+  // sehingga di launch tanpa head_tracking_node (yolo_demo*) kepala D58 diam
+  // total saat bola hilang.
+  intercept_demo->setUsingHeadControl(use_head_control);
   RCLCPP_INFO(node->get_logger(), "use_head_control = %s",
               use_head_control ? "true" : "false");
 
@@ -138,12 +162,55 @@ int main(int argc, char **argv)
   // demo_node does NOT repeat it here — doing so would double-fire the page.
   // goInitPose() below (action page 2) is still used when returning to Ready.
 
+  // FIXED INIT POSE sesudah launch (permintaan operator 2026-09-11): pose awal
+  // robot harus berasal dari template versi walking D58 (preset_init_, "mutar
+  // kanan"), bukan page mentah. Yang berpengaruh hanya blok init_*_offset +
+  // hip_pitch_offset versi itu; amplitudonya nol, gait tetap mati.
+  //
+  // MENUNGGU page init op3_manager SELESAI, bukan timer tetap. Dulu 8 detik
+  // sesudah loop mulai; begitu boot manager melambat (2026-09-13: inisialisasi
+  // servo 6,3 dtk, bukan 3,1) kaki direbut walking_module SEBELUM atau DI TENGAH
+  // page 2 -> "Action Module is not enabled", servo tak pernah sampai init pose.
+  // Sekarang: page init selesai sukses (/robotis/movement_done "action") ->
+  // tunggu launch_fixed_init_delay_sec -> serahkan kaki, sekali, hanya selagi
+  // status masih Ready. Tak terlihat selesai dalam 30 dtk -> dilewati (robot tetap
+  // di page 2, lebih baik daripada merusak init pose). 0 = matikan fitur ini.
+  const double fixed_init_delay_sec =
+      node->declare_parameter<double>("launch_fixed_init_delay_sec", 1.0);
+  const auto fixed_init_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  auto fixed_init_at = std::chrono::steady_clock::time_point::max();
+  bool fixed_init_done = (fixed_init_delay_sec <= 0.0);
+
   rclcpp::Rate loop_rate(SPIN_RATE);
   RCLCPP_WARN(node->get_logger(), "Demo node loop start");
 
   //node loop
   while (rclcpp::ok())
   {
+    if (fixed_init_done == false)
+    {
+      const auto now = std::chrono::steady_clock::now();
+      if (fixed_init_at == std::chrono::steady_clock::time_point::max() &&
+          intercept_demo->bootInitPageDone() == true)
+      {
+        fixed_init_at = now + std::chrono::milliseconds(static_cast<int>(fixed_init_delay_sec * 1000.0));
+      }
+
+      if (now >= fixed_init_at)
+      {
+        fixed_init_done = true;   // sekali saja, berhasil atau tidak
+        if (current_status == Ready && desired_status == Ready && apply_desired == false)
+          intercept_demo->applyFixedInitPose();
+      }
+      else if (fixed_init_at == std::chrono::steady_clock::time_point::max() && now >= fixed_init_deadline)
+      {
+        fixed_init_done = true;
+        RCLCPP_WARN(node->get_logger(),
+                    "FIXED INIT POSE saat launch DILEWATI: page init op3_manager tidak terlihat "
+                    "selesai dalam 30 dtk (robot tetap di page WALKING_READY)");
+      }
+    }
+
     // process
     if (apply_desired == true)
     {
@@ -176,6 +243,14 @@ int main(int argc, char **argv)
           if(DEBUG_PRINT)
             RCLCPP_INFO(node->get_logger(), "[Start] Action Demo");
           break;
+
+        case InterceptDemo:
+          current_demo = intercept_demo;
+          RCLCPP_INFO(node->get_logger(), "[Start] Demo Normal + Intercept");
+          break;
+
+        default:
+          break;
       }
 
       if (current_demo)
@@ -193,6 +268,9 @@ int main(int argc, char **argv)
     } else if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
     {
       action_demo->process();
+    } else if (current_status == InterceptDemo && intercept_demo->isDemoEnabled() == true)
+    {
+      intercept_demo->process();
     }
 
     //execute pending callbacks
@@ -216,6 +294,42 @@ void buttonHandlerCallback(const std_msgs::msg::String::SharedPtr msg)
     soccer_demo->buttonHandlerCallback(msg);
   else if (current_status == ActionDemo && action_demo->isDemoEnabled() == true)
     action_demo->buttonHandlerCallback(msg);
+
+  // Tombol D58 -> "user" (open_cr_module memetakan bit 0x04 ke sini). Tekan
+  // sekali dari Ready = jalankan DEMO NORMAL + INTERCEPT; tekan lagi selagi demo
+  // itu jalan = kembali ke Ready, yang menghentikannya lewat setDemoDisable().
+  // "user_long" TIDAK disentuh: tahan 2 detik tetap milik op3_manager (torque on
+  // + init pose).
+  if (msg->data == "user")
+  {
+    auto now = std::chrono::steady_clock::now();
+    if (now < user_debounce_until_)
+      return;
+    user_debounce_until_ = now + std::chrono::milliseconds(USER_DEBOUNCE_MS);
+
+    RCLCPP_WARN(node->get_logger(), "[D58] tombol user diterima (status sekarang : %d)",
+                static_cast<int>(current_status));
+
+    if (current_status == InterceptDemo)
+    {
+      desired_status = Ready;
+      apply_desired = true;
+      playSound(default_mp3_path + "Demonstration ready mode.mp3");
+      setLED(0x01 | 0x02 | 0x04);
+    }
+    else
+    {
+      // Sengaja dari state APA PUN, bukan hanya Ready. Kalau demo lain sedang
+      // jalan, main loop memanggil setDemoDisable()-nya lebih dulu, jadi tidak
+      // ada dua demo aktif. Versi sebelumnya hanya menerima dari Ready, dan
+      // akibatnya tombol jadi mati total begitu status tersangkut di demo lain.
+      dxlTorqueChecker();
+      desired_status = InterceptDemo;
+      apply_desired = true;
+      setLED(0x02);
+    }
+    return;
+  }
 
   // in the middle of playing demo
   if (current_status != Ready)
@@ -392,6 +506,15 @@ void demoModeCommandCallback(const std_msgs::msg::String::SharedPtr msg)
       // play sound
       dxlTorqueChecker();
       playSound(default_mp3_path + "Start vision processing demonstration.mp3");
+      if (DEBUG_PRINT)
+        RCLCPP_INFO(node->get_logger(), "= Start Demo Mode : %d", desired_status);
+    }
+    else if(msg->data == "intercept")
+    {
+      desired_status = InterceptDemo;
+      apply_desired = true;
+
+      dxlTorqueChecker();
       if (DEBUG_PRINT)
         RCLCPP_INFO(node->get_logger(), "= Start Demo Mode : %d", desired_status);
     }

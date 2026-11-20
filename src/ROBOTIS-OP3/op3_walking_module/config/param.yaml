@@ -1,22 +1,268 @@
-x_offset: -0.0149999997
-y_offset: 0.0149999997
-z_offset: 0.075000003
-roll_offset: 0
-pitch_offset: 3.999990150617601
-yaw_offset: 0
-hip_pitch_offset: 7.999980301235202
-period_time: 700
-dsp_ratio: 0.300000012
+# ===========================================================================
+# Offset Init Pose ditera ke action page 2 (WALKING_READY), 2026-08-28.
+#
+# Sejak kunci capture/bias dibuka, offset ini MENENTUKAN TINGGI BERDIRI --
+# bukan lagi sekadar bentuk gait. Nilai lama (x -0.015, y 0.015, z 0.075,
+# pitch 4, hip 8) membuat stance walking jongkok sampai lutut -97 deg,
+# sementara WALKING_READY berdiri jauh lebih tegak: robot menghentak ~107 deg
+# tiap kali walking module aktif, dan beban itu membuat KEDUA servo lutut
+# melatch OVERLOAD lalu mematikan torque-nya sendiri.
+#
+# Angka di bawah bukan tebakan. Dicari dengan pustaka IK asli robot
+# (.claude/tools/tools_fit, bangun dengan --base-paths /ros2_ws/.claude/tools),
+# lalu DIUKUR di robot yang digantung -- empat kandidat dikirim lewat
+# /robotis/walking/set_params dan stance hasilnya dibandingkan dengan pose
+# page 2 yang benar-benar dicapai perangkat keras:
+#
+#     kandidat                RMS ke page 2   selisih terbesar   r_knee
+#     x-0.015 z0.075 hip8          ~52 deg           ~107 deg    -97 deg
+#     x-0.015 z0.025 hip8           30.6 deg          65.2 deg   -53 deg
+#     z 0.018                       23.4 deg          51.6 deg   -38 deg
+#     z 0.010                       16.3 deg          37.3 deg   -24 deg
+#  >> nilai di bawah (z 0.002)        5.1 deg         13.2 deg    +0.3 deg
+#
+# Sepuluh dari 12 sendi kaki masuk dalam 3,7 deg; sisa selisihnya hampir
+# seluruhnya di lutut (+-10..13 deg) dan TIDAK bisa dihilangkan: nol mekanis
+# servo robot ini tidak berada di raw 2048 (l_ank_pitch saja melenceng ~76 deg
+# dari sisi kanannya), jadi page 2 tak bisa dibaca lewat kinematika murni.
+# Karena itu offset di sini ikut menyerap galat kalibrasi tersebut -- benar
+# secara empiris untuk robot INI, jangan disalin ke robot lain.
+#
+# Gait diuji sungguhan pada nilai ini (x_move 0.02 m, 6 detik, robot
+# digantung): NOL galat "Leg IK produced a non-finite angle". Ayunan lutut
+# 43-52 deg, kira-kira dua kali lipat setelan lama untuk langkah yang sama --
+# jadi kalau nanti langkahnya terasa terlalu agresif, turunkan x_move_amplitude
+# atau naikkan period_time, JANGAN kembalikan z_offset ke besar.
+#
+# Ingat: angka yang sama ada di TIGA tempat. Ubah satu, ubah ketiganya --
+# param.yaml (ini), WalkingModule::initialize(), dan walkingParams.js.
+#
+# ---------------------------------------------------------------------------
+# 2026-09-07: BENTUK GAIT disamakan dengan ALPHONSE atas permintaan operator.
+# Yang diganti hanya tujuh nilai bentuk gait di bawah:
+#   period_time      700 -> 500 ms
+#   dsp_ratio        0,30 -> 0,35
+#   foot_height      0,050 -> 0,040 m
+#   swing_right_left 0,002 -> 0,020 m   (sepuluh kali lipat; ini yang paling
+#                                        terasa -- badan benar-benar memindah
+#                                        berat ke kaki tumpuan sekarang)
+#   pelvis_offset    0,5 -> 3,0 deg
+#   arm_swing_gain   0,2 -> 1,5
+#   p_gain           0 -> 32            (inert: op3_walking_module tidak pernah
+#                                        menuliskannya ke servo, ikut hanya
+#                                        supaya tabel sama persis dengan ALPHONSE)
+#
+# Menyusul pada hari yang sama, atas permintaan operator yang diulang setelah
+# risikonya disampaikan: OFFSET INIT POSE ikut disamakan dengan ALPHONSE.
+#
+#   x_offset     -0,0427 -> 0,0046
+#   y_offset      0,0247 -> 0,010     (pijakan menyempit ~15 mm)
+#   z_offset      0,002  -> 0,0408    <-- ini yang menentukan tinggi berdiri
+#   roll_offset   1,140  -> 0 deg
+#   pitch_offset -0,361  -> 3,999 deg
+#   yaw_offset   -1,444  -> 0 deg
+#   hip_pitch     6,543  -> 7,998 deg
+#
+# ARTINYA, DAN INI BUKAN TEBAKAN -- BACA TABEL KANDIDAT DI ATAS. z_offset naik
+# dari 0,002 ke 0,0408. Tabel itu diukur di robot ini: z 0,025 -> r_knee -53
+# deg, z 0,075 -> r_knee -97 deg dan OVERLOAD. Interpolasi linier di antaranya
+# menaruh z 0,0408 pada r_knee sekitar -67 deg, yaitu sekitar 68 deg dari pose
+# page 2. Jadi:
+#
+#   * Begitu walking_module DIAKTIFKAN, robot akan turun ke jongkok dalam --
+#     bukan berdiri seperti page 2. Itu perilaku yang diminta, bukan bug.
+#   * Perjalanan ~68 deg itu dilandaikan iniPoseTraGene (min 1,5 detik), tidak
+#     dihentak. Yang dulu menghentak 107 deg adalah versi tanpa ramp.
+#   * Beban statis lutut pada jongkok segitu adalah kondisi yang dulu membuat
+#     KEDUA servo lutut melatch OVERLOAD lalu mematikan torque sendiri. Kalau
+#     itu terulang, bersihkan dengan REBOOT 0x08 dan turunkan z_offset lagi.
+#   * GANTUNG ROBOT saat pertama kali menekan Enable Module setelah perubahan
+#     ini.
+#
+# Nilai hasil tera 2026-08-28 disimpan di tabel atas supaya bisa dikembalikan
+# tanpa mengukur ulang: x -0,0427 / y 0,0247 / z 0,002 / roll 1,140186 /
+# pitch -0,360963 / yaw -1,443854 / hip_pitch 6,543178.
+#
+# PERINGATAN KEDUA: period_time turun 700 -> 500 ms membuat langkah JAUH lebih
+# agresif, padahal dengan kaki yang hampir lurus ayunan lutut robot ini sudah
+# ~2x setelan lama untuk langkah yang sama. Sekarang kakinya tidak lurus lagi
+# (jongkok), jadi geometrinya berubah total dan angka ayunan lama tidak berlaku.
+# Uji dengan robot digantung dan x_move_amplitude kecil dulu.
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# 2026-09-07 (menyusul): DIPERLAMBAT. Operator melaporkan "kenceng banget
+# walaupun period_time sudah dilamakan". Sebabnya bukan period_time.
+#
+# Lihat updateTimeParam():  ssp_ratio = 1 - dsp_ratio
+#                           x_move_period_time = period_time * ssp_ratio
+#
+# Jadi dsp_ratio memakan jendela ayun kaki. Yang menentukan seberapa CEPAT kaki
+# bergerak bukan period_time sendirian, tapi hasil kali keduanya:
+#
+#     period 0,7  dsp 0,50  ->  ssp 0,50  ->  jendela ayun 0,35 s
+#     period 0,7  dsp 0,30  ->  ssp 0,70  ->  jendela ayun 0,49 s   (40% lebih lambat)
+#     period 0,9  dsp 0,30  ->  ssp 0,70  ->  jendela ayun 0,63 s   (80% lebih lambat)
+#
+# Menaikkan period sambil dsp tinggi cuma menambah waktu BERDIRI DUA KAKI, bukan
+# memperlambat ayunannya -- kakinya tetap menyambar secepat semula. Karena itu
+# keduanya diubah bersama:
+#
+#   period_time  500 -> 2500 ms
+#   dsp_ratio    0,35 -> 0,50
+#   foot_height  0,040 -> 0,025 m
+#
+# Diperlambat dua tahap. Tahap pertama (900 ms / 0,30) ternyata belum cukup:
+# operator sudah menaikkan period ke 1,0 sendiri lewat Studio dan gait-nya masih
+# terasa cepat, karena dsp-nya masih 0,50 di runtime. Setelah dsp diturunkan ke
+# 0,30 dan period dinaikkan ke 1,3, jendela ayun kaki jadi 0,91 s -- 1,82x lebih
+# lambat dari 0,50 s yang dipakai sebelumnya.
+#
+# HARGA YANG DIBAYAR: dsp kecil + period panjang = robot berdiri satu kaki lebih
+# lama tiap langkah. Di robot yang digantung tidak terasa; di lantai ini justru
+# arah yang kurang stabil. Kalau nanti robot mulai oleng, JANGAN naikkan period
+# lagi -- kecilkan x_move_amplitude, dan kembalikan dsp ke 0,35.
+#
+# TERNYATA period_time DAN x_move_amplitude BUKAN TUAS UTAMANYA. Diukur di
+# robot ini (digantung, ayun r_knee dari /robotis/goal_joint_states, period 1,5 s
+# dsp 0,5, z_offset 0,002):
+#
+#     foot_height   x_move    ayun lutut
+#        30 mm      10 mm       48,5 deg
+#        20 mm      10 mm       38,2 deg
+#        15 mm      10 mm       31,8 deg
+#        10 mm      10 mm       23,9 deg
+#        15 mm       5 mm       31,6 deg   <-- langkah DIPARUH, ayun tidak berubah
+#
+# Baris terakhir itu intinya: memaruh panjang langkah mengubah ayunan lutut
+# sebesar 0,2 deg. Yang menggerakkan lutut hampir seluruhnya adalah ANGKAT KAKI
+# (foot_height), bukan maju-mundurnya. Sebabnya z_offset kecil: kaki berdiri
+# hampir lurus (lutut stance 0,1 deg), dan di dekat lurus, mengangkat telapak
+# secara tegak menuntut tekukan lutut yang besar, sementara geser mendatar 5-10 mm
+# nyaris tidak terasa di lutut.
+#
+# Jadi urutan tuas untuk "langkah terlalu cepat/kasar", dari yang paling ampuh:
+#   1. foot_height turun          -- memperkecil JARAK yang ditempuh lutut
+#   2. dsp_ratio turun            -- memperpanjang jendela ayun
+#   3. period_time naik           -- memperpanjang jendela ayun
+#   4. x_move_amplitude turun     -- hampir tidak berpengaruh di robot ini
+#
+# foot_height 15 mm dipilih supaya telapak tetap punya jarak bebas di lantai
+# rata; kalau nanti jalan di rumput atau karpet tebal, naikkan lagi dan terima
+# ayunan lututnya ikut naik.
+#
+# KOREKSI (masih 2026-09-07, setelah dicoba operator): setelan period 1,5 /
+# dsp 0,30 / foot 15 mm memang menurunkan kecepatan sendi di atas kertas
+# (30 deg/s dari 65 deg/s), TAPI operator melaporkan gait-nya justru terasa
+# LEBIH CEPAT. Metriknya yang salah, bukan pengukurannya.
+#
+# Dua hal yang terlewat:
+#
+#   * dsp_ratio turun memperpanjang jendela ayun, tapi sekaligus MEMPERPENDEK
+#     jeda dua-kaki-menapak. Jeda itulah yang bikin langkah terbaca "tenang".
+#     dsp 0,50 -> robot diam separuh siklus; dsp 0,30 -> nyaris tak pernah
+#     berhenti. Kaki memang bergerak lebih pelan, tapi temponya terasa buru-buru.
+#   * foot_height turun bikin telapak menyerempet lantai. Langkah menyeret
+#     terbaca lebih gelisah daripada langkah yang mengangkat tegas, walau
+#     cadence-nya sama persis.
+#
+# Jadi dsp_ratio dan foot_height itu TUAS DENGAN PERTUKARAN: menurunkannya
+# menukar kecepatan sendi dengan tempo yang lebih ramai.
+#
+# Satu-satunya tuas yang memperlambat SEMUANYA tanpa pertukaran adalah
+# period_time -- ia memanjangkan jendela ayun DAN jeda dua kaki sekaligus. Dan
+# period_time terbukti benar-benar bekerja: perioda terukur 1,505 s untuk
+# period_time 1,5 (diukur dari /robotis/goal_joint_states).
+#
+# SUSULAN-2 2026-09-08: DIKEMBALIKAN ke 2500 ms / dsp 0,50 / foot 25 mm.
+# Operator: "lambatin seperti request saya setelah kamu lambatin 2x sekian, nah
+# itu kecepatan segitu sudah oke" -- yaitu trio yang ditulis di blok di bawah.
+# Jadi tebakan 2500 ms itu ternyata tepat sasaran; 1600 ms yang meleset.
+#
+# Kecepatan sasarannya, dari tabel ukur di berkas ini: foot 25 mm memberi ayun
+# lutut sekitar 43 deg (interpolasi 20 mm -> 38,2 dan 30 mm -> 48,5), dibagi
+# jendela ayun 2,5 x (1 - 0,50) = 1,25 s, jadi sekitar 34 deg/s. Bandingkan
+# dengan 83 deg/s yang barusan terukur pada 1,6 s / dsp 0,40 / foot 120 mm.
+# BELUM diverifikasi di robot -- stack mati saat ini ditulis.
+#
+# Catatan arsip: 1600 ms sempat dipasang dan DIUKUR di robot (r_knee dari /robotis/goal_joint_states, dsp 0,40,
+# foot_height 120 mm, x_move 10 mm):
+#
+#     period   jendela ayun   jeda 2 kaki   ayun lutut   kecepatan sendi
+#     0,70 s      0,42 s         0,14 s       79,6 deg      189 deg/s
+#     1,60 s      0,96 s         0,32 s       79,6 deg       83 deg/s
+#
+# 2,29x lebih lambat, dan jeda dua-kakinya juga 2,29x lebih lama -- kedua sumbu
+# melambat dengan faktor yang sama persis. Itu yang membuat period_time berbeda
+# dari dsp_ratio dan foot_height: ia tidak menukar apa pun.
+#
+# Perhatikan ayun lutut TIDAK berubah (79,6 deg): period mengubah WAKTU, bukan
+# JARAK. Kalau jaraknya yang mau dikecilkan, itu foot_height.
+#
+# Setelan sebelumnya, dipilih supaya melambat di semua sumbu sekaligus:
+#   period_time  1500 -> 2500 ms   (jendela ayun DAN jeda ikut memanjang)
+#   dsp_ratio    0,30 -> 0,50      (jeda dua kaki dikembalikan)
+#   foot_height  15 -> 25 mm       (angkat kaki tegas lagi, tapi tidak 30)
+#
+# SUSULAN: foot_height DIKEMBALIKAN ke 15 mm. Setelah dicoba, temponya sudah pas
+# tapi angkat kakinya terlalu tinggi -- operator: "masalahnya di z yang terlalu
+# tinggi ketika jalan". Jadi menaikkannya ke 25 mm memang keliru; 15 mm sudah
+# terbukti enak pada percobaan sebelumnya. period_time dan dsp_ratio SENGAJA
+# tidak ikut diubah: keduanya yang membuat temponya akhirnya pas, dan itu yang
+# diminta dipertahankan.
+#
+# Perkiraan: ayun lutut ~41 deg (interpolasi tabel di atas) per jendela ayun
+# 2,5 x 0,50 = 1,25 s, dan jeda dua kaki naik dari 0,375 s ke 0,625 s tiap
+# setengah siklus. BELUM DIUKUR di robot -- stack sedang mati saat ini ditulis.
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# 2026-09-08: OFFSET INIT POSE DIKEMBALIKAN KE HASIL TERA ROBOT INI.
+#
+# Penyamaan ke ALPHONSE dicabut UNTUK TUJUH OFFSET INI SAJA (bentuk gait tetap).
+# Alasannya bukan selera: operator melaporkan "ketika di-Apply servo kaki
+# langsung jongkok full sampai servonya overload". Itu persis yang diperingatkan
+# tabel kandidat di atas -- z_offset 0,0408 menaruh lutut stance di sekitar
+# -67 deg, dan beban statis sebesar itu yang dulu membuat KEDUA servo lutut
+# melatch OVERLOAD lalu mematikan torque sendiri.
+#
+# Yang membuatnya sampai ke servo: sejak Apply di Bascorro Studio ikut
+# mengaktifkan walking_module sendiri (permintaan operator: "diapply langsung ke
+# posisi init tanpa harus start"), satu klik Apply sekarang benar-benar
+# MEMINDAHKAN robot. Sebelumnya klik itu tidak berefek apa-apa selama modul belum
+# aktif, jadi angka berbahaya di berkas ini tidak pernah terasa.
+#
+# Nilai di bawah adalah SATU-SATUNYA set yang pernah diukur di robot ini:
+# 5,1 deg RMS terhadap pose page 2 yang benar-benar dicapai perangkat keras,
+# lutut stance +0,3 deg. Jangan campur sebagian dari ALPHONSE dan sebagian dari
+# sini -- campuran itu tidak pernah diukur siapa pun.
+# ---------------------------------------------------------------------------
+# ===========================================================================
+x_offset: -0.0427
+# y_offset 0,0247 -> 0 (operator 2026-10-27): page 2 baru diajar ulang dan servo
+# 17/18 dikunci ke page 2, jadi lebar pijakan dibiarkan = page 2 tanpa tambahan.
+y_offset: 0.0
+z_offset: 0.002
+roll_offset: 1.140186
+pitch_offset: -0.360963
+yaw_offset: -1.443854
+hip_pitch_offset: 6.543178
+period_time: 1667
+dsp_ratio: 0.25
 step_forward_back_ratio: 0.25
-foot_height: 0.0500000007
-swing_right_left: 0.00200000009
+foot_height: 0.025
+swing_right_left: 0.0199999996
 swing_top_down: 0.00600000005
-pelvis_offset: 0.50002027325091514
-arm_swing_gain: 0.200000003
+pelvis_offset: 3.0022988690251378
+arm_swing_gain: 1.5
 balance_hip_roll_gain: 0.349999994
 balance_knee_gain: 0.400000006
 balance_ankle_roll_gain: 0.699999988
 balance_ankle_pitch_gain: 0.899999976
-p_gain: 0
+p_gain: 32
 i_gain: 0
 d_gain: 0
+# Soft start (detik): x_move, y_move, dan tinggi angkat kaki naik dari nol ke
+# nilai penuh selama sekian detik setiap gait mulai dari diam. 0 = mati.
+# Bisa diubah saat jalan lewat parameter ROS /op3_walking_module soft_start_time.
+soft_start_time: 0.5

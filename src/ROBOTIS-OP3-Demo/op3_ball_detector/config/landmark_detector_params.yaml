@@ -1,0 +1,61 @@
+# Parameters for scripts/landmark_detector.py -- the standalone FIELD LANDMARK
+# detector that runs the weights in model/landmark_deploy.
+#
+# The ball detector is a separate program with its own file, see
+# config/ball_detector_yolo_params.yaml.
+#
+# Applied via the "/**" wildcard so they reach the node regardless of the
+# namespace/name it is launched under.
+/**:
+  ros__parameters:
+    # Empty = pick the best weights in model/landmark_deploy automatically,
+    # matched to the runtimes installed here:
+    #   openvino present  -> best_landmark_v8n_int8_openvino_model/ (container)
+    #   onnxruntime       -> best_landmark_v8n.onnx
+    #   otherwise         -> best_landmark_v8n.pt
+    # Set an explicit path (absolute, or relative to the package share dir) to
+    # pin one, e.g. "model/landmark_deploy/best_landmark_v8n.pt".
+    model_path: ""
+
+    # OpenVINO / .onnx carry no task metadata ultralytics can rely on.
+    model_task: "detect"
+
+    # Subscribe to a CompressedImage (true) or a raw Image (false) on image_in.
+    use_compressed: true
+
+    # Landmarks are small and often partly occluded, so this sits below the
+    # ball detector's threshold. Raise it if the L/T/X classes flicker.
+    confidence_threshold: 0.4
+    iou_threshold: 0.45
+
+    # MUST match the imgsz the weights were exported with. Every export in
+    # model/landmark_deploy is 640.
+    imgsz: 640
+
+    # CPU-only runtimes here; FP16 would need a GPU build. The OpenVINO export
+    # is already int8, which is why it is the fast one (~12 ms/frame).
+    device: "cpu"
+    half: false
+
+    # A field view can hold many intersections at once.
+    max_detections: 30
+
+    # The five classes from landmark_export.yaml. Listing all of them = keep
+    # everything; remove a name to ignore that class entirely.
+    target_classes: ["L", "T", "X", "goalpost", "center_circle"]
+
+    # Inference loop rate (Hz), always on the freshest camera frame. The int8
+    # landmark model measures ~12 ms/frame on this CPU (~80 FPS), so 15 Hz is
+    # cheap; raise it if you want landmarks to update faster.
+    detection_rate: 15.0
+
+    # Publish an annotated debug image on image_out.
+    publish_image: true
+    detection_frame_id: "detector"
+
+    # Start detecting immediately, or wait for "enable" (std_msgs/Bool) = true.
+    enable_at_start: true
+
+    # How often the FPS line is logged, in seconds. The node also prints an
+    # FPS summary (with per-class detection totals) when it stops.
+    fps_log_period: 5.0

@@ -25,6 +25,7 @@
   <depend>robotis_math</depend>
   <depend>op3_ball_detector</depend>
   <depend>op3_ball_detector_msgs</depend>
+  <depend>vision_msgs</depend>
   <depend>boost</depend>
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>

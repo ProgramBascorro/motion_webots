@@ -1,0 +1,11 @@
+# Kalibrasi yaw IMU (magnetometer OpenCR) 5 titik -- dibaca open_cr_module.
+#
+# BELUM DIKALIBRASI: yaw_calib_enable false = yaw firmware mentah.
+# Isi berkas ini dengan scripts/calib_imu_yaw.py (jangan disunting tangan);
+# berlaku sesudah op3_manager start ulang.
+#
+# Kunci /** supaya parameter sampai ke node open_cr_module di dalam proses
+# op3_manager (op3_manager.launch.py memuat berkas ini).
+/**:
+  ros__parameters:
+    yaw_calib_enable: false

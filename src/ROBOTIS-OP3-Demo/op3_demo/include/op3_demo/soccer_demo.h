@@ -111,6 +111,8 @@ class SoccerDemo : public OPDemo
   BallFollower ball_follower_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_data_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr head_tracker_cmd_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr reset_yaw_pub_;
+  void resetYaw(const std::string &reason);
 
   // rclcpp::Publisher<robotis_controller_msgs::msg::JointCtrlModule>::SharedPtr module_control_pub_;
   // rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr motion_index_pub_;

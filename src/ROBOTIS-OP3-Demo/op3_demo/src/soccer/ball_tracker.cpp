@@ -18,6 +18,10 @@
 
 #include "op3_demo/ball_tracker.h"
 
+#include <algorithm>
+
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 namespace robotis_op
 {
 
@@ -37,7 +41,18 @@ BallTracker::BallTracker()
     y_error_sum_(0),
     current_ball_bottom_(0),
     tracking_status_(NotFound),
-    DEBUG_PRINT(false)
+    DEBUG_PRINT(false),
+    scan_idx_(0),
+    scan_session_(false),
+    last_seen_pan_(0.0),
+    present_pan_(0.0),
+    present_tilt_(0.0),
+    present_seen_(false),
+    head_pan_limit_(85.0 * M_PI / 180.0),
+    head_tilt_min_(-75.0 * M_PI / 180.0),
+    head_tilt_max_(58.03 * M_PI / 180.0),
+    scan_arrive_tol_(3.0 * M_PI / 180.0),
+    scan_arrive_timeout_(10.0)
 {
   // this->declare_parameter("p_gain", 0.4);
   // this->declare_parameter("i_gain", 0.0);
@@ -51,6 +66,8 @@ BallTracker::BallTracker()
   d_gain_ = 0.045;
 
   RCLCPP_INFO(rclcpp::get_logger("BallTracker"), "Ball tracking Gain : %f, %f, %f", p_gain_, i_gain_, d_gain_);
+
+  loadScanPattern();
 
   // head_joint_offset_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/robotis/head_control/set_joint_states_offset", 10);
   // head_joint_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/robotis/head_control/set_joint_states", 10);
@@ -72,6 +89,7 @@ void BallTracker::setNode(rclcpp::Node::SharedPtr node)
   if (node_ != nullptr)
   {
     ball_position_sub_ = node_->create_subscription<op3_ball_detector_msgs::msg::CircleSetStamped>("/ball_detector_node/circle_set", 10, std::bind(&BallTracker::ballPositionCallback, this, std::placeholders::_1));
+    present_joint_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>("/robotis/present_joint_states", 10, std::bind(&BallTracker::presentJointCallback, this, std::placeholders::_1));
   }
   else
   {
@@ -119,6 +137,7 @@ void BallTracker::startTracking()
 void BallTracker::stopTracking()
 {
   goInit();
+  scan_session_ = false;
 
   on_tracking_ = false;
   if (DEBUG_PRINT)
@@ -177,6 +196,7 @@ int BallTracker::processTracking()
   else
   {
     count_not_found_ = 0;
+    scan_session_ = false;
   }
 
   // if ball is found
@@ -203,6 +223,7 @@ int BallTracker::processTracking()
     x_error = -atan(ball_position_.x * tan(FOV_WIDTH));
     y_error = -atan(ball_position_.y * tan(FOV_HEIGHT));
     ball_size = ball_position_.z;
+    last_seen_pan_ = x_error;   // + = bola di kiri gambar, - = di kanan
     break;
 
   default:
@@ -318,20 +339,115 @@ void BallTracker::scanBall()
   if (use_head_scan_ == false)
     return;
 
-  // check head control module enabled
-  // ...
-
-  // send message to head control module
   if (node_ == nullptr)
   {
     RCLCPP_ERROR(rclcpp::get_logger("BallTracker"), "Node is not set, cannot scan ball");
     return;
   }
-  auto head_scan_pub_ = node_->create_publisher<std_msgs::msg::String>("/robotis/head_control/scan_command", 10);
-  std_msgs::msg::String scan_msg;
-  scan_msg.data = "scan";
 
-  head_scan_pub_->publish(scan_msg);
+  // Dulu: kirim "scan" ke head_control_module (sapuan diagonal bawaan ROBOTIS,
+  // pojok awal acak, dan di robot ini menengadah). Sekarang: pola 2D yang sama
+  // persis dengan head_tracking_node. processTracking() memanggil fungsi ini
+  // tiap NOT_FOUND_THRESHOLD siklus selama bola hilang.
+  if (scan_pattern_.empty())
+    return;
+
+  if (scan_session_ == false)
+  {
+    // Masuk (atau kembali) ke searching: LANJUTKAN urutan dari langkah terakhir,
+    // jangan dimulai ulang, supaya perpindahannya tetap KANAN -> BAWAH -> KIRI ->
+    // ATAS walau searching sempat terhenti karena bola terdeteksi.
+    scan_session_ = true;
+    publishScanTarget();
+    return;
+  }
+
+  // Langkah berikutnya HANYA kalau kepala benar-benar sudah sampai di target
+  // sekarang. Menyeberang kiri<->kanan penuh butuh 4,0 detik (170 derajat pada
+  // 42 deg/s), lebih lama dari jeda antar panggilan -- tanpa penantian ini
+  // perjalanan ke kiri dipotong dan kepala terjebak di sisi kanan.
+  const double elapsed = (node_->now() - scan_target_time_).seconds();
+  if (headArrived() == false && elapsed < scan_arrive_timeout_)
+    return;
+
+  if (headArrived() == false)
+    RCLCPP_WARN(rclcpp::get_logger("BallTracker"),
+                "Kepala tidak sampai ke target dalam %.0f dtk -- lanjut ke langkah berikutnya",
+                scan_arrive_timeout_);
+
+  publishScanTarget();
+}
+
+void BallTracker::publishScanTarget()
+{
+  scan_target_ = scan_pattern_[scan_idx_];
+  scan_idx_ = (scan_idx_ + 1) % scan_pattern_.size();
+  scan_target_time_ = node_->now();
+
+  auto head_joint_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/robotis/head_control/set_joint_states", 10);
+  sensor_msgs::msg::JointState head_angle_msg;
+  head_angle_msg.name.push_back("head_pan");
+  head_angle_msg.name.push_back("head_tilt");
+  head_angle_msg.position.push_back(scan_target_.first);
+  head_angle_msg.position.push_back(scan_target_.second);
+  head_joint_pub_->publish(head_angle_msg);
+}
+
+void BallTracker::presentJointCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+  for (std::size_t i = 0; i < msg->name.size() && i < msg->position.size(); i++)
+  {
+    if (msg->name[i] == "head_pan")
+      present_pan_ = msg->position[i];
+    else if (msg->name[i] == "head_tilt")
+      present_tilt_ = msg->position[i];
+  }
+  present_seen_ = true;
+}
+
+// Dibandingkan dengan target yang SUDAH dipotong batas keras head_control_module,
+// karena target di luar batas tidak akan pernah dicapai persis.
+bool BallTracker::headArrived() const
+{
+  if (present_seen_ == false)
+    return false;
+  const double pan  = std::max(-head_pan_limit_, std::min(head_pan_limit_, scan_target_.first));
+  const double tilt = std::max(head_tilt_min_, std::min(head_tilt_max_, scan_target_.second));
+  return std::fabs(present_pan_ - pan) <= scan_arrive_tol_ &&
+         std::fabs(present_tilt_ - tilt) <= scan_arrive_tol_;
+}
+
+void BallTracker::loadScanPattern()
+{
+  // Angka cadangan = isi head_tracking.yaml per 2026-09-10. Hanya dipakai kalau
+  // berkasnya tidak terbaca, dan itu dilaporkan sebagai ERROR.
+  double p = 1.5708, fw = 0.5238, dn = 1.0128;   // servo 210 / 238 derajat
+
+  try
+  {
+    const std::string path =
+        ament_index_cpp::get_package_share_directory("op3_ball_localization") + "/config/head_tracking.yaml";
+    YAML::Node doc = YAML::LoadFile(path);
+    YAML::Node prm = doc["head_tracking_node"]["ros__parameters"];
+    if (prm["scan_pan_rad"])          p  = prm["scan_pan_rad"].as<double>();
+    if (prm["scan_tilt_forward_rad"]) fw = prm["scan_tilt_forward_rad"].as<double>();
+    if (prm["scan_tilt_down_rad"])    dn = prm["scan_tilt_down_rad"].as<double>();
+    if (prm["head_pan_limit_rad"])      head_pan_limit_      = std::fabs(prm["head_pan_limit_rad"].as<double>());
+    if (prm["head_tilt_min_rad"])       head_tilt_min_       = prm["head_tilt_min_rad"].as<double>();
+    if (prm["head_tilt_max_rad"])       head_tilt_max_       = prm["head_tilt_max_rad"].as<double>();
+    if (prm["scan_arrive_tol_rad"])     scan_arrive_tol_     = prm["scan_arrive_tol_rad"].as<double>();
+    if (prm["scan_arrive_timeout_sec"]) scan_arrive_timeout_ = prm["scan_arrive_timeout_sec"].as<double>();
+  }
+  catch (const std::exception &e)
+  {
+    RCLCPP_ERROR(rclcpp::get_logger("BallTracker"),
+                 "head_tracking.yaml tidak terbaca (%s) -- pola searching memakai angka cadangan", e.what());
+  }
+
+  // Urutan SAMA PERSIS dengan head_tracking_node._scan_positions_2d:
+  //   KANAN -> BAWAH -> KIRI -> ATAS -> (ulang)
+  // head_pan positif = kiri; fw = servo 210 (atas), dn = servo 238 (bawah).
+  scan_pattern_ = {{-p, fw}, {-p, dn}, {+p, dn}, {+p, fw}};
 }
 
 }

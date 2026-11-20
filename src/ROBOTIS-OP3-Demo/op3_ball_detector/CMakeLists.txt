@@ -66,10 +66,17 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
 )
 
-# YOLO ball detector (Python). Installed alongside the C++ executable so it can
-# be launched with `ros2 run op3_ball_detector yolo_ball_detector.py`.
+# YOLO detectors (Python). Installed alongside the C++ executable so they can
+# be launched with `ros2 run op3_ball_detector <script>.py`.
+#
+# ball_detector.py     -> model/ball_model      (ball only)
+# landmark_detector.py -> model/landmark_deploy (L/T/X/goalpost/center_circle)
+# Two separate programs on purpose: either can be run, stopped and tuned
+# without touching the other.
 install(PROGRAMS
   scripts/yolo_ball_detector.py
+  scripts/ball_detector.py
+  scripts/landmark_detector.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

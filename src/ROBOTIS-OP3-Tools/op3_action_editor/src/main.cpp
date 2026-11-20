@@ -22,9 +22,9 @@ const int BAUD_RATE = 2000000;
 const double PROTOCOL_VERSION = 2.0;
 const int SUB_CONTROLLER_ID = 200;
 // device_name is used for exactly one thing here: the ID 200 power-on below.
-// Stock opencr_op3 wiring, so the sub controller answers on the servo bus; the
-// OpenCR's micro-USB CDC (/dev/ttyACM0) is only a debug console.
-const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOP3";
+// Split buses on this board -- the firmware serves ID 200 over the OpenCR
+// micro-USB CDC, not the servo bus -- so this is the OpenCR port, not ttyOP3.
+const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOPENCR";
 const int POWER_CTRL_TABLE = 24;
 
 void sighandler(int sig)
@@ -54,10 +54,11 @@ bool turnOnDynamixelPower(rclcpp::Node::SharedPtr node, const std::string &devic
 
   if(_return != COMM_SUCCESS)
   {
-    // CHRONUS is wired through a U2D2 with no OPEN-CR sub controller on the bus, so
-    // ID 200 never answers and the DXLs are powered from the supply directly. Only
-    // warn here: op3_manager does the same (it logs and keeps going), and bailing out
-    // made the editor unusable on this robot.
+    // Not fatal on purpose. ID 200 is silent whenever the OpenCR is unplugged or
+    // device_name points at the servo bus instead of the CDC port, and the DXLs are
+    // powered from the supply directly anyway -- so the editor still works, just
+    // without the button and IMU. op3_manager does the same (logs and keeps going);
+    // bailing out here made the editor unusable on this robot.
     RCLCPP_WARN(node->get_logger(),
                 "No sub controller at ID %d, skipping DXL power on (already powered externally)",
                 SUB_CONTROLLER_ID);

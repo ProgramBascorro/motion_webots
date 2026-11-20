@@ -28,11 +28,14 @@
   <depend>ament_index_cpp</depend>
   <exec_depend>usb_cam</exec_depend>
   <exec_depend>uvc_camera</exec_depend>
-  <!-- YOLO ball detector (Python node: scripts/yolo_ball_detector.py).
-       NOTE: the "ultralytics" / torch wheels have no rosdep key and must be
-       installed manually, e.g.  pip3 install ultralytics -->
+  <!-- YOLO detectors (Python nodes: scripts/yolo_ball_detector.py,
+       scripts/ball_detector.py, scripts/landmark_detector.py).
+       NOTE: the "ultralytics" / torch / openvino wheels have no rosdep key and
+       must be installed manually, e.g.  pip3 install ultralytics -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <!-- landmark_detector.py publishes vision_msgs/Detection2DArray -->
+  <exec_depend>vision_msgs</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <export>

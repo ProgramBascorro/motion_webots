@@ -57,10 +57,12 @@ const int SUB_CONTROLLER_ID = 200;
 const int DXL_BROADCAST_ID = 254;
 const int DEFAULT_DXL_ID = 1;
 const std::string SERVO_DEVICE = "/dev/ttyOP3";
-// Stock opencr_op3 wiring: ID 200 sits on the TTL bus with the servos, so the
-// power-on and RGB LED writes go to the servo port. The OpenCR's micro-USB CDC
-// (/dev/ttyACM0) is only a debug console here and answers no DXL packet.
-const std::string SUB_CONTROLLER_DEVICE = SERVO_DEVICE;
+// Split buses. The firmware on this board moves DXL_PORT from Serial3 to Serial,
+// so ID 200 answers on the OpenCR micro-USB CDC and no longer on the TTL bus --
+// the power-on and RGB LED writes have to go to that port, not the servo port.
+// Probing at launch (ensure_ports in op3_manager.launch.py) keeps both names
+// pointing at whoever actually answers.
+const std::string SUB_CONTROLLER_DEVICE = "/dev/ttyOPENCR";
 const int POWER_CTRL_TABLE = 24;
 const int RGB_LED_CTRL_TABLE = 26;
 const int TORQUE_ON_CTRL_TABLE = 64;
@@ -72,7 +74,8 @@ std::string g_robot_file;
 std::string g_init_file;
 std::string g_device_name;
 // Port carrying sub controller ID 200. Separate from g_device_name because this
-// OpenCR serves it over micro-USB while the servos stay on the TTL bus.
+// OpenCR serves it over micro-USB while the servos stay on the U2D2 bus -- that
+// separation is the whole point of the split, so the two must never be merged.
 std::string g_sub_controller_device;
 
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr g_init_pose_pub;
@@ -226,7 +229,21 @@ void dxlTorqueCheckCallback(const std_msgs::msg::String::SharedPtr msg)
     if (controller->robot_->dxls_.find(default_device_name) == controller->robot_->dxls_.end())
       continue;
 
-    controller->read1Byte(default_device_name, TORQUE_ON_CTRL_TABLE, &torque_result);
+    // Hasil baca WAJIB dicek. Callback ini jalan saat timer kontrol 8 ms masih
+    // memakai bus servo yang sama; paketnya sering bertabrakan dan read1Byte gagal,
+    // torque_result tetap 0 -- dulu itu dianggap "torsi mati" sehingga SETIAP
+    // tekan D58/D56 menghentikan timer dan menginisialisasi ulang semua servo
+    // (beberapa detik servo diam + service manager tertahan -> demo terasa tidak
+    // merespons tombol; terlihat sebagai "FIRST BULKREAD" ulang di log). Hanya
+    // bacaan yang BERHASIL dengan nilai != 1 yang berarti torsi benar-benar mati.
+    int read_result = controller->read1Byte(default_device_name, TORQUE_ON_CTRL_TABLE, &torque_result);
+    if (read_result != COMM_SUCCESS)
+    {
+      RCLCPP_WARN(controller->get_logger(),
+                  "Cek torsi %s gagal dibaca (%d) -- inisialisasi ulang servo dilewati",
+                  default_device_name.c_str(), read_result);
+      continue;
+    }
 
     // if not, torque on
     if (torque_result != 1)
@@ -443,6 +460,21 @@ int main(int argc, char **argv)
   (void) health_service;
 
   rclcpp::spin(node);
+
+  // Urutan mati penting (bukti gdb 2026-09-13: SIGSEGV di ~shared_ptr<Publisher<Int32>>
+  // dari exit()). Keempat publisher g_* adalah GLOBAL, jadi tanpa ini baru
+  // dihancurkan oleh exit() SESUDAH rclcpp::shutdown() membongkar DDS -- destruktornya
+  // menghapus DataWriter yang sudah tidak ada -> segfault / "double free" /
+  // std::system_error saat Ctrl+C. Timer controller dihentikan dulu supaya thread
+  // 8 ms (dan modul yang ia panggil) tidak lagi memakai ROS selama pembongkaran.
+  RobotisController *controller_at_exit = RobotisController::getInstance();
+  if (controller_at_exit != nullptr && controller_at_exit->isTimerRunning())
+    controller_at_exit->stopTimer();
+
+  g_init_pose_pub.reset();
+  g_enable_ctrl_pub.reset();
+  g_action_page_pub.reset();
+  g_demo_command_pub.reset();
 
   rclcpp::shutdown();
   return 0;

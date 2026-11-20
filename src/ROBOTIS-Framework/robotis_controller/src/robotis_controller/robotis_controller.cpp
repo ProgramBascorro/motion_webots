@@ -1775,8 +1775,26 @@ void RobotisController::setJointStatesCallback(const sensor_msgs::msg::JointStat
   queue_mutex_.unlock();
 }
 
+// SEMUA pintu ganti-modul di bawah berbagi SATU std::thread (set_module_thread_)
+// dan dulu tidak berpagar. Kalau dua permintaan tiba bersamaan dari thread berbeda
+// -- misal op3_manager memindahkan sendi ke action_module untuk page init sementara
+// head_tracking_node meminta modul kepala di detik boot yang sama -- satu thread
+// menimpa std::thread yang masih joinable (std::terminate, exit -6) atau dua thread
+// join() objek yang sama (perilaku tak terdefinisi, exit -11). Mutex ini membuat
+// semua permintaan antre. Sengaja static di file ini, bukan anggota kelas, supaya
+// layout RobotisController tidak berubah bagi pustaka yang sudah ter-build.
+// Fungsi pekerja (setCtrlModuleThread / setJointCtrlModuleThread) tidak memanggil
+// pintu-pintu ini, jadi tidak ada deadlock.
+//
+// Sengaja DIBOCORKAN (new tanpa delete): mutex static biasa dihancurkan saat
+// program keluar, sementara thread timer/callback controller masih hidup dan
+// masih bisa minta ganti modul -> lock() pada mutex yang sudah hancur ->
+// std::system_error "Invalid argument" (exit -6) atau -11 saat Ctrl+C.
+static std::mutex &g_set_module_mutex = *new std::mutex;
+
 void RobotisController::setCtrlModuleCallback(const std_msgs::msg::String::SharedPtr msg)
 {
+  std::lock_guard<std::mutex> set_module_lock(g_set_module_mutex);
   if(set_module_thread_.joinable())
     set_module_thread_.join();
 
@@ -1787,6 +1805,7 @@ void RobotisController::setCtrlModuleCallback(const std_msgs::msg::String::Share
 
 void RobotisController::setCtrlModule(std::string module_name)
 {
+  std::lock_guard<std::mutex> set_module_lock(g_set_module_mutex);
   if(set_module_thread_.joinable())
     set_module_thread_.join();
 
@@ -1798,6 +1817,7 @@ void RobotisController::setJointCtrlModuleCallback(robotis_controller_msgs::msg:
   if (msg->joint_name.size() != msg->module_name.size())
     return;
 
+  std::lock_guard<std::mutex> set_module_lock(g_set_module_mutex);
   if(set_module_thread_.joinable())
     set_module_thread_.join();
 
@@ -1835,6 +1855,7 @@ bool RobotisController::getJointCtrlModuleService(const std::shared_ptr<robotis_
 bool RobotisController::setJointCtrlModuleService(const std::shared_ptr<robotis_controller_msgs::srv::SetJointModule::Request> req,
                           std::shared_ptr<robotis_controller_msgs::srv::SetJointModule::Response> res)
 {
+  std::lock_guard<std::mutex> set_module_lock(g_set_module_mutex);
   if(set_module_thread_.joinable())
     set_module_thread_.join();
 
@@ -1858,6 +1879,7 @@ bool RobotisController::setJointCtrlModuleService(const std::shared_ptr<robotis_
 bool RobotisController::setCtrlModuleService(const std::shared_ptr<robotis_controller_msgs::srv::SetModule::Request> req,
                        std::shared_ptr<robotis_controller_msgs::srv::SetModule::Response> res)
 {
+  std::lock_guard<std::mutex> set_module_lock(g_set_module_mutex);
   if(set_module_thread_.joinable())
     set_module_thread_.join();
 

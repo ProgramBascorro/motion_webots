@@ -13,6 +13,8 @@ find_package(op3_action_module_msgs REQUIRED)
 find_package(robotis_math REQUIRED)
 find_package(op3_ball_detector REQUIRED)
 find_package(op3_ball_detector_msgs REQUIRED)
+# Mode kiper D58: semua kelas YOLO dari /ball_detector_node/detections.
+find_package(vision_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 find_package(Eigen3 REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -47,6 +49,7 @@ add_executable(op_demo_node
   src/action/action_demo.cpp
   src/vision/vision_demo.cpp
   src/vision/face_tracker.cpp
+  src/intercept/intercept_demo.cpp
 )
 
 ament_target_dependencies(op_demo_node
@@ -61,6 +64,7 @@ ament_target_dependencies(op_demo_node
   robotis_math
   op3_ball_detector
   op3_ball_detector_msgs
+  vision_msgs
   Boost
   Eigen3
   YAML_CPP

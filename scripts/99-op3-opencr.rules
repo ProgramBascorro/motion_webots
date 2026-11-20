@@ -1,21 +1,25 @@
-# OP3 serial port -> stable /dev/ttyOP3
+# Port serial OP3 -> nama tetap /dev/ttyOP3 dan /dev/ttyOPENCR
 #
-# Install on the HOST (not in the container):
+# Pasang di HOST (bukan di dalam container):
 #   sudo cp scripts/99-op3-opencr.rules /etc/udev/rules.d/99-op3-opencr.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# One port does the work. CHRONUS runs stock opencr_op3, which serves the sub
-# controller (ID 200 -- IMU, button, buzzer, DXL power) on DXL_PORT = Serial3,
-# i.e. the TTL bus alongside the servos. So ttyOP3 = the U2D2 = servos + ID 200,
-# and the OpenCR's micro-USB CDC (/dev/ttyACM0) is only a debug console: it never
-# answers a DXL packet, so nothing in the stack addresses it.
+# DUA jalur, tidak lagi satu. Firmware "opencr_op3 edited by Fayyadh Raja Gula"
+# memindahkan DXL_PORT dari Serial3 ke Serial (dxl_def.h), jadi sub controller
+# ID 200 -- IMU, magnetometer, tombol, buzzer, daya DXL -- menjawab di micro-USB
+# OpenCR, bukan lagi di bus TTL bersama servo:
 #
-# A ttyACM must never claim ttyOP3 -- nothing is reachable there.
+#   ttyOP3    = U2D2  -> 20 servo saja
+#   ttyOPENCR = OpenCR -> ID 200 saja
+#
+# Keduanya wajib punya nama tetap: /dev/ttyACM0 bisa berpindah ke ttyACM1 begitu
+# ada perangkat CDC lain tercolok atau OpenCR di-reset, dan OP3.robot menyebut
+# nama port secara harfiah.
 
-# U2D2 (FT232H) on the DXL bus -- the 20 servos plus sub controller ID 200
+# U2D2 (FT232H) di bus DXL -- 20 servo
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", SYMLINK+="ttyOP3", MODE="0666"
 
-# OpenCR CDC (/dev/ttyACM0) -- debug console only under stock opencr_op3. Kept
-# world-writable for flashing and serial monitoring. A board flashed with
-# opencr_op3_usb would serve ID 200 here, and OP3.robot would need this port.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", MODE="0666"
+
+# OpenCR CDC -- sub controller ID 200 (IMU + magnetometer). Tetap world-writable
+# supaya bisa dipakai flashing dan serial monitor tanpa sudo.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", SYMLINK+="ttyOPENCR", MODE="0666"
